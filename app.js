@@ -10,21 +10,19 @@ import cron from "node-cron";
 import cors from "cors";
 
 const app = express();
-// Lấy danh sách domain từ biến môi trường CORS_ORIGINS, nếu không có thì cho phép tất cả
-const allowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map(o => o.trim())
-  : ["*"];
+// Cho tất cả website truy cập
+app.use(cors());
 
+// Hoặc chỉ cho phép 1 danh sách website:
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // Cho phép request từ server (no-origin)
-    if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error("CORS blocked: " + origin), false);
-  },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: [
+    "http://localhost:5173",
+    "https://neu-scholar-frontend.vercel.app",
+    "https://research.neu.edu.vn",
+    "*"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 app.use(express.json());
 
