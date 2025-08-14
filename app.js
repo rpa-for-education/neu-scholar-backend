@@ -8,10 +8,12 @@ import { journalVectorSearch, conferenceVectorSearch } from "./search.js";
 import { getDb } from "./db.js"; // Dùng chung getDb
 import cron from "node-cron";
 
+const app = express();
+
 // Danh sách domain được phép khi khóa
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://neu-scholar-frontend.vercel.app",
+  "https://neu-scholar-backend-lldk.vercel.app",
   "https://research.neu.edu.vn"
 ];
 
