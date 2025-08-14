@@ -1,0 +1,18 @@
+{
+  "journal": [
+    {
+      "title": "Journal of AI Research",
+      "publisher": "AI Press",
+      "categories": ["Artificial Intelligence", "Machine Learning"],
+      "areas": ["Computer Science"]
+    }
+  ],
+  "conference": [
+    {
+      "name": "International AI Conference",
+      "acronym": "IAIC",
+      "location": "New York, USA",
+      "topics": ["Deep Learning", "NLP"]
+    }
+  ]
+}
