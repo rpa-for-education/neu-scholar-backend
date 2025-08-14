@@ -10,44 +10,32 @@ import cron from "node-cron";
 
 const app = express();
 
-// Danh sách domain được phép khi khóa
+// Danh sách domain được phép
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://neu-scholar-backend-lldk.vercel.app",
+  "https://neu-scholar-frontend.vercel.app",
   "https://research.neu.edu.vn"
 ];
 
-// 🔄 Chuyển giữa mở toàn bộ và khóa
-const allowAll = true; // đổi thành false để khóa
-
-// Middleware CORS thủ công
+// Bắt preflight thủ công
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
-  if (allowAll) {
-    // Mở toàn bộ nhưng vẫn trả về origin thật, không phải '*'
-    if (origin) {
-      res.header("Access-Control-Allow-Origin", origin);
-    }
-  } else {
-    if (allowedOrigins.includes(origin)) {
-      res.header("Access-Control-Allow-Origin", origin);
-    }
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
   }
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
 
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200); // Xử lý preflight ngay
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200); // Trả OK ngay cho preflight
   }
   next();
 });
 
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || "0 0 * * *";
 const DEFAULT_LLM_PROVIDER = (process.env.DEFAULT_LLM_PROVIDER || "gemini").toLowerCase();
 
