@@ -10,20 +10,37 @@ import cron from "node-cron";
 import cors from "cors";
 
 const app = express();
-// Cho tất cả website truy cập
-app.use(cors());
 
-// Hoặc chỉ cho phép 1 danh sách website:
+// Danh sách website được phép truy cập khi chế độ "khóa"
+const allowedOrigins = [
+  "https://neu-scholar-frontend.vercel.app",
+  "https://research.neu.edu.vn/",
+  "http://localhost:5173"
+];
+
+// 🔄 Chuyển giữa chế độ mở toàn bộ và khóa
+const allowAll = true; // đổi thành false để khóa theo danh sách
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://neu-scholar-frontend.vercel.app",
-    "https://research.neu.edu.vn",
-    "*"
-  ],
+  origin: allowAll
+    ? "*" // mở toàn bộ
+    : function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+app.options("*", cors({
+  origin: allowAll ? "*" : allowedOrigins,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
