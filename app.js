@@ -1,32 +1,32 @@
 // app.js
 import "dotenv/config";
 import express from "express";
-import cors from "cors";
 import { ObjectId } from "mongodb";
 import { callGemini, callQwen } from "./llm.js";
 import { runImport } from "./import.js";
 import { journalVectorSearch, conferenceVectorSearch } from "./search.js";
 import { getDb } from "./db.js"; // Dùng chung getDb
 import cron from "node-cron";
+import cors from "cors";
 
 const app = express();
 
+// Danh sách website được phép truy cập khi chế độ "khóa"
 const allowedOrigins = [
   "https://neu-scholar-frontend.vercel.app",
   "https://research.neu.edu.vn",
   "http://localhost:5173"
 ];
 
-const allowAll = true; // đổi false để khóa
+// 🔄 Chuyển giữa chế độ mở toàn bộ và khóa
+const allowAll = true; // đổi thành false để khóa theo danh sách
 
+// Middleware CORS — xử lý cả preflight OPTIONS
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
   if (allowAll) {
-    // Cho origin thực tế thay vì '*'
-    if (origin) {
-      res.header("Access-Control-Allow-Origin", origin);
-    }
+    res.header("Access-Control-Allow-Origin", "*");
   } else {
     if (allowedOrigins.includes(origin)) {
       res.header("Access-Control-Allow-Origin", origin);
@@ -36,9 +36,7 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // Cho phép credentials nếu cần
-  res.header("Access-Control-Allow-Credentials", "true");
-
+  // Trả về OK ngay cho preflight
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
@@ -46,6 +44,22 @@ app.use((req, res, next) => {
   next();
 });
 
+// Nếu muốn vẫn dùng cors package (optional)
+app.use(cors({
+  origin: allowAll
+    ? "*"
+    : function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// Middleware parse JSON
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
