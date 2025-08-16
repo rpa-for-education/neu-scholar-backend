@@ -57,7 +57,7 @@ export async function callQwen(prompt) {
   });
 
   const completion = await client.chat.completions.create({
-    model: 'qwen-plus',
+    model: 'qwen-max',
     messages: [{ role: 'user', content: prompt }]
   });
 
