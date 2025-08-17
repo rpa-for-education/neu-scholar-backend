@@ -1,182 +1,168 @@
-// search.js (tối ưu)
-import "dotenv/config";
-import express from "express";
+// search.js
 import { MongoClient } from "mongodb";
 import { pipeline } from "@xenova/transformers";
+import axios from "axios";
+import "dotenv/config";
 
-const router = express.Router();
-
-// ===== ENV =====
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB = process.env.MONGODB_DB || "rpa";
-const ENV_JOURNAL_INDEX = (process.env.JOURNAL_VECTOR_INDEX || "").trim();
-const ENV_CONFERENCE_INDEX = (process.env.CONFERENCE_VECTOR_INDEX || "").trim();
-
-// ===== MongoDB Singleton =====
+// --- MongoDB Singleton ---
 let _client;
 let _db;
 async function getDb() {
   if (!_db) {
-    _client = new MongoClient(MONGODB_URI);
+    _client = new MongoClient(process.env.MONGODB_URI);
     await _client.connect();
-    _db = _client.db(MONGODB_DB);
-    console.log(`✅ MongoDB connected (search.js) → DB: ${MONGODB_DB}`);
+    _db = _client.db(process.env.MONGODB_DB || "rpa");
+    console.log(`✅ MongoDB connected (search.js) → DB: ${_db.databaseName}`);
   }
   return _db;
 }
 
-// ===== Embedding Model Singleton =====
+// --- Embedding Model Singleton (local HuggingFace) ---
 let _embedderPromise;
-async function getEmbedder() {
+async function getLocalEmbedder() {
   if (!_embedderPromise) {
-    console.log("⏳ Loading embedding model: Xenova/all-MiniLM-L6-v2...");
+    console.log("⏳ Loading embedding model: Xenova/all-MiniLM-L6-v2");
     _embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("✅ Embedding model ready (local)");
   }
   return _embedderPromise;
 }
 
-function toArrayLike(v) {
-  if (!v) return [];
-  if (Array.isArray(v)) return v.flat(Infinity);
-  if (v.data) return Array.from(v.data);
+function flattenEmbedding(result) {
+  if (!result) return [];
+  if (result.data) return Array.from(result.data);
+  if (Array.isArray(result[0]?.data)) return Array.from(result[0].data);
+  if (Array.isArray(result[0])) return result[0].flat();
+  if (Array.isArray(result)) return result;
   return [];
 }
 
-async function getQueryVector(q) {
+// --- Embed text ---
+async function embedText(text) {
+  const provider = process.env.DEFAULT_LLM_PROVIDER || "qwen";
+
+  // --- Qwen embedding ---
+  if (provider === "qwen") {
+    try {
+      const resp = await axios.post(
+        `${process.env.QWEN_BASE_URL}/embeddings`,
+        {
+          model: "text-embedding-v2",
+          input: text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return resp.data.data[0].embedding;
+    } catch (err) {
+      console.error("❌ Qwen Embedding error:", err.response?.data || err.message);
+    }
+  }
+
+  // --- OpenAI embedding ---
+  if (provider === "openai") {
+    try {
+      const resp = await axios.post(
+        "https://api.openai.com/v1/embeddings",
+        {
+          model: "text-embedding-3-small",
+          input: text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return resp.data.data[0].embedding;
+    } catch (err) {
+      console.error("❌ OpenAI Embedding error:", err.response?.data || err.message);
+    }
+  }
+
+  // --- Fallback local HuggingFace ---
   try {
-    const emb = await (await getEmbedder())(q, { pooling: "mean", normalize: true });
-    const arr = toArrayLike(emb);
-    return arr.length ? arr : null;
-  } catch (e) {
-    console.error("❌ Embedding error:", e.message);
-    return null;
+    const embedder = await getLocalEmbedder();
+    const out = await embedder(text, { pooling: "mean", normalize: true });
+    return flattenEmbedding(out);
+  } catch (err) {
+    console.error("⚠️ Local embedding failed:", err.message);
+    return [];
   }
 }
 
-// ===== Field & Index Detection =====
-const FIELD_CACHE = new Map();
-const candidateVectorFields = ["vector", "embedding"];
-
-async function pickVectorField(db, collection) {
-  if (FIELD_CACHE.has(collection)) return FIELD_CACHE.get(collection);
-
-  for (const field of candidateVectorFields) {
-    const hit = await db.collection(collection).findOne(
-      { [field]: { $type: "array" } },
-      { projection: { _id: 1 } }
-    );
-    if (hit) {
-      FIELD_CACHE.set(collection, field);
-      return field;
-    }
+// --- Cosine Similarity ---
+function cosine(a, b) {
+  let dot = 0.0, na = 0.0, nb = 0.0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
   }
-  FIELD_CACHE.set(collection, "vector"); // fallback default
-  return "vector";
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-function candidateIndexNames(collection) {
-  const envName =
-    collection === "journal" ? ENV_JOURNAL_INDEX :
-    collection === "conference" ? ENV_CONFERENCE_INDEX : "";
-  const cands = [];
-  if (envName) cands.push(envName);
-  cands.push(`${collection}_vector_index`, "vector_index");
-  return [...new Set(cands)];
+// --- Fallback keyword rank ---
+function fallbackRank(items, question, fieldExtractor) {
+  return items
+    .map(it => {
+      const text = (fieldExtractor(it) || "").toLowerCase();
+      const score = text.includes(question.toLowerCase()) ? 1 : 0;
+      return { ...it, score };
+    })
+    .sort((a, b) => b.score - a.score);
 }
 
-// ===== Text Fallback =====
-async function textSearch(db, collection, q, limit) {
-  const regex = new RegExp(q, "i");
-  const orFields = [
-    "title", "name", "categories", "areas", "publisher", "issn",
-    "search_keywords", "topics", "acronym", "location", "country"
-  ];
-
-  const filter = { $or: orFields.map(f => ({ [f]: regex })) };
-  return db.collection(collection).find(filter).limit(limit).toArray();
+// --- Safe rank (try embedding first) ---
+async function safeRank(items, question, fieldExtractor) {
+  try {
+    const qVec = await embedText(question);
+    return items
+      .map(it => ({
+        ...it,
+        score: it.vector ? cosine(qVec, it.vector) : 0,
+      }))
+      .sort((a, b) => b.score - a.score);
+  } catch (err) {
+    console.error("⚠️ Embedding failed, fallback keyword:", err.message);
+    return fallbackRank(items, question, fieldExtractor);
+  }
 }
 
-// ===== Vector Search =====
-async function tryVectorOnce(db, collection, indexName, path, qv, limit) {
-  const projection = {
-    _id: 1,
-    score: { $meta: "vectorSearchScore" },
-    title: 1, name: 1, acronym: 1, location: 1, issn: 1,
-    publisher: 1, country: 1, categories: 1, areas: 1,
-    rank: 1, sjr: 1, h_index: 1, deadline: 1, start_date: 1,
-    url: 1, topics: 1,
-  };
-
-  const agg = [
-    {
-      $vectorSearch: {
-        index: indexName,
-        path,
-        queryVector: qv,
-        numCandidates: Math.max(100, limit * 5),
-        limit,
-      },
-    },
-    { $project: projection },
-  ];
-
-  return db.collection(collection).aggregate(agg).toArray();
-}
-
-async function vectorSearch(collection, q, limit = 5) {
+// --- Search chính ---
+export async function search(question, topk = 5) {
   const db = await getDb();
-  const n = Math.max(1, Number(limit) || 5);
 
-  if (!q?.trim()) {
-    // nếu không có từ khoá → trả về mới nhất
-    return db.collection(collection).find({})
-      .sort({ _id: -1 })
-      .limit(n)
-      .toArray();
+  if (/hội thảo|conference/i.test(question)) {
+    const confs = await db.collection("conference").find().toArray();
+    const ranked = await safeRank(confs, question, it => `${it.name} ${it.location} ${it.topics}`);
+    return { type: "conference", results: ranked.slice(0, topk) };
   }
 
-  const qv = await getQueryVector(q);
-  if (qv) {
-    const path = await pickVectorField(db, collection);
-    const indexes = candidateIndexNames(collection);
-
-    for (const idx of indexes) {
-      try {
-        const rs = await tryVectorOnce(db, collection, idx, path, qv, n);
-        if (rs.length) return rs;
-      } catch (e) {
-        // ignore and try next index
-      }
-    }
+  if (/tạp chí|journal/i.test(question)) {
+    const journals = await db.collection("journal").find().toArray();
+    const ranked = await safeRank(journals, question, it => `${it.title} ${it.areas} ${it.categories}`);
+    return { type: "journal", results: ranked.slice(0, topk) };
   }
 
-  console.warn(`⚠️ Using text fallback for '${collection}' (q='${q}')`);
-  return textSearch(db, collection, q, n);
+  return { type: "unknown", results: [] };
 }
 
-// ===== Public API =====
-export async function journalVectorSearch(q, limit = 10) {
-  return vectorSearch("journal", q, limit);
-}
-export async function conferenceVectorSearch(q, limit = 10) {
-  return vectorSearch("conference", q, limit);
+export async function conferenceVectorSearch(question, topk = 5) {
+  const db = await getDb();
+  const confs = await db.collection("conference").find().toArray();
+  const ranked = await safeRank(confs, question, it => `${it.name} ${it.location} ${it.topics}`);
+  return ranked.slice(0, topk);
 }
 
-// ===== Express Routes =====
-router.get("/journals", async (req, res) => {
-  res.json(await journalVectorSearch(req.query.q || "", req.query.limit || 10));
-});
-router.get("/conferences", async (req, res) => {
-  res.json(await conferenceVectorSearch(req.query.q || "", req.query.limit || 10));
-});
-router.get("/search/all", async (req, res) => {
-  const limit = req.query.limit || 10;
-  const q = req.query.q || "";
-  const [journals, conferences] = await Promise.all([
-    journalVectorSearch(q, limit),
-    conferenceVectorSearch(q, limit)
-  ]);
-  res.json({ journals, conferences });
-});
-
-export default router;
+export async function journalVectorSearch(question, topk = 5) {
+  const db = await getDb();
+  const journals = await db.collection("journal").find().toArray();
+  const ranked = await safeRank(journals, question, it => `${it.title} ${it.areas} ${it.categories}`);
+  return ranked.slice(0, topk);
+}

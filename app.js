@@ -1,285 +1,131 @@
 // app.js
 import "dotenv/config";
 import express from "express";
-import { ObjectId } from "mongodb";
-import { callGemini, callQwen } from "./llm.js";
+import axios from "axios";
+import cron from "node-cron";
+import { llmMap } from "./llm.js";
 import { runImport } from "./import.js";
 import { journalVectorSearch, conferenceVectorSearch } from "./search.js";
-import { getDb } from "./db.js"; // Dùng chung getDb
-import cron from "node-cron";
 
 const app = express();
-
-// Danh sách domain được phép
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://neu-scholar-frontend.vercel.app",
-  "https://research.neu.edu.vn"
-];
-
-// Bắt preflight thủ công
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200); // Trả OK ngay cho preflight
-  }
-  next();
-});
-
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || "0 0 * * *";
-const DEFAULT_LLM_PROVIDER = (process.env.DEFAULT_LLM_PROVIDER || "gemini").toLowerCase();
+const DEFAULT_LLM_PROVIDER = (process.env.DEFAULT_LLM_PROVIDER || "qwen").toLowerCase();
 
-// ===== Text search fallback =====
-function buildRegex(q) {
-  return new RegExp(".*" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ".*", "i");
+// ===== API ngoài để fallback =====
+async function fetchArticles() {
+  try {
+    const res = await axios.get(process.env.API_RESEARCH);
+    return Array.isArray(res.data) ? res.data : [];
+  } catch (err) {
+    console.error("❌ Lỗi fetchArticles:", err.message);
+    return [];
+  }
 }
 
-async function textSearchConference({ q, limit = 10 }) {
-  const db = await getDb();
-  const re = buildRegex(q);
-  return db.collection("conference")
-    .find({
-      $or: [
-        { name: { $regex: re } },
-        { acronym: { $regex: re } },
-        { topics: { $regex: re } },
-        { location: { $regex: re } }
-      ]
-    })
-    .limit(limit)
-    .toArray();
-}
+// ===== Chuẩn hóa context =====
+function buildPrompt(question, conferences = [], journals = []) {
+  let context =
+    "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
 
-async function textSearchJournal({ q, limit = 10 }) {
-  const db = await getDb();
-  const re = buildRegex(q);
-  return db.collection("journal")
-    .find({
-      $or: [
-        { title: { $regex: re } },
-        { categories: { $regex: re } },
-        { areas: { $regex: re } },
-        { publisher: { $regex: re } },
-        { issn: { $regex: re } }
-      ]
-    })
-    .limit(limit)
-    .toArray();
-}
-
-// ===== API =====
-app.get("/api/journals", async (req, res) => {
-  try {
-    const { q, limit = 50, skip = 0 } = req.query;
-    const db = await getDb();
-
-    console.log("📂 Querying collection:", "journal");
-
-    let filter = {};
-    if (q) {
-      filter = {
-        $or: [
-          { title: new RegExp(q, "i") },
-          { categories: new RegExp(q, "i") },
-          { areas: new RegExp(q, "i") },
-          { publisher: new RegExp(q, "i") },
-          { issn: new RegExp(q, "i") }
-        ]
-      };
-    }
-
-    const data = await db.collection("journal")
-                         .find(filter)
-                         .skip(Number(skip))
-                         .limit(Number(limit))
-                         .toArray();
-
-    res.json(data);
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get("/api/conferences", async (req, res) => {
-  try {
-    const { q, limit = 50, skip = 0 } = req.query;
-    const db = await getDb();
-
-    console.log("📂 Querying collection:", "conference");
-
-    let filter = {};
-    if (q) {
-      filter = {
-        $or: [
-          { name: new RegExp(q, "i") },
-          { acronym: new RegExp(q, "i") },
-          { topics: new RegExp(q, "i") },
-          { location: new RegExp(q, "i") },
-          { country: new RegExp(q, "i") }
-        ]
-      };
-    }
-
-    const data = await db.collection("conference")
-                         .find(filter)
-                         .skip(Number(skip))
-                         .limit(Number(limit))
-                         .toArray();
-
-    res.json(data);
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ===== Search API =====
-app.get("/api/journals/search", async (req, res) => {
-  try {
-    const { q, limit = 5 } = req.query;
-    if (!q?.trim()) return res.status(400).json({ error: "Missing query param q" });
-
-    let results = [];
-    try {
-      results = await journalVectorSearch(q, Number(limit));
-      if (!results?.length) results = await textSearchJournal({ q, limit: Number(limit) });
-    } catch (err) {
-      console.error("Journal vector search failed:", err.message);
-      results = await textSearchJournal({ q, limit: Number(limit) });
-    }
-
-    res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get("/api/conferences/search", async (req, res) => {
-  try {
-    const { q, limit = 5 } = req.query;
-    if (!q?.trim()) return res.status(400).json({ error: "Missing query param q" });
-
-    let results = [];
-    try {
-      results = await conferenceVectorSearch(q, Number(limit));
-      if (!results?.length) results = await textSearchConference({ q, limit: Number(limit) });
-    } catch (err) {
-      console.error("Conference vector search failed:", err.message);
-      results = await textSearchConference({ q, limit: Number(limit) });
-    }
-
-    res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ===== Search All =====
-app.all("/api/search/all", async (req, res) => {
-  try {
-    const q = req.query.q || req.body.q;
-    const limit = Number(req.query.limit || req.body.limit || 5);
-    if (!q?.trim()) return res.status(400).json({ error: "Missing query param q" });
-
-    let journals = [];
-    let conferences = [];
-
-    try {
-      journals = await journalVectorSearch(q, limit);
-      if (!journals?.length) journals = await textSearchJournal({ q, limit });
-    } catch (e) {
-      console.error("Journal vector search failed:", e.message);
-      journals = await textSearchJournal({ q, limit });
-    }
-
-    try {
-      conferences = await conferenceVectorSearch(q, limit);
-      if (!conferences?.length) conferences = await textSearchConference({ q, limit });
-    } catch (e) {
-      console.error("Conference vector search failed:", e.message);
-      conferences = await textSearchConference({ q, limit });
-    }
-
-    res.json({
-      query: q,
-      limit,
-      journals,
-      conferences,
-      total: (journals?.length || 0) + (conferences?.length || 0)
+  if (conferences.length) {
+    context += "Danh sách hội thảo:\n";
+    conferences.slice(0, 10).forEach((c, i) => {
+      context += `Hội thảo ${i + 1}: 
+- Tên: ${c.name || c.title || "Không có"} 
+- Acronym: ${c.acronym || "Không có"} 
+- Địa điểm: ${c.location || "Không có"} 
+- Hạn nộp: ${c.deadline || "Không có"} 
+- Ngày tổ chức: ${c.start_date || "Không có"} 
+- Chủ đề: ${c.topics || "Không có"} 
+- Link: ${c.url || "Không có"}\n\n`;
     });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  } else {
+    context += "Không có hội thảo phù hợp.\n\n";
   }
-});
 
-// ===== Agent API =====
+  if (journals.length) {
+    context += "Danh sách tạp chí:\n";
+    journals.slice(0, 10).forEach((j, i) => {
+      context += `Tạp chí ${i + 1}: 
+- Tên: ${j.title || "Không có"} 
+- Nhà xuất bản: ${j.publisher || "Không có"} 
+- Lĩnh vực: ${j.areas || "Không có"} 
+- Danh mục: ${j.categories || "Không có"} 
+- ISSN: ${j.issn || "Không có"}\n\n`;
+    });
+  } else {
+    context += "Không có tạp chí phù hợp.\n\n";
+  }
+
+  context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
+  return context;
+}
+
+// ===== Agent API cải tiến với fallback =====
 app.post("/api/agent", async (req, res) => {
   try {
-    const { question, provider, topk = 5 } = req.body || {};
-    if (!question?.trim()) return res.status(400).json({ error: "Missing question" });
+    const { question, provider, model, topk = 5 } = req.body || {};
+    if (!question?.trim()) {
+      return res.status(400).json({ error: "Missing question" });
+    }
 
+    // 1. Tìm trong MongoDB
     let conferences = [];
     let journals = [];
-
     try {
       conferences = await conferenceVectorSearch(question, Number(topk));
-      if (!conferences?.length) conferences = await textSearchConference({ q: question, limit: Number(topk) });
     } catch (e) {
       console.error("Conference vector search failed:", e.message);
-      conferences = await textSearchConference({ q: question, limit: Number(topk) });
     }
-
     try {
       journals = await journalVectorSearch(question, Number(topk));
-      if (!journals?.length) journals = await textSearchJournal({ q: question, limit: Number(topk) });
     } catch (e) {
       console.error("Journal vector search failed:", e.message);
-      journals = await textSearchJournal({ q: question, limit: Number(topk) });
     }
 
-    const simplifyConferenceData = (list) =>
-      (list || []).map(c => ({
-        title: c.name || c.title,
-        acronym: c.acronym,
-        location: c.location,
-        start_date: c.start_date,
-        deadline: c.deadline,
-        topics: c.topics
-      }));
+    // 2. Nếu DB rỗng → fallback API ngoài
+    if (!conferences?.length) {
+      const articles = await fetchArticles();
+      conferences = articles.slice(0, topk);
+    }
 
-    const simplifyJournalData = (list) =>
-      (list || []).map(j => ({
-        title: j.title,
-        publisher: j.publisher,
-        categories: j.categories,
-        areas: j.areas
-      }));
+    // 3. Tạo prompt context
+    const prompt = buildPrompt(question, conferences, journals);
 
-    const context = [
-      "Bạn là trợ lý học thuật. Trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.",
-      conferences?.length ? `Hội thảo (JSON):\n${JSON.stringify(simplifyConferenceData(conferences), null, 2)}` : "Không có hội thảo phù hợp.",
-      journals?.length ? `Tạp chí (JSON):\n${JSON.stringify(simplifyJournalData(journals), null, 2)}` : "Không có tạp chí phù hợp."
-    ].join("\n\n");
+    // 4. Gọi LLM theo fallback
+    const tryProviders = [
+      (provider || DEFAULT_LLM_PROVIDER).toLowerCase(),
+      "openai",
+      "local",
+    ];
 
-    const prompt = `${context}\n\nCâu hỏi người dùng: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ câu hỏi.`;
-    const useProvider = (provider || DEFAULT_LLM_PROVIDER).toLowerCase();
-    const llmMap = { gemini: callGemini, qwen: callQwen };
-    if (!llmMap[useProvider]) throw new Error(`Unknown provider: ${useProvider}`);
+    let answer = null;
+    let usedProvider = null;
+    let lastError = null;
 
-    const answer = await llmMap[useProvider](prompt);
+    for (const p of tryProviders) {
+      if (!llmMap[p]) continue;
+      try {
+        answer = await llmMap[p](prompt, model);
+        usedProvider = p;
+        break; // thành công → thoát
+      } catch (err) {
+        lastError = err;
+        console.error(`❌ Provider ${p} failed:`, err.message);
+      }
+    }
 
-    res.json({ provider: useProvider, answer, retrieved: { conference: conferences, journal: journals } });
+    if (!answer) throw lastError || new Error("All providers failed");
+
+    res.json({
+      provider: usedProvider,
+      model: model || process.env[`${usedProvider.toUpperCase()}_MODEL`],
+      answer,
+      retrieved: { conference: conferences, journal: journals },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -296,7 +142,6 @@ if (!process.env.VERCEL) {
     }
   });
 
-  // Cron local
   cron.schedule(CRON_SCHEDULE, async () => {
     console.log("⏰ Running scheduled import...");
     try {
@@ -308,5 +153,4 @@ if (!process.env.VERCEL) {
   });
 }
 
-// ===== Export app để Vercel dùng =====
 export default app;

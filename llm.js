@@ -1,107 +1,87 @@
 // llm.js
-import axios from 'axios';
-import OpenAI from 'openai';
+import axios from "axios";
+import { pipeline } from "@xenova/transformers";
 
-/**
- * Lấy dữ liệu hội thảo
- */
-async function getConferenceData(query) {
+// ===== Qwen =====
+async function callQwen(prompt, model = process.env.QWEN_MODEL) {
   try {
-    const res = await axios.get(`${process.env.API_CONFERENCE_URL}?q=${encodeURIComponent(query)}`);
-    return res.data || [];
-  } catch (error) {
-    console.error('Conference API error:', error.message);
-    return [];
+    const baseUrl = process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    const res = await axios.post(
+      `${baseUrl}/chat/completions`,
+      {
+        model,
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${process.env.QWEN_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return res.data.choices?.[0]?.message?.content || "";
+  } catch (err) {
+    throw new Error(`Qwen error: ${err.response?.data?.message || err.message}`);
   }
 }
 
-/**
- * Lấy dữ liệu tạp chí
- */
-async function getJournalData(query) {
+// ===== OpenAI =====
+async function callOpenAI(prompt, model = process.env.OPENAI_MODEL) {
   try {
-    const res = await axios.get(`${process.env.API_JOURNAL_URL}?q=${encodeURIComponent(query)}`);
-    return res.data || [];
-  } catch (error) {
-    console.error('Journal API error:', error.message);
-    return [];
+    const res = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model,
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return res.data.choices?.[0]?.message?.content || "";
+  } catch (err) {
+    throw new Error(`OpenAI error: ${err.response?.data?.error?.message || err.message}`);
   }
 }
 
-/**
- * Gọi model Gemini từ Google Generative Language API
- */
-export async function callGemini(prompt) {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) throw new Error('Missing GEMINI_API_KEY in environment');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-  const response = await axios.post(url, {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }]
-  });
-
-  return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
-
-/**
- * Gọi model Qwen từ Alibaba Cloud (OpenAI-compatible API)
- */
-export async function callQwen(prompt) {
-  const QWEN_API_KEY = process.env.QWEN_API_KEY;
-  if (!QWEN_API_KEY) throw new Error('Missing QWEN_API_KEY in environment');
-
-  const client = new OpenAI({
-    apiKey: QWEN_API_KEY,
-    baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-  });
-
-  const completion = await client.chat.completions.create({
-    model: 'qwen-max',
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  return completion.choices[0]?.message?.content || '';
-}
-
-/**
- * Agent tổng hợp: Gọi API Conference + Journal, sau đó gửi prompt cho model
- * @param {string} userPrompt - Nội dung người dùng hỏi
- * @param {'qwen'|'gemini'} provider - Model muốn dùng
- */
-export async function runAgent(userPrompt, provider = 'qwen') {
-  // Gọi song song 2 API dữ liệu
-  const [conference, journal] = await Promise.all([
-    getConferenceData(userPrompt),
-    getJournalData(userPrompt)
-  ]);
-
-  // Chuẩn bị prompt
-  const fullPrompt = `
-Người dùng hỏi: ${userPrompt}
-
---- Dữ liệu hội thảo tìm được ---
-${JSON.stringify(conference, null, 2)}
-
---- Dữ liệu tạp chí tìm được ---
-${JSON.stringify(journal, null, 2)}
-
-Hãy trả lời dựa trên dữ liệu trên. Nếu dữ liệu trống, hãy gợi ý cách tìm kiếm khác.
-  `;
-
-  let aiAnswer = '';
-  if (provider === 'gemini') {
-    aiAnswer = await callGemini(fullPrompt);
-  } else {
-    aiAnswer = await callQwen(fullPrompt);
+// ===== Gemini =====
+async function callGemini(prompt, model = process.env.GEMINI_MODEL) {
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const res = await axios.post(
+      url,
+      { contents: [{ parts: [{ text: prompt }] }] },
+      { headers: { "Content-Type": "application/json" } }
+    );
+    return res.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  } catch (err) {
+    throw new Error(`Gemini error: ${err.response?.data?.error?.message || err.message}`);
   }
+}
 
-  return {
-    provider,
-    answer: aiAnswer,
-    retrieved: {
-      conference: conference || [],
-      journal: journal || []
+// ===== Local =====
+let _localPipeline;
+async function callLocal(prompt, model = process.env.LOCAL_MODEL || "Xenova/llama-2-7b-chat") {
+  try {
+    if (!_localPipeline) {
+      console.log(`⏳ Loading local model ${model}...`);
+      _localPipeline = await pipeline("text-generation", model);
+      console.log(`✅ Local model ready: ${model}`);
     }
-  };
+    const out = await _localPipeline(prompt, { max_new_tokens: 200 });
+    return out[0]?.generated_text || "";
+  } catch (err) {
+    throw new Error(`Local error: ${err.message}`);
+  }
 }
+
+// ===== Export Map =====
+export const llmMap = {
+  qwen: callQwen,
+  openai: callOpenAI,
+  gemini: callGemini,
+  local: callLocal,
+};
