@@ -17,7 +17,7 @@ async function getDb() {
   return _db;
 }
 
-// --- Embedding Model Singleton (local HuggingFace) ---
+// --- Local Embedding Model Singleton ---
 let _embedderPromise;
 async function getLocalEmbedder() {
   if (!_embedderPromise) {
@@ -39,50 +39,44 @@ function flattenEmbedding(result) {
 
 // --- Embed text ---
 async function embedText(text) {
-  const provider = process.env.DEFAULT_LLM_PROVIDER || "qwen";
+  const provider = (process.env.DEFAULT_LLM_PROVIDER || "qwen").toLowerCase();
 
-  // --- Qwen embedding ---
-  if (provider === "qwen") {
-    try {
-      const resp = await axios.post(
-        `${process.env.QWEN_BASE_URL}/embeddings`,
-        {
-          model: "text-embedding-v2",
-          input: text,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      return resp.data.data[0].embedding;
-    } catch (err) {
-      console.error("❌ Qwen Embedding error:", err.response?.data || err.message);
-    }
-  }
+  switch (provider) {
+    case "qwen":
+      try {
+        const resp = await axios.post(
+          `${process.env.QWEN_BASE_URL}/embeddings`,
+          { model: "text-embedding-v2", input: text },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        return resp.data.data[0].embedding;
+      } catch (err) {
+        console.error("❌ Qwen Embedding error:", err.response?.data || err.message);
+        break;
+      }
 
-  // --- OpenAI embedding ---
-  if (provider === "openai") {
-    try {
-      const resp = await axios.post(
-        "https://api.openai.com/v1/embeddings",
-        {
-          model: "text-embedding-3-small",
-          input: text,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      return resp.data.data[0].embedding;
-    } catch (err) {
-      console.error("❌ OpenAI Embedding error:", err.response?.data || err.message);
-    }
+    case "openai":
+      try {
+        const resp = await axios.post(
+          "https://api.openai.com/v1/embeddings",
+          { model: "text-embedding-3-small", input: text },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        return resp.data.data[0].embedding;
+      } catch (err) {
+        console.error("❌ OpenAI Embedding error:", err.response?.data || err.message);
+        break;
+      }
   }
 
   // --- Fallback local HuggingFace ---
@@ -118,10 +112,11 @@ function fallbackRank(items, question, fieldExtractor) {
     .sort((a, b) => b.score - a.score);
 }
 
-// --- Safe rank (try embedding first) ---
+// --- Safe rank (embedding + cosine, fallback keyword) ---
 async function safeRank(items, question, fieldExtractor) {
   try {
     const qVec = await embedText(question);
+    if (!qVec.length) throw new Error("Empty embedding vector");
     return items
       .map(it => ({
         ...it,
@@ -153,6 +148,7 @@ export async function search(question, topk = 5) {
   return { type: "unknown", results: [] };
 }
 
+// --- Exports riêng cho conference & journal ---
 export async function conferenceVectorSearch(question, topk = 5) {
   const db = await getDb();
   const confs = await db.collection("conference").find().toArray();
