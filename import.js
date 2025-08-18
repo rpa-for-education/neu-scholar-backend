@@ -28,7 +28,6 @@ async function initEmbedder() {
 
 async function embedBatch(texts) {
   const emb = await (await initEmbedder())(texts, { pooling: "mean", normalize: true });
-  // Trả về list vector (mảng số float)
   return texts.map((_, i) => Array.from(emb[i]));
 }
 
@@ -76,6 +75,19 @@ async function fetchJsonStream(url, retries = 3) {
   }
 }
 
+// ===== Deep equal (so sánh dữ liệu cũ - mới) =====
+function isEqualExceptVector(a, b) {
+  const ignore = new Set(["_id", "vector"]);
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) {
+    if (ignore.has(k)) continue;
+    if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // ===== Import collection =====
 async function importCollection(db, name, records, fields) {
   if (!records?.length) {
@@ -85,24 +97,29 @@ async function importCollection(db, name, records, fields) {
 
   const spinner = ora(`🔍 Checking existing docs in "${name}"...`).start();
 
-  // 🔥 Query 1 lần để lấy danh sách _key đã có vector
-  const existing = await db.collection(name)
-    .find({ vector: { $exists: true } }, { projection: { _key: 1 } })
-    .toArray();
+  const existing = await db.collection(name).find({}, { projection: { _id: 0 } }).toArray();
+  const existingMap = new Map(existing.map(x => [x._key, x]));
 
-  const existingKeys = new Set(existing.map(x => x._key));
-  const newRecords = records.filter(r => !existingKeys.has(r._key));
+  spinner.succeed(`📊 ${records.length} total records to process in "${name}"`);
 
-  spinner.succeed(`📊 ${records.length} total, ${newRecords.length} need import in "${name}"`);
+  const toProcess = [];
+  for (const r of records) {
+    const old = existingMap.get(r._key);
+    if (!old) {
+      toProcess.push({ item: r, reason: "new" });
+    } else if (!isEqualExceptVector(old, r)) {
+      toProcess.push({ item: { ...old, ...r }, reason: "update" });
+    }
+  }
 
-  if (!newRecords.length) {
+  if (!toProcess.length) {
     console.log(`✔ "${name}" đã đầy đủ, skip.`);
     return;
   }
 
-  console.log(`📦 Importing ${newRecords.length} docs into "${name}"...`);
+  console.log(`📦 ${toProcess.length} docs need insert/update in "${name}"...`);
 
-  const contents = newRecords.map((item) =>
+  const contents = toProcess.map(({ item }) =>
     fields
       .map((f) => {
         const val = item[f];
@@ -131,17 +148,17 @@ async function importCollection(db, name, records, fields) {
   embedBar.stop();
   console.log("✔ Embedding finished (local MiniLM-L6-v2)");
 
-  // 🟢 Bước 2: UPDATING DB
+  // 🟢 Bước 2: UPDATE DB
   const limit = pLimit(10);
   const updateBar = new cliProgress.SingleBar(
-    { format: `   → Updating [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
+    { format: `   → Writing DB [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
     cliProgress.Presets.shades_classic
   );
-  updateBar.start(newRecords.length, 0);
+  updateBar.start(toProcess.length, 0);
 
   let done = 0;
   await Promise.all(
-    newRecords.map((item, idx) =>
+    toProcess.map(({ item }, idx) =>
       limit(async () => {
         await db.collection(name).updateOne(
           { _key: item._key },
@@ -154,7 +171,7 @@ async function importCollection(db, name, records, fields) {
     )
   );
   updateBar.stop();
-  console.log(`✔ Imported ${newRecords.length} docs into "${name}"`);
+  console.log(`✔ Upserted ${toProcess.length} docs into "${name}"`);
 }
 
 // ===== Main =====
@@ -164,14 +181,12 @@ async function importCollection(db, name, records, fields) {
     const db = client.db(MONGODB_DB);
     console.log(`✅ MongoDB connected (import.js) → DB: ${MONGODB_DB}`);
 
-    // 🟢 Fetch data
     const conferences = await fetchJsonStream(API_RESEARCH);
     console.log(`📊 Conferences fetched: ${conferences.length}`);
 
     const journals = await fetchJsonStream(API_JOURNAL);
     console.log(`📊 Journals fetched: ${journals.length}`);
 
-    // 🟢 Với conference: dùng acronym+name làm _key
     await importCollection(
       db,
       "conference",
@@ -179,7 +194,6 @@ async function importCollection(db, name, records, fields) {
       ["_key", "publisher", "description"]
     );
 
-    // 🟢 Với journal: dùng title làm _key
     await importCollection(
       db,
       "journal",
@@ -187,7 +201,7 @@ async function importCollection(db, name, records, fields) {
       ["_key", "publisher", "description"]
     );
 
-    console.log("🎯 Import finished (all data guaranteed with vectors).");
+    console.log("🎯 Import finished (all data up-to-date with vectors).");
   } catch (err) {
     console.error("❌ Import failed:", err);
   } finally {
