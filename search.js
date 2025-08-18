@@ -1,24 +1,29 @@
 // backend/search.js
-import OpenAI from "openai";
 import { MongoClient } from "mongodb";
+import { pipeline } from "@xenova/transformers";
 
 const client = new MongoClient(process.env.MONGODB_URI);
 const dbName = process.env.MONGODB_DB || "rpa";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// ===== Hàm tạo embedding cho câu hỏi =====
-async function embed(text) {
-  const resp = await openai.embeddings.create({
-    model: "sentence-transformers/all-MiniLM-L6-v2",
-    input: text,
-  });
-  return resp.data[0].embedding;
+// Khởi tạo embedder local
+let embedder = null;
+export async function initEmbedding() {   // 👈 export luôn từ đây
+  if (!embedder) {
+    console.log("⏳ Loading embedder: Xenova/all-MiniLM-L6-v2 ...");
+    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("✅ Embedder ready");
+  }
+  return true;
 }
 
-// ===== Hàm tìm kiếm chung (conference + journal) =====
+// Hàm tạo embedding cho câu hỏi
+async function embed(text) {
+  if (!embedder) await initEmbedding();
+  const output = await embedder(text, { pooling: "mean", normalize: true });
+  return Array.from(output.data);
+}
+
+// Hàm tìm kiếm chung (conference + journal)
 export async function search({ question, topk = 5 }) {
   await client.connect();
   const db = client.db(dbName);
@@ -38,19 +43,14 @@ export async function search({ question, topk = 5 }) {
       },
     },
     {
-      $addFields: {
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-    {
       $project: {
         _id: 0,
         vector: 0,
         created_time: 0,
         modified_time: 0,
+        score: { $meta: "vectorSearchScore" },
       },
     },
-    { $sort: { score: -1 } },
   ]).toArray();
 
   // --- Tìm trong collection journal ---
@@ -66,19 +66,14 @@ export async function search({ question, topk = 5 }) {
       },
     },
     {
-      $addFields: {
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-    {
       $project: {
         _id: 0,
         vector: 0,
         created_time: 0,
         modified_time: 0,
+        score: { $meta: "vectorSearchScore" },
       },
     },
-    { $sort: { score: -1 } },
   ]).toArray();
 
   return {
@@ -87,7 +82,7 @@ export async function search({ question, topk = 5 }) {
   };
 }
 
-// ===== Alias để app.js import không lỗi =====
+// Alias để app.js import
 export async function conferenceVectorSearch(question, topk = 5) {
   const result = await search({ question, topk });
   return result.conference;
@@ -96,8 +91,4 @@ export async function conferenceVectorSearch(question, topk = 5) {
 export async function journalVectorSearch(question, topk = 5) {
   const result = await search({ question, topk });
   return result.journal;
-}
-
-export async function initEmbedding() {
-  return true;
 }
