@@ -2,17 +2,14 @@
 import "dotenv/config";
 import express from "express";
 import axios from "axios";
-import cron from "node-cron";
-import { llmMap } from "./llm.js";
-import { runImport } from "./import.js";
-import { journalVectorSearch, conferenceVectorSearch } from "./search.js";
+import { callLLM } from "./llm.js";
+import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE || "0 0 * * *";
-const DEFAULT_LLM_PROVIDER = (process.env.DEFAULT_LLM_PROVIDER || "qwen").toLowerCase();
+const DEFAULT_MODEL_ID = process.env.DEFAULT_MODEL_ID || "qwen-max";
 
 // ===== API ngoài để fallback =====
 async function fetchArticles() {
@@ -64,15 +61,14 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
-// ===== Agent API cải tiến với fallback =====
+// ===== Agent API =====
 app.post("/api/agent", async (req, res) => {
   try {
-    const { question, provider, model, topk = 5 } = req.body || {};
+    const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body || {};
     if (!question?.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
 
-    // 1. Tìm trong MongoDB
     let conferences = [];
     let journals = [];
     try {
@@ -86,43 +82,16 @@ app.post("/api/agent", async (req, res) => {
       console.error("Journal vector search failed:", e.message);
     }
 
-    // 2. Nếu DB rỗng → fallback API ngoài
     if (!conferences?.length) {
       const articles = await fetchArticles();
       conferences = articles.slice(0, topk);
     }
 
-    // 3. Tạo prompt context
     const prompt = buildPrompt(question, conferences, journals);
-
-    // 4. Gọi LLM theo fallback
-    const tryProviders = [
-      (provider || DEFAULT_LLM_PROVIDER).toLowerCase(),
-      "openai",
-      "local",
-    ];
-
-    let answer = null;
-    let usedProvider = null;
-    let lastError = null;
-
-    for (const p of tryProviders) {
-      if (!llmMap[p]) continue;
-      try {
-        answer = await llmMap[p](prompt, model);
-        usedProvider = p;
-        break; // thành công → thoát
-      } catch (err) {
-        lastError = err;
-        console.error(`❌ Provider ${p} failed:`, err.message);
-      }
-    }
-
-    if (!answer) throw lastError || new Error("All providers failed");
+    const answer = await callLLM(prompt, model_id);
 
     res.json({
-      provider: usedProvider,
-      model: model || process.env[`${usedProvider.toUpperCase()}_MODEL`],
+      model_id,
       answer,
       retrieved: { conference: conferences, journal: journals },
     });
@@ -135,21 +104,7 @@ app.post("/api/agent", async (req, res) => {
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`➡️ API listening on http://localhost:${PORT}`);
-    try {
-      await runImport();
-    } catch (e) {
-      console.error("Initial import failed:", e.message);
-    }
-  });
-
-  cron.schedule(CRON_SCHEDULE, async () => {
-    console.log("⏰ Running scheduled import...");
-    try {
-      await runImport();
-      console.log("✅ Scheduled import ok");
-    } catch (e) {
-      console.error("❌ Scheduled import failed:", e.message);
-    }
+    initEmbedding().catch(e => console.error("Embedding preload failed:", e.message));
   });
 }
 

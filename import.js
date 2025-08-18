@@ -1,66 +1,110 @@
-// import.js (fixed & optimized)
+// import.js
 import fs from "fs";
+import axios from "axios";
 import { MongoClient } from "mongodb";
-import { pipeline } from "@xenova/transformers";
 import pLimit from "p-limit";
+import cliProgress from "cli-progress";
+import ora from "ora";
+import { pipeline } from "@xenova/transformers";   // ✅ local embedding
 import "dotenv/config";
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || "rpa";
+const API_RESEARCH = process.env.API_RESEARCH || "https://api.rpa4edu.shop/api_research.php";
+const API_JOURNAL = process.env.API_JOURNAL || "https://api.rpa4edu.shop/api_journal.php";
 
-// ===== MongoDB Singleton =====
-let _client;
-let _db;
-async function getDb() {
-  if (!_db) {
-    _client = new MongoClient(MONGODB_URI);
-    await _client.connect();
-    _db = _client.db(MONGODB_DB);
-    console.log(`✅ MongoDB connected (import.js) → DB: ${MONGODB_DB}`);
+const client = new MongoClient(MONGODB_URI);
+
+// ===== Embedding helper (Local MiniLM-L6-v2) =====
+let embedder = null;
+async function initEmbedder() {
+  if (!embedder) {
+    console.log("⏳ Loading local embedding model (all-MiniLM-L6-v2)...");
+    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("✅ Model loaded");
   }
-  return _db;
+  return embedder;
 }
 
-// ===== Embedding Model Singleton =====
-let _embedderPromise;
-async function getEmbedder() {
-  if (!_embedderPromise) {
-    console.log("⏳ Loading embedding model: Xenova/all-MiniLM-L6-v2");
-    _embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    console.log("✅ Embedding model ready");
-  }
-  return _embedderPromise;
-}
-
-function flattenEmbedding(result) {
-  if (!result) return [];
-  if (result.data) return Array.from(result.data);
-  if (Array.isArray(result[0]?.data)) return Array.from(result[0].data);
-  if (Array.isArray(result[0])) return result[0].flat();
-  if (Array.isArray(result)) return result;
-  return [];
-}
-
-// ===== Batch Embedding (safe for 1 or many inputs) =====
 async function embedBatch(texts) {
-  const embedder = await getEmbedder();
-  const outputs = await embedder(texts, { pooling: "mean", normalize: true });
-  const arr = Array.isArray(outputs) ? outputs : [outputs];
-  return arr.map(flattenEmbedding);
+  const emb = await (await initEmbedder())(texts, { pooling: "mean", normalize: true });
+  // Trả về list vector (mảng số float)
+  return texts.map((_, i) => Array.from(emb[i]));
 }
 
-// ===== Helper: Import collection =====
+// ===== Streaming fetch with spinner =====
+async function fetchJsonStream(url, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const connectSpinner = ora(`📡 Connecting to ${url}`).start();
+      const res = await axios.get(url, {
+        responseType: "stream",
+        timeout: 60000,
+      });
+      connectSpinner.succeed(`✔ 📡 Connected to ${url}`);
+
+      let data = "";
+      let size = 0;
+      const startTime = Date.now();
+
+      const spinner = ora("📥 Downloading...").start();
+      const interval = setInterval(() => {
+        const mb = (size / 1024 / 1024).toFixed(1);
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? (size / 1024 / 1024 / elapsed).toFixed(1) : "0.0";
+        spinner.text = `📥 Downloading... ${mb} MB | ${speed} MB/s`;
+      }, 500);
+
+      for await (const chunk of res.data) {
+        size += chunk.length;
+        data += chunk.toString("utf8");
+      }
+
+      clearInterval(interval);
+      spinner.succeed("✔ 📥 Download complete");
+
+      return JSON.parse(data);
+    } catch (err) {
+      console.error(`❌ Fetch error (attempt ${attempt}) from ${url}:`, err.message);
+      if (attempt < retries) {
+        console.log(`⏳ Retry in 5s...`);
+        await new Promise((r) => setTimeout(r, 5000));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+// ===== Import collection =====
 async function importCollection(db, name, records, fields) {
   if (!records?.length) {
     console.warn(`⚠️ No data for collection "${name}"`);
     return;
   }
 
-  console.log(`📦 Importing ${records.length} docs into "${name}"...`);
+  const spinner = ora(`🔍 Checking existing docs in "${name}"...`).start();
 
-  const contents = records.map(item =>
+  // 🔥 Query 1 lần để lấy danh sách _key đã có vector
+  const existing = await db.collection(name)
+    .find({ vector: { $exists: true } }, { projection: { _key: 1 } })
+    .toArray();
+
+  const existingKeys = new Set(existing.map(x => x._key));
+  const newRecords = records.filter(r => !existingKeys.has(r._key));
+
+  spinner.succeed(`📊 ${records.length} total, ${newRecords.length} need import in "${name}"`);
+
+  if (!newRecords.length) {
+    console.log(`✔ "${name}" đã đầy đủ, skip.`);
+    return;
+  }
+
+  console.log(`📦 Importing ${newRecords.length} docs into "${name}"...`);
+
+  const contents = newRecords.map((item) =>
     fields
-      .map(f => {
+      .map((f) => {
         const val = item[f];
         return Array.isArray(val) ? val.join(" ") : val || "";
       })
@@ -68,44 +112,86 @@ async function importCollection(db, name, records, fields) {
       .join(" ")
   );
 
-  const BATCH_SIZE = 32;
+  const BATCH_SIZE = 25;
   let vectors = [];
+
+  // 🟢 Bước 1: EMBEDDING
+  const embedBar = new cliProgress.SingleBar(
+    { format: `   → Embedding [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
+    cliProgress.Presets.shades_classic
+  );
+  embedBar.start(contents.length, 0);
+
   for (let i = 0; i < contents.length; i += BATCH_SIZE) {
     const batch = contents.slice(i, i + BATCH_SIZE);
     const vecs = await embedBatch(batch);
     vectors.push(...vecs);
-    console.log(`   → Embedded ${Math.min(i + BATCH_SIZE, contents.length)}/${contents.length}`);
+    embedBar.update(Math.min(i + batch.length, contents.length));
   }
+  embedBar.stop();
+  console.log("✔ Embedding finished (local MiniLM-L6-v2)");
 
+  // 🟢 Bước 2: UPDATING DB
   const limit = pLimit(10);
-  await Promise.all(records.map((item, idx) =>
-    limit(() =>
-      db.collection(name).updateOne(
-        { [fields[0]]: item[fields[0]] },
-        { $set: { ...item, vector: vectors[idx] } },
-        { upsert: true }
-      )
+  const updateBar = new cliProgress.SingleBar(
+    { format: `   → Updating [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
+    cliProgress.Presets.shades_classic
+  );
+  updateBar.start(newRecords.length, 0);
+
+  let done = 0;
+  await Promise.all(
+    newRecords.map((item, idx) =>
+      limit(async () => {
+        await db.collection(name).updateOne(
+          { _key: item._key },
+          { $set: { ...item, vector: vectors[idx] } },
+          { upsert: true }
+        );
+        done++;
+        updateBar.update(done);
+      })
     )
-  ));
-
-  console.log(`✅ Imported ${records.length} docs into "${name}"`);
+  );
+  updateBar.stop();
+  console.log(`✔ Imported ${newRecords.length} docs into "${name}"`);
 }
 
-// ===== Main import =====
-export async function runImport() {
-  const db = await getDb();
-  const data = JSON.parse(fs.readFileSync("./data.json", "utf-8"));
+// ===== Main =====
+(async () => {
+  try {
+    await client.connect();
+    const db = client.db(MONGODB_DB);
+    console.log(`✅ MongoDB connected (import.js) → DB: ${MONGODB_DB}`);
 
-  await importCollection(db, "journal", data.journal, ["title", "publisher", "categories", "areas"]);
-  await importCollection(db, "conference", data.conference, ["name", "acronym", "location", "topics"]);
+    // 🟢 Fetch data
+    const conferences = await fetchJsonStream(API_RESEARCH);
+    console.log(`📊 Conferences fetched: ${conferences.length}`);
 
-  console.log("🎯 Import finished.");
-}
+    const journals = await fetchJsonStream(API_JOURNAL);
+    console.log(`📊 Journals fetched: ${journals.length}`);
 
-// Run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runImport().then(() => {
+    // 🟢 Với conference: dùng acronym+name làm _key
+    await importCollection(
+      db,
+      "conference",
+      conferences.map(c => ({ ...c, _key: `${c.acronym || ""} ${c.name || ""}`.trim() })),
+      ["_key", "publisher", "description"]
+    );
+
+    // 🟢 Với journal: dùng title làm _key
+    await importCollection(
+      db,
+      "journal",
+      journals.map(j => ({ ...j, _key: j.title || "" })),
+      ["_key", "publisher", "description"]
+    );
+
+    console.log("🎯 Import finished (all data guaranteed with vectors).");
+  } catch (err) {
+    console.error("❌ Import failed:", err);
+  } finally {
+    await client.close();
     console.log("🔌 MongoDB connection closed");
-    _client?.close();
-  });
-}
+  }
+})();
