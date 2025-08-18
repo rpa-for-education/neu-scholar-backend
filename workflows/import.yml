@@ -1,4 +1,4 @@
-name: Run Import Script every 12 hours
+name: Run Import.js Script every 12 hours
 
 on:
   schedule:
@@ -26,4 +26,5 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           MONGODB_DB: ${{ secrets.MONGODB_DB }}
           API_RESEARCH: ${{ secrets.API_RESEARCH }}
+          API_JOURNAL: ${{ secrets.API_JOURNAL }}
         run: node import.js
