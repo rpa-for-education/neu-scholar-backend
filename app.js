@@ -2,9 +2,9 @@
 import "dotenv/config";
 import express from "express";
 import axios from "axios";
-import mongoose from "mongoose"; // ⬅️ thêm
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
+import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
 
 const app = express();
 app.use(express.json());
@@ -13,19 +13,22 @@ const PORT = process.env.PORT || 4000;
 const DEFAULT_MODEL_ID = process.env.DEFAULT_MODEL_ID || "qwen-max";
 
 /* ===================== MongoDB Connect ===================== */
-if (!mongoose.connection.readyState) {
-  mongoose
-    .connect(process.env.MONGO_URI, { dbName: process.env.MONGO_DB })
-    .then(() => console.log("✅ MongoDB connected"))
-    .catch(err => console.error("❌ MongoDB connection error:", err.message));
+let db;
+(async () => {
+  try {
+    db = await getDb();
+  } catch (err) {
+    console.error("❌ MongoDB init error:", err.message);
+  }
+})();
+
+/* ===================== Collections ===================== */
+function Journals() {
+  return db.collection("journal");
 }
-
-/* ===================== Schemas & Models ===================== */
-const JournalSchema = new mongoose.Schema({}, { strict: false });
-const ConferenceSchema = new mongoose.Schema({}, { strict: false });
-
-const Journal = mongoose.model("Journal", JournalSchema, "journals");
-const Conference = mongoose.model("Conference", ConferenceSchema, "conferences");
+function Conferences() {
+  return db.collection("conference");
+}
 
 /* =========== Helpers: query, pagination, projection =========== */
 function parseBool(v) {
@@ -50,7 +53,7 @@ function buildSearchFilter(q, fields) {
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
-    db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    db: db ? "connected" : "disconnected",
     time: new Date().toISOString(),
   });
 });
@@ -79,15 +82,12 @@ app.get("/api/journals", async (req, res) => {
     ]);
 
     if (!limit) {
-      // lấy tất cả
-      const data = await Journal.find(filter, projection).sort({ created_time: -1 });
+      const data = await Journals().find(filter, { projection }).sort({ created_time: -1 }).toArray();
       return res.json({ page: 1, total: data.length, items: data });
     }
 
-    const [items, total] = await Promise.all([
-      Journal.find(filter, projection).sort({ created_time: -1 }).skip(skip).limit(limit),
-      Journal.countDocuments(filter),
-    ]);
+    const cursor = Journals().find(filter, { projection }).sort({ created_time: -1 }).skip(skip).limit(limit);
+    const [items, total] = await Promise.all([cursor.toArray(), Journals().countDocuments(filter)]);
     res.json({ page, limit, total, items });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
@@ -98,7 +98,8 @@ app.get("/api/journals", async (req, res) => {
 app.get("/api/journals/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
-    const doc = await Journal.findById(req.params.id, projection);
+    const { ObjectId } = await import("mongodb");
+    const doc = await Journals().findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Journal not found" });
     res.json(doc);
   } catch (err) {
@@ -109,8 +110,8 @@ app.get("/api/journals/:id", async (req, res) => {
 // POST /api/journals
 app.post("/api/journals", async (req, res) => {
   try {
-    const created = await Journal.create(req.body);
-    res.status(201).json(created);
+    const result = await Journals().insertOne(req.body);
+    res.status(201).json({ _id: result.insertedId, ...req.body });
   } catch (err) {
     res.status(400).json({ error: "Failed to create journal", detail: err.message });
   }
@@ -119,12 +120,14 @@ app.post("/api/journals", async (req, res) => {
 // PUT /api/journals/:id
 app.put("/api/journals/:id", async (req, res) => {
   try {
-    const updated = await Journal.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: false,
-    });
-    if (!updated) return res.status(404).json({ error: "Journal not found" });
-    res.json(updated);
+    const { ObjectId } = await import("mongodb");
+    const result = await Journals().findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: req.body },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return res.status(404).json({ error: "Journal not found" });
+    res.json(result.value);
   } catch (err) {
     res.status(400).json({ error: "Failed to update journal", detail: err.message });
   }
@@ -133,9 +136,10 @@ app.put("/api/journals/:id", async (req, res) => {
 // DELETE /api/journals/:id
 app.delete("/api/journals/:id", async (req, res) => {
   try {
-    const deleted = await Journal.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: "Journal not found" });
-    res.json({ message: "Journal deleted", deleted });
+    const { ObjectId } = await import("mongodb");
+    const result = await Journals().findOneAndDelete({ _id: new ObjectId(req.params.id) });
+    if (!result.value) return res.status(404).json({ error: "Journal not found" });
+    res.json({ message: "Journal deleted", deleted: result.value });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete journal", detail: err.message });
   }
@@ -164,14 +168,12 @@ app.get("/api/conferences", async (req, res) => {
     ]);
 
     if (!limit) {
-      const data = await Conference.find(filter, projection).sort({ created_time: -1 });
+      const data = await Conferences().find(filter, { projection }).sort({ created_time: -1 }).toArray();
       return res.json({ page: 1, total: data.length, items: data });
     }
 
-    const [items, total] = await Promise.all([
-      Conference.find(filter, projection).sort({ created_time: -1 }).skip(skip).limit(limit),
-      Conference.countDocuments(filter),
-    ]);
+    const cursor = Conferences().find(filter, { projection }).sort({ created_time: -1 }).skip(skip).limit(limit);
+    const [items, total] = await Promise.all([cursor.toArray(), Conferences().countDocuments(filter)]);
     res.json({ page, limit, total, items });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
@@ -182,7 +184,8 @@ app.get("/api/conferences", async (req, res) => {
 app.get("/api/conferences/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
-    const doc = await Conference.findById(req.params.id, projection);
+    const { ObjectId } = await import("mongodb");
+    const doc = await Conferences().findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Conference not found" });
     res.json(doc);
   } catch (err) {
@@ -193,8 +196,8 @@ app.get("/api/conferences/:id", async (req, res) => {
 // POST /api/conferences
 app.post("/api/conferences", async (req, res) => {
   try {
-    const created = await Conference.create(req.body);
-    res.status(201).json(created);
+    const result = await Conferences().insertOne(req.body);
+    res.status(201).json({ _id: result.insertedId, ...req.body });
   } catch (err) {
     res.status(400).json({ error: "Failed to create conference", detail: err.message });
   }
@@ -203,12 +206,14 @@ app.post("/api/conferences", async (req, res) => {
 // PUT /api/conferences/:id
 app.put("/api/conferences/:id", async (req, res) => {
   try {
-    const updated = await Conference.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: false,
-    });
-    if (!updated) return res.status(404).json({ error: "Conference not found" });
-    res.json(updated);
+    const { ObjectId } = await import("mongodb");
+    const result = await Conferences().findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: req.body },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return res.status(404).json({ error: "Conference not found" });
+    res.json(result.value);
   } catch (err) {
     res.status(400).json({ error: "Failed to update conference", detail: err.message });
   }
@@ -217,9 +222,10 @@ app.put("/api/conferences/:id", async (req, res) => {
 // DELETE /api/conferences/:id
 app.delete("/api/conferences/:id", async (req, res) => {
   try {
-    const deleted = await Conference.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: "Conference not found" });
-    res.json({ message: "Conference deleted", deleted });
+    const { ObjectId } = await import("mongodb");
+    const result = await Conferences().findOneAndDelete({ _id: new ObjectId(req.params.id) });
+    if (!result.value) return res.status(404).json({ error: "Conference not found" });
+    res.json({ message: "Conference deleted", deleted: result.value });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete conference", detail: err.message });
   }
