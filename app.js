@@ -1,16 +1,29 @@
 // app.js
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
 
-const app = express();
-app.use(express.json());
-
+const app = express(); 
 const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
+
+// ===== Middleware =====
+app.use(cors()); // ✅ Cho phép mọi origin gọi API
+app.use(express.json({ limit: "10mb" }));
+
+// Debug log middleware
+app.use((req, res, next) => {
+  console.log("📩 Request:", {
+    method: req.method,
+    url: req.url,
+    body: req.body,
+  });
+  next();
+});
 
 /* ===================== MongoDB Connect ===================== */
 let db;
