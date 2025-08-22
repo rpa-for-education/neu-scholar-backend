@@ -35,7 +35,7 @@ async function callQwen(prompt, model) {
         Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
         "Content-Type": "application/json",
       },
-      timeout: 20000,
+      timeout: 30000,
     }
   );
 
@@ -55,7 +55,7 @@ async function callOpenAI(prompt, model) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
-      timeout: 20000,
+      timeout: 30000,
     }
   );
 
@@ -78,7 +78,7 @@ async function callGemini(prompt, model) {
     },
     {
       headers: { "Content-Type": "application/json" },
-      timeout: 20000,
+      timeout: 30000,
     }
   );
 
