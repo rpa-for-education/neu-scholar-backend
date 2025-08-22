@@ -6,6 +6,7 @@ import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
+import { encode } from "gpt-tokenizer"; // ✅ thêm để tính token
 
 const app = express(); 
 const PORT = 4000;
@@ -294,8 +295,9 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
-/* ===================== Agent API (giữ nguyên) ===================== */
+/* ===================== Agent API ===================== */
 app.post("/api/agent", async (req, res) => {
+  const start = Date.now();
   try {
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body || {};
     if (!question?.trim()) {
@@ -323,10 +325,21 @@ app.post("/api/agent", async (req, res) => {
     const prompt = buildPrompt(question, conferences, journals);
     const answer = await callLLM(prompt, model_id);
 
+    const response_time_ms = Date.now() - start;
+    const prompt_tokens = encode(prompt).length;
+    const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
+    const tokens_used = prompt_tokens + answer_tokens;
+
     res.json({
       model_id,
       answer,
       retrieved: { conference: conferences, journal: journals },
+      meta: {
+        response_time_ms,
+        tokens_used,
+        prompt_tokens,
+        answer_tokens
+      }
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
