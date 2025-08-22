@@ -9,8 +9,8 @@ import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 4000;
-const DEFAULT_MODEL_ID = process.env.DEFAULT_MODEL_ID || "qwen-max";
+const PORT = 4000;
+const DEFAULT_MODEL_ID = "qwen-max";
 
 /* ===================== MongoDB Connect ===================== */
 let db;

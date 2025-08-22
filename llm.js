@@ -22,9 +22,7 @@ const modelMap = {
 
 // ===== Qwen =====
 async function callQwen(prompt, model) {
-  const baseUrl =
-    process.env.QWEN_BASE_URL ||
-    "https://dashscope.aliyuncs.com/compatible-mode/v1";
+  const baseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
 
   const res = await axios.post(
     `${baseUrl}/chat/completions`,
