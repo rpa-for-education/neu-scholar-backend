@@ -315,6 +315,7 @@ app.post("/api/agent", async (req, res) => {
       console.error("Journal vector search failed:", e.message);
     }
 
+    // fallback nếu không có kết quả
     if (!conferences?.length && !journals?.length) {
       const articles = await fetchArticles();
       conferences = articles.slice(0, topk);
@@ -332,6 +333,7 @@ app.post("/api/agent", async (req, res) => {
     const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
     const tokens_used = prompt_tokens + answer_tokens;
 
+    // base log
     const logBase = {
       question,
       asked_at,
@@ -341,39 +343,45 @@ app.post("/api/agent", async (req, res) => {
       model_id,
       provider: model_id.includes("qwen") ? "qwen" : "openai",
       model: model_id,
-      topk: Number(topk)
+      topk: Number(topk),
     };
 
-    // 🎯 Quyết định log theo loại nào có nhiều hits hơn
-    try {
-      const confHits = conferences?.length || 0;
-      const jourHits = journals?.length || 0;
+    // 🎯 Quyết định type và score
+    const score_conf = conferences?.length || 0;
+    const score_jour = journals?.length || 0;
 
-      if (confHits > jourHits) {
-        await db.collection("conferencelogs").insertOne({
-          ...logBase,
-          hits: conferences
-        });
-      } else if (jourHits > confHits) {
-        await db.collection("journallogs").insertOne({
-          ...logBase,
-          hits: journals
-        });
-      } else if (confHits > 0 && jourHits > 0) {
-        // Nếu bằng nhau mà cả hai đều có kết quả → ghi cả hai
-        await db.collection("conferencelogs").insertOne({
-          ...logBase,
-          hits: conferences
-        });
-        await db.collection("journallogs").insertOne({
-          ...logBase,
-          hits: journals
-        });
-      }
+    let type = null;
+    let hits = [];
+    if (score_conf > score_jour) {
+      type = "conference";
+      hits = conferences;
+    } else if (score_jour > score_conf) {
+      type = "journal";
+      hits = journals;
+    } else if (score_conf > 0 && score_jour > 0) {
+      type = "both";
+      hits = { conferences, journals };
+    }
+
+    // 📝 Ghi log vào chatlogs
+    try {
+      await db.collection("chatlogs").insertOne({
+        ...logBase,
+        type,
+        score_conf,
+        score_jour,
+        hits,
+        response_time_ms,
+        prompt_tokens,
+        answer_tokens,
+        tokens_used,
+        createdAt: new Date(),
+      });
     } catch (err) {
       console.error("❌ Lỗi ghi log:", err.message);
     }
 
+    // 📤 Trả về client (GIỮ NGUYÊN)
     res.json({
       model_id,
       answer,
@@ -385,6 +393,7 @@ app.post("/api/agent", async (req, res) => {
         answer_tokens
       }
     });
+
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
