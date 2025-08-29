@@ -66,14 +66,13 @@ function buildSearchFilter(q, fields) {
 /* ===================== HEALTH ===================== */
 app.get("/api/health", (_req, res) => {
   res.json({
-    status: "ok",
+    status: "ok", 
     db: db ? "connected" : "disconnected",
     time: new Date().toISOString(),
   });
 });
 
 /* ===================== JOURNALS CRUD ===================== */
-
 // GET /api/journals  (list/search/pagination)
 app.get("/api/journals", async (req, res) => {
   try {
@@ -160,7 +159,6 @@ app.delete("/api/journals/:id", async (req, res) => {
 });
 
 /* ===================== CONFERENCES CRUD ===================== */
-
 // GET /api/conferences  (list/search/pagination)
 app.get("/api/conferences", async (req, res) => {
   try {
@@ -326,9 +324,44 @@ app.post("/api/agent", async (req, res) => {
     const answer = await callLLM(prompt, model_id);
 
     const response_time_ms = Date.now() - start;
+    const asked_at = new Date().toISOString();
+    const answered_at = new Date().toISOString();
+
+    // Tính token
     const prompt_tokens = encode(prompt).length;
     const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
     const tokens_used = prompt_tokens + answer_tokens;
+
+    const logBase = {
+      question,
+      asked_at,
+      answer,
+      answered_at,
+      withLLM: true,
+      model_id,
+      provider: model_id.includes("qwen") ? "qwen" : "openai",
+      model: model_id,
+      topk: Number(topk),
+      hits: [] // sẽ gán dữ liệu thực tế bên dưới
+    };
+
+    // 🎯 Lưu vào MongoDB logs
+    try {
+      if (conferences?.length) {
+        await db.collection("conferencelogs").insertOne({
+          ...logBase,
+          hits: conferences
+        });
+      }
+      if (journals?.length) {
+        await db.collection("journallogs").insertOne({
+          ...logBase,
+          hits: journals
+        });
+      }
+    } catch (err) {
+      console.error("❌ Lỗi ghi log:", err.message);
+    }
 
     res.json({
       model_id,
@@ -345,6 +378,7 @@ app.post("/api/agent", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 
 /* ===================== Boot ===================== */
 if (!process.env.VERCEL) {

@@ -8,9 +8,9 @@ const dbName = process.env.MONGODB_DB || "rpa";
 // Khởi tạo embedder local
 let embedder = null;
 export async function initEmbedding() {   // 👈 export luôn từ đây
-  if (!embedder) {
-    console.log("⏳ Loading embedder: Xenova/all-MiniLM-L6-v2 ...");
-    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+  if (!embedder) { 
+    console.log("⏳ Loading local embedding model (paraphrase-multilingual-mpnet-base-v2, 768d)...");
+    embedder = await pipeline("feature-extraction", "Xenova/paraphrase-multilingual-mpnet-base-v2");
     console.log("✅ Embedder ready");
   }
   return true;

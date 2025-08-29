@@ -3,21 +3,21 @@ import axios from "axios";
 
 // ==== Map model_id → provider + model ====
 const modelMap = {
-  // OpenAI
-  "gpt-5": { provider: "openai", model: "gpt-5" },
-  "gpt-5-mini": { provider: "openai", model: "gpt-5-mini" },
-  "gpt-4.1": { provider: "openai", model: "gpt-4.1" },
-  "gpt-4.1-mini": { provider: "openai", model: "gpt-4.1-mini" },
+  // Qwen
+  "qwen-max": { provider: "qwen", model: "qwen-max" },
+  "qwen-plus": { provider: "qwen", model: "qwen-plus" },
+  "qwen-flash": { provider: "qwen", model: "qwen-flash" },
 
   // Gemini
   "gemini-2.5-pro": { provider: "gemini", model: "gemini-2.5-pro" },
   "gemini-2.5-flash": { provider: "gemini", model: "gemini-2.5-flash" },
   "gemini-2.5-flash-lite": { provider: "gemini", model: "gemini-2.5-flash-lite" },
 
-  // Qwen
-  "qwen-max": { provider: "qwen", model: "qwen-max" },
-  "qwen-plus": { provider: "qwen", model: "qwen-plus" },
-  "qwen-flash": { provider: "qwen", model: "qwen-flash" },
+  // OpenAI
+  "gpt-5": { provider: "openai", model: "gpt-5" },
+  "gpt-5-mini": { provider: "openai", model: "gpt-5-mini" },
+  "gpt-4.1": { provider: "openai", model: "gpt-4.1" },
+  "gpt-4.1-mini": { provider: "openai", model: "gpt-4.1-mini" },
 };
 
 // ===== Qwen =====
@@ -33,26 +33,6 @@ async function callQwen(prompt, model) {
     {
       headers: {
         Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    }
-  );
-
-  return res.data.choices?.[0]?.message?.content || "";
-}
-
-// ===== OpenAI =====
-async function callOpenAI(prompt, model) {
-  const res = await axios.post(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      model,
-      messages: [{ role: "user", content: prompt }],
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       timeout: 30000,
@@ -83,6 +63,26 @@ async function callGemini(prompt, model) {
   );
 
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+// ===== OpenAI =====
+async function callOpenAI(prompt, model) {
+  const res = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model,
+      messages: [{ role: "user", content: prompt }],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 30000,
+    }
+  );
+
+  return res.data.choices?.[0]?.message?.content || "";
 }
 
 // ===== Hàm gọi LLM chung =====

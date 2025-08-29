@@ -15,13 +15,13 @@ const API_JOURNAL = process.env.API_JOURNAL || "https://api.rpa4edu.shop/api_jou
 
 const client = new MongoClient(MONGODB_URI);
 
-// ===== Embedding helper (Local MiniLM-L6-v2) =====
+// ===== Embedding helper (768 chiều với MiniLM-L12-v2) =====
 let embedder = null;
 async function initEmbedder() {
   if (!embedder) {
-    console.log("⏳ Loading local embedding model (all-MiniLM-L6-v2)...");
-    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    console.log("✅ Model loaded");
+    console.log("⏳ Loading local embedding model (paraphrase-multilingual-mpnet-base-v2, 768d)...");
+    embedder = await pipeline("feature-extraction", "Xenova/paraphrase-multilingual-mpnet-base-v2");
+    console.log("✅ Model loaded (768d)");
   }
   return embedder;
 }
@@ -102,22 +102,10 @@ async function importCollection(db, name, records, fields) {
 
   spinner.succeed(`📊 ${records.length} total records to process in "${name}"`);
 
-  const toProcess = [];
-  for (const r of records) {
-    const old = existingMap.get(r._key);
-    if (!old) {
-      toProcess.push({ item: r, reason: "new" });
-    } else if (!isEqualExceptVector(old, r)) {
-      toProcess.push({ item: { ...old, ...r }, reason: "update" });
-    }
-  }
+  // 🚀 Force update: ép import lại tất cả records
+  const toProcess = records.map(r => ({ item: r, reason: "force-update" }));
 
-  if (!toProcess.length) {
-    console.log(`✔ "${name}" đã đầy đủ, skip.`);
-    return;
-  }
-
-  console.log(`📦 ${toProcess.length} docs need insert/update in "${name}"...`);
+  console.log(`📦 ${toProcess.length} docs will be re-imported into "${name}"...`);
 
   const contents = toProcess.map(({ item }) =>
     fields
@@ -146,7 +134,7 @@ async function importCollection(db, name, records, fields) {
     embedBar.update(Math.min(i + batch.length, contents.length));
   }
   embedBar.stop();
-  console.log("✔ Embedding finished (local MiniLM-L6-v2)");
+  console.log("✔ Embedding finished (MiniLM-L12-v2, 768d)");
 
   // 🟢 Bước 2: UPDATE DB
   const limit = pLimit(10);
@@ -201,7 +189,7 @@ async function importCollection(db, name, records, fields) {
       ["_key", "publisher", "description"]
     );
 
-    console.log("🎯 Import finished (all data up-to-date with vectors).");
+    console.log("🎯 Import finished (all data up-to-date with vectors, 768d).");
   } catch (err) {
     console.error("❌ Import failed:", err);
   } finally {
