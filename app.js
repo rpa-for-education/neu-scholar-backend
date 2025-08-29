@@ -315,7 +315,7 @@ app.post("/api/agent", async (req, res) => {
       console.error("Journal vector search failed:", e.message);
     }
 
-    if (!conferences?.length) {
+    if (!conferences?.length && !journals?.length) {
       const articles = await fetchArticles();
       conferences = articles.slice(0, topk);
     }
@@ -341,19 +341,30 @@ app.post("/api/agent", async (req, res) => {
       model_id,
       provider: model_id.includes("qwen") ? "qwen" : "openai",
       model: model_id,
-      topk: Number(topk),
-      hits: [] // sẽ gán dữ liệu thực tế bên dưới
+      topk: Number(topk)
     };
 
-    // 🎯 Lưu vào MongoDB logs
+    // 🎯 Quyết định log theo loại nào có nhiều hits hơn
     try {
-      if (conferences?.length) {
+      const confHits = conferences?.length || 0;
+      const jourHits = journals?.length || 0;
+
+      if (confHits > jourHits) {
         await db.collection("conferencelogs").insertOne({
           ...logBase,
           hits: conferences
         });
-      }
-      if (journals?.length) {
+      } else if (jourHits > confHits) {
+        await db.collection("journallogs").insertOne({
+          ...logBase,
+          hits: journals
+        });
+      } else if (confHits > 0 && jourHits > 0) {
+        // Nếu bằng nhau mà cả hai đều có kết quả → ghi cả hai
+        await db.collection("conferencelogs").insertOne({
+          ...logBase,
+          hits: conferences
+        });
         await db.collection("journallogs").insertOne({
           ...logBase,
           hits: journals
