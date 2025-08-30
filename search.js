@@ -3,7 +3,10 @@ import { MongoClient } from "mongodb";
 import { pipeline } from "@xenova/transformers";
 
 const client = new MongoClient(process.env.MONGODB_URI);
-const dbName = process.env.MONGODB_DB || "rpa";
+const dbName = process.env.MONGODB_DB || "fitneu";
+
+// Giới hạn topK (có thể cấu hình qua .env)
+const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
 
 // Khởi tạo embedder local
 let embedder = null;
@@ -30,6 +33,9 @@ export async function search({ question, topk = 5 }) {
 
   const queryVector = await embed(question);
 
+  // 👇 Giới hạn topk để tránh query quá nhiều
+  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
+
   // --- Tìm trong collection conference ---
   const confResults = await db.collection("conference").aggregate([
     {
@@ -38,7 +44,7 @@ export async function search({ question, topk = 5 }) {
         path: "vector",
         queryVector,
         numCandidates: 100,
-        limit: topk,
+        limit: safeTopK,
         similarity: "cosine",
       },
     },
@@ -61,7 +67,7 @@ export async function search({ question, topk = 5 }) {
         path: "vector",
         queryVector,
         numCandidates: 100,
-        limit: topk,
+        limit: safeTopK,
         similarity: "cosine",
       },
     },
