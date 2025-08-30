@@ -5,7 +5,7 @@ import cors from "cors";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
-import { getDb } from "./db.js";
+import { getDb } from "./db.js"; 
 import { encode } from "gpt-tokenizer";
 
 const app = express();
@@ -17,48 +17,48 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 app.use((req, _res, next) => {
-  console.log("📩 Request:", { method: req.method, url: req.url, body: req.body });
+  console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
 
-/* ===================== MongoDB Connect ===================== */
+/* ===================== MongoDB ===================== */
 let db;
 async function getCollection(name) {
   if (!db) db = await getDb();
   return db.collection(name);
 }
-
-/* ===================== Collections ===================== */
 async function Journals() { return getCollection("journal"); }
 async function Conferences() { return getCollection("conference"); }
 
-/* =========== Helpers =========== */
-function parseBool(v) {
-  return String(v).toLowerCase() === "true";
-}
-function getProjection(includeVector) {
-  return includeVector ? {} : { vector: 0 };
-}
+/* ===================== Helpers ===================== */
+function parseBool(v) { return String(v).toLowerCase() === "true"; }
+function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
 /* ===================== HEALTH ===================== */
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", db: db ? "connected" : "disconnected", time: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    db: db ? "connected" : "disconnected",
+    time: new Date().toISOString(),
+  });
 });
 
-/* ===================== JOURNALS ===================== */
+/* ===================== JOURNALS CRUD ===================== */
 app.get("/api/journals", async (_req, res) => {
   try {
     const col = await Journals();
+
+    // ⚡ Lấy hết bản ghi, chỉ chọn 3 field cần thiết
     const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } });
 
     const items = [];
-    for await (const doc of cursor) {
+    await cursor.forEach(item => {
       items.push({
-        name: doc.title,
-        quartiles: doc.categories,
-        publisher: doc.publisher
+        name: item.title,
+        quartiles: item.categories,
+        publisher: item.publisher
       });
-    }
+    });
 
     res.json({ total: items.length, items });
   } catch (err) {
@@ -69,9 +69,9 @@ app.get("/api/journals", async (_req, res) => {
 
 app.get("/api/journals/:id", async (req, res) => {
   try {
+    const projection = getProjection(parseBool(req.query.includeVector));
     const { ObjectId } = await import("mongodb");
     const col = await Journals();
-    const projection = getProjection(parseBool(req.query.includeVector));
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Journal not found" });
     res.json(doc);
@@ -79,6 +79,7 @@ app.get("/api/journals/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch journal", detail: err.message });
   }
 });
+
 app.post("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -88,6 +89,7 @@ app.post("/api/journals", async (req, res) => {
     res.status(400).json({ error: "Failed to create journal", detail: err.message });
   }
 });
+
 app.put("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -101,6 +103,7 @@ app.put("/api/journals/:id", async (req, res) => {
     res.status(400).json({ error: "Failed to update journal", detail: err.message });
   }
 });
+
 app.delete("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -113,19 +116,21 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-/* ===================== CONFERENCES ===================== */
+/* ===================== CONFERENCES CRUD ===================== */
 app.get("/api/conferences", async (_req, res) => {
   try {
     const col = await Conferences();
+
+    // ⚡ Lấy hết bản ghi, chỉ 2 field name + url
     const cursor = col.find({}, { projection: { name: 1, url: 1 } });
 
     const items = [];
-    for await (const doc of cursor) {
+    await cursor.forEach(item => {
       items.push({
-        name: doc.name || "Không có",
-        url: doc.url || "Không có"
+        name: item.name || "Không có",
+        url: item.url || "Không có"
       });
-    }
+    });
 
     res.json({ total: items.length, items });
   } catch (err) {
@@ -136,9 +141,9 @@ app.get("/api/conferences", async (_req, res) => {
 
 app.get("/api/conferences/:id", async (req, res) => {
   try {
+    const projection = getProjection(parseBool(req.query.includeVector));
     const { ObjectId } = await import("mongodb");
     const col = await Conferences();
-    const projection = getProjection(parseBool(req.query.includeVector));
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Conference not found" });
     res.json(doc);
@@ -146,6 +151,7 @@ app.get("/api/conferences/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch conference", detail: err.message });
   }
 });
+
 app.post("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -155,6 +161,7 @@ app.post("/api/conferences", async (req, res) => {
     res.status(400).json({ error: "Failed to create conference", detail: err.message });
   }
 });
+
 app.put("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -168,6 +175,7 @@ app.put("/api/conferences/:id", async (req, res) => {
     res.status(400).json({ error: "Failed to update conference", detail: err.message });
   }
 });
+
 app.delete("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -180,7 +188,7 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-/* ===================== API ngoài để fallback ===================== */
+/* ===================== API ngoài + Agent ===================== */
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
@@ -190,6 +198,7 @@ async function fetchArticles() {
     return [];
   }
 }
+
 
 /* ===================== Chuẩn hóa context ===================== */
 function buildPrompt(question, conferences = [], journals = []) {
