@@ -5,103 +5,73 @@ import cors from "cors";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
-import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
-import { encode } from "gpt-tokenizer"; // ✅ thêm để tính token
+import { getDb } from "./db.js";
+import { encode } from "gpt-tokenizer";
 
-const app = express(); 
+const app = express();
 const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
 
 // ===== Middleware =====
-app.use(cors()); // ✅ Cho phép mọi origin gọi API
+app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-// Debug log middleware
-app.use((req, res, next) => {
-  console.log("📩 Request:", {
-    method: req.method,
-    url: req.url,
-    body: req.body,
-  });
+app.use((req, _res, next) => {
+  console.log("📩 Request:", { method: req.method, url: req.url, body: req.body });
   next();
 });
 
 /* ===================== MongoDB Connect ===================== */
 let db;
 async function getCollection(name) {
-  if (!db) {
-    db = await getDb();
-  }
+  if (!db) db = await getDb();
   return db.collection(name);
 }
 
 /* ===================== Collections ===================== */
-async function Journals() {
-  return getCollection("journal");
-}
-async function Conferences() {
-  return getCollection("conference");
-}
+async function Journals() { return getCollection("journal"); }
+async function Conferences() { return getCollection("conference"); }
 
-/* =========== Helpers: query, pagination, projection =========== */
+/* =========== Helpers =========== */
 function parseBool(v) {
   return String(v).toLowerCase() === "true";
 }
 function getProjection(includeVector) {
   return includeVector ? {} : { vector: 0 };
 }
-function getPagination(req) {
-  const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit || "0", 10), 0), 500); // 0 = lấy tất cả
-  const skip = limit ? (page - 1) * limit : 0;
-  return { page, limit, skip };
-}
-function buildSearchFilter(q, fields) {
-  if (!q || !q.trim()) return {};
-  const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-  return { $or: fields.map(f => ({ [f]: regex })) };
-}
 
 /* ===================== HEALTH ===================== */
 app.get("/api/health", (_req, res) => {
-  res.json({
-    status: "ok", 
-    db: db ? "connected" : "disconnected",
-    time: new Date().toISOString(),
-  });
+  res.json({ status: "ok", db: db ? "connected" : "disconnected", time: new Date().toISOString() });
 });
 
-/* ===================== JOURNALS CRUD ===================== */
-app.get("/api/journals", async (req, res) => {
+/* ===================== JOURNALS ===================== */
+app.get("/api/journals", async (_req, res) => {
   try {
     const col = await Journals();
-
-    // ❌ Không phân trang, load hết, chỉ giữ 3 trường cần
     const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } });
-    const itemsRaw = await cursor.toArray();
 
-    const items = itemsRaw.map(item => ({
-      name: item.title,
-      quartiles: item.categories,
-      publisher: item.publisher
-    }));
+    const items = [];
+    for await (const doc of cursor) {
+      items.push({
+        name: doc.title,
+        quartiles: doc.categories,
+        publisher: doc.publisher
+      });
+    }
 
-    return res.json({
-      total: items.length,
-      items,
-    });
+    res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/journals error:", err);
-    return res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
+    res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
 
-// GET /api/journals/:id
 app.get("/api/journals/:id", async (req, res) => {
   try {
-    const projection = getProjection(parseBool(req.query.includeVector));
     const { ObjectId } = await import("mongodb");
     const col = await Journals();
+    const projection = getProjection(parseBool(req.query.includeVector));
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Journal not found" });
     res.json(doc);
@@ -109,8 +79,6 @@ app.get("/api/journals/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch journal", detail: err.message });
   }
 });
-
-// POST /api/journals
 app.post("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -120,16 +88,12 @@ app.post("/api/journals", async (req, res) => {
     res.status(400).json({ error: "Failed to create journal", detail: err.message });
   }
 });
-
-// PUT /api/journals/:id
 app.put("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
     const col = await Journals();
     const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
+      { _id: new ObjectId(req.params.id) }, { $set: req.body }, { returnDocument: "after" }
     );
     if (!result.value) return res.status(404).json({ error: "Journal not found" });
     res.json(result.value);
@@ -137,8 +101,6 @@ app.put("/api/journals/:id", async (req, res) => {
     res.status(400).json({ error: "Failed to update journal", detail: err.message });
   }
 });
-
-// DELETE /api/journals/:id
 app.delete("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -151,38 +113,32 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-/* ===================== CONFERENCES CRUD ===================== */
-app.get("/api/conferences", async (req, res) => {
+/* ===================== CONFERENCES ===================== */
+app.get("/api/conferences", async (_req, res) => {
   try {
     const col = await Conferences();
-
-    // ✅ Projection chỉ lấy 2 field: name + url (không cần title vì DB đã có name)
     const cursor = col.find({}, { projection: { name: 1, url: 1 } });
-    const itemsRaw = await cursor.toArray();
 
-    // ✅ Bảo toàn dữ liệu: nếu không có name thì fallback sang title
-    const items = itemsRaw.map(item => ({
-      name: item.name || "Không có",
-      url: item.url || "Không có"
-    }));
+    const items = [];
+    for await (const doc of cursor) {
+      items.push({
+        name: doc.name || "Không có",
+        url: doc.url || "Không có"
+      });
+    }
 
-    res.json({
-      total: items.length,
-      items,
-    });
+    res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
   }
 });
 
-
-// GET /api/conferences/:id
 app.get("/api/conferences/:id", async (req, res) => {
   try {
-    const projection = getProjection(parseBool(req.query.includeVector));
     const { ObjectId } = await import("mongodb");
     const col = await Conferences();
+    const projection = getProjection(parseBool(req.query.includeVector));
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Conference not found" });
     res.json(doc);
@@ -190,8 +146,6 @@ app.get("/api/conferences/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch conference", detail: err.message });
   }
 });
-
-// POST /api/conferences
 app.post("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -201,16 +155,12 @@ app.post("/api/conferences", async (req, res) => {
     res.status(400).json({ error: "Failed to create conference", detail: err.message });
   }
 });
-
-// PUT /api/conferences/:id
 app.put("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
     const col = await Conferences();
     const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
+      { _id: new ObjectId(req.params.id) }, { $set: req.body }, { returnDocument: "after" }
     );
     if (!result.value) return res.status(404).json({ error: "Conference not found" });
     res.json(result.value);
@@ -218,8 +168,6 @@ app.put("/api/conferences/:id", async (req, res) => {
     res.status(400).json({ error: "Failed to update conference", detail: err.message });
   }
 });
-
-// DELETE /api/conferences/:id
 app.delete("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
