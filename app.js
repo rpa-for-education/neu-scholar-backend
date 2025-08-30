@@ -44,28 +44,30 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* ===================== JOURNALS CRUD ===================== */
-app.get("/api/journals", async (_req, res) => {
+// GET /api/journals
+app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
+    const projection = { _id: 0, title: 1, publisher: 1, categories: 1, url: 1 };
 
-    // ⚡ Lấy hết bản ghi, chỉ chọn 3 field cần thiết
-    const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } });
+    const cursor = col.find({}, { projection }).sort({ created_time: -1 });
+    const items = await cursor.toArray();
 
-    const items = [];
-    await cursor.forEach(item => {
-      items.push({
-        name: item.title,
-        quartiles: item.categories,
-        publisher: item.publisher
-      });
-    });
+    // map thành format chuẩn
+    const result = items.map(j => ({
+      name: j.title,
+      publisher: j.publisher,
+      quartiles: j.categories,
+      url: j.url
+    }));
 
-    res.json({ total: items.length, items });
+    res.json({ total: result.length, items: result });
   } catch (err) {
     console.error("❌ /api/journals error:", err);
     res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
+
 
 app.get("/api/journals/:id", async (req, res) => {
   try {
@@ -117,20 +119,19 @@ app.delete("/api/journals/:id", async (req, res) => {
 });
 
 /* ===================== CONFERENCES CRUD ===================== */
-app.get("/api/conferences", async (_req, res) => {
+// GET /api/conferences
+app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
 
-    // ⚡ Lấy hết bản ghi, chỉ 2 field name + url
-    const cursor = col.find({}, { projection: { name: 1, url: 1 } });
+    // chỉ lấy 2 field
+    const projection = { _id: 0, name: 1, url: 1 };
 
-    const items = [];
-    await cursor.forEach(item => {
-      items.push({
-        name: item.name || "Không có",
-        url: item.url || "Không có"
-      });
-    });
+    // nếu không có query, stream luôn toàn bộ
+    const cursor = col.find({}, { projection }).sort({ created_time: -1 });
+
+    // chuyển cursor -> array (vẫn ok nếu chỉ 2 field nhẹ)
+    const items = await cursor.toArray();
 
     res.json({ total: items.length, items });
   } catch (err) {
@@ -138,6 +139,7 @@ app.get("/api/conferences", async (_req, res) => {
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
   }
 });
+
 
 app.get("/api/conferences/:id", async (req, res) => {
   try {
