@@ -75,8 +75,13 @@ app.get("/api/health", (_req, res) => {
 // GET /api/journals  (list/search/pagination)
 app.get("/api/journals", async (req, res) => {
   try {
+    const db = await getDb();
+    const colName = process.env.MONGO_JOURNAL_COLLECTION || "journal";
+    const col = db.collection(colName);
+
     const { q, includeVector } = req.query;
     const { limit, skip, page } = getPagination(req);
+
     const filter = buildSearchFilter(q, [
       "title",
       "publisher",
@@ -88,10 +93,10 @@ app.get("/api/journals", async (req, res) => {
       "_key",
       "id_journal",
       "sjr",
-      "sjr_best_quartile"
+      "sjr_best_quartile",
     ]);
 
-    // Exclusion projection (không mix 1 và 0)
+    // Exclusion projection — không mix include + exclude
     const projection = {
       _id: 0,
       _key: 0,
@@ -118,33 +123,54 @@ app.get("/api/journals", async (req, res) => {
       total_docs_3_years: 0,
       total_refs: 0,
       type: 0,
-      ...(includeVector ? {} : { vector: 0 }) // ẩn vector trừ khi includeVector=true
+      // ẩn vector trừ khi explicitly yêu cầu
+      ...(parseBool(includeVector) ? {} : { vector: 0 }),
     };
 
-    const col = await Journals();
-
-    // Build pipeline: optional $match, $sort, $project, then optional $skip/$limit
+    // Build aggregation pipeline
     const pipeline = [];
     if (filter && Object.keys(filter).length) pipeline.push({ $match: filter });
 
-    // sort — nếu created_time có kiểu chuỗi vẫn được phép sort, nhưng index tốt hơn
+    // Sort (có thể lớn — allowDiskUse cần thiết)
     pipeline.push({ $sort: { created_time: -1 } });
 
+    // Project (ẩn các field)
     pipeline.push({ $project: projection });
 
-    // Nếu limit === 0 => trả tất cả (vẫn dùng aggregation để bật allowDiskUse)
+    // pagination nếu có limit
     if (limit && limit > 0) {
       pipeline.push({ $skip: skip });
       pipeline.push({ $limit: limit });
     }
 
-    // Chạy aggregation với allowDiskUse để tránh lỗi sort memory
-    const items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
+    // 1) Try aggregate with allowDiskUse (preferred)
+    let items = [];
+    try {
+      items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
+    } catch (aggErr) {
+      console.warn("Aggregation with allowDiskUse failed, falling back to db.command:", aggErr?.message || aggErr);
 
-    // Tổng số document matching filter (vẫn cần countDocuments)
+      // 2) Fallback: call aggregate via db.command to ensure allowDiskUse reaches server
+      try {
+        const cmd = {
+          aggregate: colName,
+          pipeline,
+          cursor: { batchSize: limit && limit > 0 ? limit : 1000 },
+          allowDiskUse: true,
+        };
+        const cmdRes = await db.command(cmd);
+        items = (cmdRes && cmdRes.cursor && Array.isArray(cmdRes.cursor.firstBatch))
+          ? cmdRes.cursor.firstBatch
+          : [];
+      } catch (cmdErr) {
+        console.error("Fallback db.command aggregate also failed:", cmdErr);
+        throw cmdErr; // will be caught by outer try/catch below
+      }
+    }
+
+    // total count matched (separate call)
     const total = await col.countDocuments(filter);
 
-    // Nếu limit === 0, page trả về 1 cho tương thích cũ
     const respPage = limit && limit > 0 ? page : 1;
     const respLimit = limit && limit > 0 ? limit : total;
 
@@ -159,6 +185,7 @@ app.get("/api/journals", async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
+
 
 
 // GET /api/journals/:id
