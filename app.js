@@ -2,72 +2,37 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import compression from "compression";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
-import { getDb } from "./db.js"; // ✅ dùng db.js thay vì mongoose
-import { encode } from "gpt-tokenizer"; // ✅ thêm để tính token
+import { getDb } from "./db.js"; 
+import { encode } from "gpt-tokenizer";
 
 const app = express();
 const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
 
 // ===== Middleware =====
-app.use(cors()); // ✅ Cho phép mọi origin gọi API
+app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-app.use(compression()); // ✅ nén gzip để trả nhanh hơn
-app.set("etag", false);
-app.set("x-powered-by", false);
 
-// Debug log middleware
 app.use((req, _res, next) => {
-  console.log("📩 Request:", {
-    method: req.method,
-    url: req.url,
-    // body: req.body, // có thể bật khi cần
-  });
+  console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
 
-/* ===================== MongoDB Connect ===================== */
+/* ===================== MongoDB ===================== */
 let db;
 async function getCollection(name) {
-  if (!db) {
-    db = await getDb();
-  }
+  if (!db) db = await getDb();
   return db.collection(name);
 }
+async function Journals() { return getCollection("journal"); }
+async function Conferences() { return getCollection("conference"); }
 
-/* ===================== Collections ===================== */
-async function Journals() {
-  // dùng env nếu có chỉ định tên collection
-  const name = process.env.MONGO_JOURNAL_COLLECTION || "journal";
-  return getCollection(name);
-}
-async function Conferences() {
-  const name = process.env.MONGO_CONFERENCE_COLLECTION || "conference";
-  return getCollection(name);
-}
-
-/* =========== Helpers: query, pagination, projection =========== */
-function parseBool(v) {
-  return String(v).toLowerCase() === "true";
-}
-function getProjection(includeVector) {
-  return includeVector ? {} : { vector: 0 };
-}
-function getPagination(req) {
-  const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit || "0", 10), 0), 500); // 0 = lấy tất cả
-  const skip = limit ? (page - 1) * limit : 0;
-  return { page, limit, skip };
-}
-function buildSearchFilter(q, fields) {
-  if (!q || !q.trim()) return {};
-  const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-  return { $or: fields.map((f) => ({ [f]: regex })) };
-}
+/* ===================== Helpers ===================== */
+function parseBool(v) { return String(v).toLowerCase() === "true"; }
+function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
 /* ===================== HEALTH ===================== */
 app.get("/api/health", (_req, res) => {
@@ -79,55 +44,29 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* ===================== JOURNALS CRUD ===================== */
-/**
- * Yêu cầu:
- *  - Luôn load TẤT CẢ bản ghi
- *  - Trả nhanh: chỉ field nhẹ + sort theo _id (index mặc định) + batchSize lớn + gzip
- *  - Tổng bản ghi: dùng countDocuments({}, { hint: "_id_" }) để ra đúng số lượng thực tế
- *  - Giữ nguyên format trả về như trước (name, quartiles, publisher)
- */
 app.get("/api/journals", async (_req, res) => {
   try {
     const col = await Journals();
 
-    // projection chỉ field nhẹ, bỏ _id để payload nhỏ
-    const projection = { _id: 0, title: 1, categories: 1, publisher: 1, url: 1 };
+    // ⚡ Lấy hết bản ghi (31,120), chỉ chọn field cần
+    const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } }).batchSize(1000);
 
-    // sort theo _id để dùng index mặc định (nhanh hơn sort created_time nếu chưa có index)
-    const cursor = col.find({}, { projection }).sort({ _id: 1 }).batchSize(2000);
-
-    const itemsRaw = await cursor.toArray();
-
-    const items = itemsRaw.map((item) => ({
-      name: item?.title ?? null,
-      quartiles: item?.categories ?? null,
-      publisher: item?.publisher ?? null,
-      url: item?.url ?? null,
-    }));
-
-    // Đếm CHÍNH XÁC (không ước lượng)
-    let total = items.length;
-    try {
-      total = await col.countDocuments({}, { hint: "_id_" });
-    } catch (_) {
-      // nếu hint không có (rất hiếm), fallback length để không lỗi
-      total = items.length;
-    }
-
-    res.setHeader("X-Total-Count", String(total));
-    return res.json({
-      total,
-      items,
+    const items = [];
+    await cursor.forEach(item => {
+      items.push({
+        name: item.title,
+        quartiles: item.categories,
+        publisher: item.publisher
+      });
     });
+
+    res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/journals error:", err);
-    return res
-      .status(500)
-      .json({ error: "Failed to fetch journals", detail: err.message });
+    res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
 
-// GET /api/journals/:id
 app.get("/api/journals/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
@@ -141,7 +80,6 @@ app.get("/api/journals/:id", async (req, res) => {
   }
 });
 
-// POST /api/journals
 app.post("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -152,15 +90,12 @@ app.post("/api/journals", async (req, res) => {
   }
 });
 
-// PUT /api/journals/:id
 app.put("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
     const col = await Journals();
     const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
+      { _id: new ObjectId(req.params.id) }, { $set: req.body }, { returnDocument: "after" }
     );
     if (!result.value) return res.status(404).json({ error: "Journal not found" });
     res.json(result.value);
@@ -169,7 +104,6 @@ app.put("/api/journals/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/journals/:id
 app.delete("/api/journals/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -183,36 +117,25 @@ app.delete("/api/journals/:id", async (req, res) => {
 });
 
 /* ===================== CONFERENCES CRUD ===================== */
-/**
- * Yêu cầu:
- *  - Luôn load TẤT CẢ bản ghi
- *  - Trả về đúng 2 trường name + url (đã có sẵn trong DB)
- *  - Tối ưu tốc độ tương tự journals
- */
 app.get("/api/conferences", async (_req, res) => {
   try {
     const col = await Conferences();
 
-    const projection = { _id: 0, name: 1, url: 1 };
-    const cursor = col.find({}, { projection }).sort({ _id: 1 }).batchSize(2000);
-    const items = await cursor.toArray();
+    // ⚡ Lấy hết bản ghi (1,780), chỉ chọn field cần
+    const cursor = col.find({}, { projection: { _id: 0, name: 1, url: 1 } })
+                      .sort({ created_time: -1 })
+                      .batchSize(500);
 
-    let total = items.length;
-    try {
-      total = await col.countDocuments({}, { hint: "_id_" });
-    } catch (_) {
-      total = items.length;
-    }
+    const items = [];
+    await cursor.forEach(item => items.push(item));
 
-    res.setHeader("X-Total-Count", String(total));
-    res.json({ total, items });
+    res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
   }
 });
 
-// GET /api/conferences/:id
 app.get("/api/conferences/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
@@ -226,7 +149,6 @@ app.get("/api/conferences/:id", async (req, res) => {
   }
 });
 
-// POST /api/conferences
 app.post("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -237,15 +159,12 @@ app.post("/api/conferences", async (req, res) => {
   }
 });
 
-// PUT /api/conferences/:id
 app.put("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
     const col = await Conferences();
     const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
+      { _id: new ObjectId(req.params.id) }, { $set: req.body }, { returnDocument: "after" }
     );
     if (!result.value) return res.status(404).json({ error: "Conference not found" });
     res.json(result.value);
@@ -254,7 +173,6 @@ app.put("/api/conferences/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/conferences/:id
 app.delete("/api/conferences/:id", async (req, res) => {
   try {
     const { ObjectId } = await import("mongodb");
@@ -267,7 +185,8 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-/* ===================== API ngoài để fallback ===================== */
+
+/* ===================== API ngoài + Agent ===================== */
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
@@ -277,6 +196,7 @@ async function fetchArticles() {
     return [];
   }
 }
+
 
 /* ===================== Chuẩn hóa context ===================== */
 function buildPrompt(question, conferences = [], journals = []) {
@@ -354,9 +274,7 @@ app.post("/api/agent", async (req, res) => {
 
     // Tính token
     const prompt_tokens = encode(prompt).length;
-    const answer_tokens = encode(
-      typeof answer === "string" ? answer : JSON.stringify(answer)
-    ).length;
+    const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
     const tokens_used = prompt_tokens + answer_tokens;
 
     // base log
@@ -417,9 +335,10 @@ app.post("/api/agent", async (req, res) => {
         response_time_ms,
         tokens_used,
         prompt_tokens,
-        answer_tokens,
-      },
+        answer_tokens
+      }
     });
+
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -429,21 +348,7 @@ app.post("/api/agent", async (req, res) => {
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`➡️ API listening on http://localhost:${PORT}`);
-    // tạo index gợi ý (không bắt buộc; nếu đã có thì Mongo sẽ bỏ qua)
-    try {
-      const _db = await getDb();
-      const jCol = _db.collection(process.env.MONGO_JOURNAL_COLLECTION || "journal");
-      const cCol = _db.collection(process.env.MONGO_CONFERENCE_COLLECTION || "conference");
-      // index mặc định _id đã có; thêm created_time nếu bạn hay sort theo field này
-      jCol.createIndex({ created_time: -1 }).catch(() => {});
-      cCol.createIndex({ created_time: -1 }).catch(() => {});
-    } catch (e) {
-      console.warn("⚠️ ensure indexes warning:", e?.message || e);
-    }
-
-    initEmbedding().catch((e) =>
-      console.error("Embedding preload failed:", e.message)
-    );
+    initEmbedding().catch(e => console.error("Embedding preload failed:", e.message));
   });
 }
 
