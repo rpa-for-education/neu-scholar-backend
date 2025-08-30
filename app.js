@@ -118,6 +118,7 @@ app.get("/api/journals", async (req, res) => {
       sjr: 0,
       sjr_best_quartile: 0,
       sourceid: 0,
+      publisher: 0,
       total_citations_3_years: 0,
       total_docs_2024: 0,
       total_docs_3_years: 0,
