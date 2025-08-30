@@ -58,7 +58,7 @@ function getPagination(req) {
 }
 function buildSearchFilter(q, fields) {
   if (!q || !q.trim()) return {};
-  const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\\]\\]/g, "\\$&"), "i");
   return { $or: fields.map(f => ({ [f]: regex })) };
 }
 
@@ -74,49 +74,46 @@ app.get("/api/health", (_req, res) => {
 /* ===================== JOURNALS CRUD ===================== */
 app.get("/api/journals", async (req, res) => {
   try {
-    const db = await getDb();
-    const colName = process.env.MONGO_JOURNAL_COLLECTION || "journal";
-    const col = db.collection(colName);
-
+    const col = await Journals();
     const { q } = req.query;
     const { limit, skip, page } = getPagination(req);
+    const safeLimit = limit || 50; // ✅ limit mặc định
 
-    const filter = buildSearchFilter(q, [
-      "title",
-      "categories",
-      "publisher",
-      "_key",
-      "id_journal",
-    ]);
-
-    // Build aggregation pipeline
-    const pipeline = [];
-    if (filter && Object.keys(filter).length) pipeline.push({ $match: filter });
-
-    pipeline.push({ $sort: { created_time: -1 } });
-
-    if (limit && limit > 0) {
-      pipeline.push({ $skip: skip });
-      pipeline.push({ $limit: limit });
+    // filter: ưu tiên text search nếu có index
+    let filter = {};
+    if (q?.trim()) {
+      filter = { $text: { $search: q.trim() } };
     }
 
-    let items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
+    const pipeline = [];
+    if (Object.keys(filter).length) pipeline.push({ $match: filter });
+    pipeline.push({ $sort: { created_time: -1 } });
 
-    const total = await col.countDocuments(filter);
-    const respPage = limit && limit > 0 ? page : 1;
-    const respLimit = limit && limit > 0 ? limit : total;
+    pipeline.push({
+      $facet: {
+        items: [
+          { $skip: skip },
+          { $limit: safeLimit },
+          {
+            $project: {
+              name: "$title",
+              quartiles: "$categories",
+              publisher: 1
+            }
+          }
+        ],
+        total: [{ $count: "count" }]
+      }
+    });
 
-    // Chỉ giữ lại 3 trường và đổi tên
-    items = items.map(item => ({
-      name: item.title,
-      quartiles: item.categories,
-      publisher: item.publisher
-    }));
+    const result = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
+    const { items, total } = result[0];
+    const totalCount = total.length ? total[0].count : 0;
 
     return res.json({
-      page: respPage,
-      limit: respLimit,
-      total,
+      page,
+      limit: safeLimit,
+      total: totalCount,
       items,
     });
   } catch (err) {
@@ -124,7 +121,6 @@ app.get("/api/journals", async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
-
 
 // GET /api/journals/:id
 app.get("/api/journals/:id", async (req, res) => {
@@ -182,7 +178,6 @@ app.delete("/api/journals/:id", async (req, res) => {
 });
 
 /* ===================== CONFERENCES CRUD ===================== */
-// GET /api/conferences  (list/search/pagination)
 app.get("/api/conferences", async (req, res) => {
   try {
     const { q, includeVector } = req.query;
@@ -196,43 +191,42 @@ app.get("/api/conferences", async (req, res) => {
       location: 0,
       modified_time: 0,
       topics: 0,
-      ...(includeVector ? {} : { vector: 0 }) // nếu không cần vector thì ẩn luôn
+      ...(includeVector ? {} : { vector: 0 })
     };
 
     const { limit, skip, page } = getPagination(req);
+    const safeLimit = limit || 50;
 
-    const filter = buildSearchFilter(q, [
-      "name",
-      "title",
-      "acronym",
-      "location",
-      "topics",
-      "url",
-      "_key",
-      "id_conference",
-      "deadline",
-      "start_date"
-    ]);
-
-    const col = await Conferences();
-
-    if (!limit) {
-      const data = await col.find(filter, { projection }).sort({ created_time: -1 }).toArray();
-      return res.json({ page: 1, total: data.length, items: data });
+    let filter = {};
+    if (q?.trim()) {
+      filter = { $text: { $search: q.trim() } };
     }
 
-    const cursor = col.find(filter, { projection }).sort({ created_time: -1 }).skip(skip).limit(limit);
-    const [items, total] = await Promise.all([
-      cursor.toArray(),
-      col.countDocuments(filter)
-    ]);
+    const pipeline = [];
+    if (Object.keys(filter).length) pipeline.push({ $match: filter });
+    pipeline.push({ $sort: { created_time: -1 } });
 
-    res.json({ page, limit, total, items });
+    pipeline.push({
+      $facet: {
+        items: [
+          { $skip: skip },
+          { $limit: safeLimit },
+          { $project: projection }
+        ],
+        total: [{ $count: "count" }]
+      }
+    });
+
+    const col = await Conferences();
+    const result = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
+    const { items, total } = result[0];
+    const totalCount = total.length ? total[0].count : 0;
+
+    res.json({ page, limit: safeLimit, total: totalCount, items });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
   }
 });
-
 
 // GET /api/conferences/:id
 app.get("/api/conferences/:id", async (req, res) => {
