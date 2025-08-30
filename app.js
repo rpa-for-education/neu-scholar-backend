@@ -76,6 +76,22 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/journals", async (req, res) => {
   try {
     const { q, includeVector } = req.query;
+    const { limit, skip, page } = getPagination(req);
+    const filter = buildSearchFilter(q, [
+      "title",
+      "publisher",
+      "areas",
+      "categories",
+      "country",
+      "region",
+      "issn",
+      "_key",
+      "id_journal",
+      "sjr",
+      "sjr_best_quartile"
+    ]);
+
+    // Exclusion projection (không mix 1 và 0)
     const projection = {
       _id: 0,
       _key: 0,
@@ -102,44 +118,47 @@ app.get("/api/journals", async (req, res) => {
       total_docs_3_years: 0,
       total_refs: 0,
       type: 0,
-      ...(includeVector ? {} : { vector: 0 }) // nếu không cần vector thì ẩn luôn
+      ...(includeVector ? {} : { vector: 0 }) // ẩn vector trừ khi includeVector=true
     };
-
-    const { limit, skip, page } = getPagination(req);
-
-    const filter = buildSearchFilter(q, [
-      "title",
-      "publisher",
-      "areas",
-      "categories",
-      "country",
-      "region",
-      "issn",
-      "_key",
-      "id_journal",
-      "sjr",
-      "sjr_best_quartile"
-    ]);
 
     const col = await Journals();
 
-    if (!limit) {
-      const data = await col.find(filter, { projection }).sort({ created_time: -1 }).toArray();
-      return res.json({ page: 1, total: data.length, items: data });
+    // Build pipeline: optional $match, $sort, $project, then optional $skip/$limit
+    const pipeline = [];
+    if (filter && Object.keys(filter).length) pipeline.push({ $match: filter });
+
+    // sort — nếu created_time có kiểu chuỗi vẫn được phép sort, nhưng index tốt hơn
+    pipeline.push({ $sort: { created_time: -1 } });
+
+    pipeline.push({ $project: projection });
+
+    // Nếu limit === 0 => trả tất cả (vẫn dùng aggregation để bật allowDiskUse)
+    if (limit && limit > 0) {
+      pipeline.push({ $skip: skip });
+      pipeline.push({ $limit: limit });
     }
 
-    const cursor = col.find(filter, { projection }).sort({ created_time: -1 }).skip(skip).limit(limit);
-    const [items, total] = await Promise.all([
-      cursor.toArray(),
-      col.countDocuments(filter)
-    ]);
+    // Chạy aggregation với allowDiskUse để tránh lỗi sort memory
+    const items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
 
-    res.json({ page, limit, total, items });
+    // Tổng số document matching filter (vẫn cần countDocuments)
+    const total = await col.countDocuments(filter);
+
+    // Nếu limit === 0, page trả về 1 cho tương thích cũ
+    const respPage = limit && limit > 0 ? page : 1;
+    const respLimit = limit && limit > 0 ? limit : total;
+
+    return res.json({
+      page: respPage,
+      limit: respLimit,
+      total,
+      items,
+    });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
+    console.error("❌ /api/journals error:", err);
+    return res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
-
 
 
 // GET /api/journals/:id
