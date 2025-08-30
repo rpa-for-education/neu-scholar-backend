@@ -252,6 +252,7 @@ app.get("/api/conferences", async (req, res) => {
     const projection = {
       _id: 0,
       _key: 0,
+      name: 0,
       acronym: 0,
       created_time: 0,
       deadline: 0,
