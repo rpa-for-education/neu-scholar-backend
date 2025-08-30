@@ -15,7 +15,7 @@ const API_JOURNAL = process.env.API_JOURNAL || "https://api.rpa4edu.shop/api_jou
 
 const client = new MongoClient(MONGODB_URI);
 
-// ===== Embedding helper (768 chiều với MiniLM-L12-v2) =====
+// ===== Embedding helper (768 chiều với Xenova/paraphrase-multilingual-mpnet-base-v2) =====
 let embedder = null;
 async function initEmbedder() {
   if (!embedder) {
