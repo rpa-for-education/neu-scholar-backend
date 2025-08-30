@@ -308,7 +308,7 @@ function buildPrompt(question, conferences = [], journals = []) {
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
-    const { question, model_id = DEFAULT_MODEL_ID, topk = 10 } = req.body || {};
+    const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body || {};
     if (!question?.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
