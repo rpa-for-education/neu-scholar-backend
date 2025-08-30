@@ -77,46 +77,33 @@ app.get("/api/journals", async (req, res) => {
   try {
     const { q, includeVector } = req.query;
     const projection = {
-      // cho phép hiển thị các field bạn cần
-      title: 1,
-      publisher: 1,
-      areas: 1,
-      categories: 1,
-      // ví dụ: hiển thị hết mọi thứ trừ các field bạn muốn ẩn
+      _id: 0,
+      _key: 0,
+      citable_docs_2_years: 0,
+      citable_docs_3_years: 0,
+      country: 0,
+      coverage: 0,
+      created_time: 0,
+      female: 0,
+      h_index: 0,
+      id_journal: 0,
+      issn: 0,
+      modified_time: 0,
+      overton: 0,
+      rank: 0,
+      ref_doc: 0,
+      region: 0,
+      sdg: 0,
+      sjr: 0,
+      sjr_best_quartile: 0,
+      sourceid: 0,
+      total_citations_3_years: 0,
+      total_docs_2024: 0,
+      total_docs_3_years: 0,
+      total_refs: 0,
+      type: 0,
+      ...(includeVector ? {} : { vector: 0 }) // nếu không cần vector thì ẩn luôn
     };
-
-    // Ẩn các trường không muốn hiển thị
-    const hiddenFields = [
-      "_id",
-      "_key",
-      "citable_docs_2_years",
-      "citable_docs_3_years",
-      "country",
-      "coverage",
-      "created_time",
-      "female",
-      "h_index",
-      "id_journal",
-      "issn",
-      "modified_time",
-      "overton",
-      "rank",
-      "ref_doc",
-      "region",
-      "sdg",
-      "sjr",
-      "sjr_best_quartile",
-      "sourceid",
-      "total_citations_3_years",
-      "total_docs_2024",
-      "total_docs_3_years",
-      "total_refs",
-      "type"
-    ];
-
-    hiddenFields.forEach(field => {
-      projection[field] = 0; // 0 nghĩa là không lấy field đó
-    });
 
     const { limit, skip, page } = getPagination(req);
 
@@ -142,12 +129,17 @@ app.get("/api/journals", async (req, res) => {
     }
 
     const cursor = col.find(filter, { projection }).sort({ created_time: -1 }).skip(skip).limit(limit);
-    const [items, total] = await Promise.all([cursor.toArray(), col.countDocuments(filter)]);
+    const [items, total] = await Promise.all([
+      cursor.toArray(),
+      col.countDocuments(filter)
+    ]);
+
     res.json({ page, limit, total, items });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
+
 
 
 // GET /api/journals/:id
