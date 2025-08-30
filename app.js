@@ -72,108 +72,46 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* ===================== JOURNALS CRUD ===================== */
-// GET /api/journals  (list/search/pagination)
 app.get("/api/journals", async (req, res) => {
   try {
     const db = await getDb();
     const colName = process.env.MONGO_JOURNAL_COLLECTION || "journal";
     const col = db.collection(colName);
 
-    const { q, includeVector } = req.query;
+    const { q } = req.query;
     const { limit, skip, page } = getPagination(req);
 
     const filter = buildSearchFilter(q, [
       "title",
-      "publisher",
-      "areas",
       "categories",
-      "country",
-      "region",
-      "issn",
+      "publisher",
       "_key",
       "id_journal",
-      "sjr",
-      "sjr_best_quartile",
     ]);
-
-    // Exclusion projection — không mix include + exclude
-    const projection = {
-      _id: 0,
-      _key: 0,
-      citable_docs_2_years: 0,
-      citable_docs_3_years: 0,
-      country: 0,
-      coverage: 0,
-      created_time: 0,
-      female: 0,
-      h_index: 0,
-      id_journal: 0,
-      issn: 0,
-      modified_time: 0,
-      overton: 0,
-      rank: 0,
-      ref_doc: 0,
-      region: 0,
-      sdg: 0,
-      sjr: 0,
-      sjr_best_quartile: 0,
-      sourceid: 0,
-      publisher: 0,
-      total_citations_3_years: 0,
-      total_docs_2024: 0,
-      total_docs_3_years: 0,
-      total_refs: 0,
-      type: 0,
-      // ẩn vector trừ khi explicitly yêu cầu
-      ...(parseBool(includeVector) ? {} : { vector: 0 }),
-    };
 
     // Build aggregation pipeline
     const pipeline = [];
     if (filter && Object.keys(filter).length) pipeline.push({ $match: filter });
 
-    // Sort (có thể lớn — allowDiskUse cần thiết)
     pipeline.push({ $sort: { created_time: -1 } });
 
-    // Project (ẩn các field)
-    pipeline.push({ $project: projection });
-
-    // pagination nếu có limit
     if (limit && limit > 0) {
       pipeline.push({ $skip: skip });
       pipeline.push({ $limit: limit });
     }
 
-    // 1) Try aggregate with allowDiskUse (preferred)
-    let items = [];
-    try {
-      items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
-    } catch (aggErr) {
-      console.warn("Aggregation with allowDiskUse failed, falling back to db.command:", aggErr?.message || aggErr);
+    let items = await col.aggregate(pipeline, { allowDiskUse: true }).toArray();
 
-      // 2) Fallback: call aggregate via db.command to ensure allowDiskUse reaches server
-      try {
-        const cmd = {
-          aggregate: colName,
-          pipeline,
-          cursor: { batchSize: limit && limit > 0 ? limit : 1000 },
-          allowDiskUse: true,
-        };
-        const cmdRes = await db.command(cmd);
-        items = (cmdRes && cmdRes.cursor && Array.isArray(cmdRes.cursor.firstBatch))
-          ? cmdRes.cursor.firstBatch
-          : [];
-      } catch (cmdErr) {
-        console.error("Fallback db.command aggregate also failed:", cmdErr);
-        throw cmdErr; // will be caught by outer try/catch below
-      }
-    }
-
-    // total count matched (separate call)
     const total = await col.countDocuments(filter);
-
     const respPage = limit && limit > 0 ? page : 1;
     const respLimit = limit && limit > 0 ? limit : total;
+
+    // Chỉ giữ lại 3 trường và đổi tên
+    items = items.map(item => ({
+      name: item.title,
+      quartiles: item.categories,
+      publisher: item.publisher
+    }));
 
     return res.json({
       page: respPage,
@@ -186,7 +124,6 @@ app.get("/api/journals", async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
   }
 });
-
 
 
 // GET /api/journals/:id
