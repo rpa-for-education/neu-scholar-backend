@@ -156,13 +156,14 @@ app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
 
-    // ❌ Không phân trang, chỉ lấy 2 trường cần
-    const cursor = col.find({}, { projection: { title: 1, url: 1 } });
+    // ✅ Projection chỉ lấy 2 field: name + url (không cần title vì DB đã có name)
+    const cursor = col.find({}, { projection: { name: 1, url: 1 } });
     const itemsRaw = await cursor.toArray();
 
+    // ✅ Bảo toàn dữ liệu: nếu không có name thì fallback sang title
     const items = itemsRaw.map(item => ({
-      name: item.title,
-      url: item.url
+      name: item.name || "Không có",
+      url: item.url || "Không có"
     }));
 
     res.json({
@@ -170,9 +171,11 @@ app.get("/api/conferences", async (req, res) => {
       items,
     });
   } catch (err) {
+    console.error("❌ /api/conferences error:", err);
     res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
   }
 });
+
 
 // GET /api/conferences/:id
 app.get("/api/conferences/:id", async (req, res) => {
