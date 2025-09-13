@@ -11,6 +11,8 @@ import { encode } from "gpt-tokenizer";
 const app = express();
 const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
+const DEFAULT_LIMIT_JOURNAL = 100;     // 👈 Số bản ghi Journal mặc định
+const DEFAULT_LIMIT_CONFERENCE = 100; // 👈 Số bản ghi Conference mặc định
 
 // ===== Middleware =====
 app.use(cors());
@@ -48,8 +50,10 @@ app.get("/api/journals", async (_req, res) => {
   try {
     const col = await Journals();
 
-    // ⚡ Lấy hết bản ghi (31,120), chỉ chọn field cần
-    const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } }).batchSize(1000);
+    // ⚡ Lấy bản ghi, chỉ chọn field cần
+    const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } })
+                      .limit(DEFAULT_LIMIT_JOURNAL) // 👈 Giới hạn bản ghi Journal
+                      .batchSize(1000);
 
     const items = [];
     await cursor.forEach(item => {
@@ -121,9 +125,10 @@ app.get("/api/conferences", async (_req, res) => {
   try {
     const col = await Conferences();
 
-    // ⚡ Lấy hết bản ghi (1,780), chỉ chọn field cần
+    // ⚡ Lấy bản ghi, chỉ chọn field cần
     const cursor = col.find({}, { projection: { _id: 0, name: 1, url: 1 } })
                       .sort({ created_time: -1 })
+                      .limit(DEFAULT_LIMIT_CONFERENCE) // 👈 Giới hạn bản ghi Conference
                       .batchSize(500);
 
     const items = [];
