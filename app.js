@@ -1,27 +1,48 @@
-// app.js
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import session from "express-session";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; 
 import { encode } from "gpt-tokenizer";
+import { addToMemory, getMemory } from "./memory.js";
 
 const app = express();
 const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
-const DEFAULT_LIMIT_JOURNAL = 100;     // 👈 Số bản ghi Journal mặc định
-const DEFAULT_LIMIT_CONFERENCE = 100; // 👈 Số bản ghi Conference mặc định
+const DEFAULT_LIMIT_JOURNAL = 100;
+const DEFAULT_LIMIT_CONFERENCE = 100;
+const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất
 
 // ===== Middleware =====
 app.use(cors());
+app.use(session({
+  secret: process.env.SESSION_SECRET || "fitneu2025",
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false }
+}));
 app.use(express.json({ limit: "10mb" }));
 
 app.use((req, _res, next) => {
   console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
+
+/* ===================== Helpers ===================== */
+// Hàm format text trả lời cho đẹp và dễ đọc
+function formatAnswerText(rawText) {
+  if (!rawText) return "";
+  let text = rawText.replace(/\*\*/g, "");
+  text = text.replace(/(\d+)\.\s+/g, "\n- ");
+  text = text.replace(/\n+/g, "\n\n");
+  return text.trim();
+}
+
+function parseBool(v) { return String(v).toLowerCase() === "true"; }
+function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
 /* ===================== MongoDB ===================== */
 let db;
@@ -31,10 +52,6 @@ async function getCollection(name) {
 }
 async function Journals() { return getCollection("journal"); }
 async function Conferences() { return getCollection("conference"); }
-
-/* ===================== Helpers ===================== */
-function parseBool(v) { return String(v).toLowerCase() === "true"; }
-function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
 /* ===================== HEALTH ===================== */
 app.get("/api/health", (_req, res) => {
@@ -46,13 +63,12 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* ===================== JOURNALS CRUD ===================== */
-app.get("/api/journals", async (_req, res) => {
+app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
 
-    // ⚡ Lấy bản ghi, chỉ chọn field cần
     const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } })
-                      .limit(DEFAULT_LIMIT_JOURNAL) // 👈 Giới hạn bản ghi Journal
+                      .limit(DEFAULT_LIMIT_JOURNAL)
                       .batchSize(1000);
 
     const items = [];
@@ -121,14 +137,13 @@ app.delete("/api/journals/:id", async (req, res) => {
 });
 
 /* ===================== CONFERENCES CRUD ===================== */
-app.get("/api/conferences", async (_req, res) => {
+app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
 
-    // ⚡ Lấy bản ghi, chỉ chọn field cần
     const cursor = col.find({}, { projection: { _id: 0, name: 1, url: 1 } })
                       .sort({ created_time: -1 })
-                      .limit(DEFAULT_LIMIT_CONFERENCE) // 👈 Giới hạn bản ghi Conference
+                      .limit(DEFAULT_LIMIT_CONFERENCE)
                       .batchSize(500);
 
     const items = [];
@@ -190,7 +205,6 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-
 /* ===================== API ngoài + Agent ===================== */
 async function fetchArticles() {
   try {
@@ -201,7 +215,6 @@ async function fetchArticles() {
     return [];
   }
 }
-
 
 /* ===================== Chuẩn hóa context ===================== */
 function buildPrompt(question, conferences = [], journals = []) {
@@ -242,7 +255,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
-/* ===================== Agent API ===================== */
+/* ===================== Agent API (short-term memory) ===================== */
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
@@ -270,19 +283,49 @@ app.post("/api/agent", async (req, res) => {
       conferences = articles.slice(0, topk);
     }
 
+    const sid = req.sessionID;
+
+    let memoryEntries = [];
+    try {
+      memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
+    } catch (e) {
+      console.warn("⚠️ getMemory failed:", e);
+      memoryEntries = [];
+    }
+
+    let memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
+
     const prompt = buildPrompt(question, conferences, journals);
-    const answer = await callLLM(prompt, model_id);
+
+    const finalPrompt = `
+Ngữ cảnh hội thoại gần đây:
+${memoryText}
+
+${prompt}
+`;
+
+    let answer = await callLLM(finalPrompt, model_id);
+
+    // Format answer cho dễ đọc
+    if (typeof answer === "string") {
+      answer = formatAnswerText(answer);
+    }
+
+    try {
+      await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
+      await addToMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
+    } catch (e) {
+      console.warn("⚠️ addToMemory failed:", e);
+    }
 
     const response_time_ms = Date.now() - start;
     const asked_at = new Date().toISOString();
     const answered_at = new Date().toISOString();
 
-    // Tính token
-    const prompt_tokens = encode(prompt).length;
+    const prompt_tokens = encode(finalPrompt).length;
     const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
     const tokens_used = prompt_tokens + answer_tokens;
 
-    // base log
     const logBase = {
       question,
       asked_at,
@@ -295,7 +338,6 @@ app.post("/api/agent", async (req, res) => {
       topk: Number(topk),
     };
 
-    // 🎯 Quyết định type và score
     const score_conf = conferences?.length || 0;
     const score_jour = journals?.length || 0;
 
@@ -312,7 +354,6 @@ app.post("/api/agent", async (req, res) => {
       hits = { conferences, journals };
     }
 
-    // 📝 Ghi log vào chatlogs
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -331,11 +372,11 @@ app.post("/api/agent", async (req, res) => {
       console.error("❌ Lỗi ghi log:", err.message);
     }
 
-    // 📤 Trả về client (GIỮ NGUYÊN)
     res.json({
       model_id,
       answer,
       retrieved: { conference: conferences, journal: journals },
+      memory: { entries_count: memoryEntries.length },
       meta: {
         response_time_ms,
         tokens_used,
