@@ -14,7 +14,7 @@ const PORT = 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
-const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất
+const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất 
 
 // ===== Middleware =====
 app.use(cors());
