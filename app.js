@@ -248,6 +248,7 @@ function buildPrompt(question, conferences = [], journals = []) {
 
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
+
   try {
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body;
 
@@ -281,17 +282,16 @@ app.post("/api/agent", async (req, res) => {
 
     const sid = req.sessionID;
 
-    // Nếu có chat_history, lấy short-term memory từ đây
+    // Lấy short-term memory từ chat_history nếu có, không dùng DB lưu bộ nhớ
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
       memoryEntries = req.body.chat_history
-        .slice(-2 * DEFAULT_SHORT_MEMORY_SIZE) // lấy 2 lần dài hơn cho phòng trường hợp
-        .map(entry => ({ role: entry.role || "user", text: entry.content || "" }))
-        .filter(m => typeof m.text === "string" && m.text.trim().length > 0);
+        .slice(-2 * DEFAULT_SHORT_MEMORY)  // lấy gấp đôi short memory
+        .map((entry) => ({ role: entry.role || "user", text: entry.content || "" }))
+        .filter((m) => m.text && m.text.trim().length > 0);
     } else {
-      // Không có chat_history trong request thì lấy từ DB
       try {
-        memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
+        memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY);
       } catch (e) {
         console.warn("getMemory error:", e);
       }
@@ -300,9 +300,11 @@ app.post("/api/agent", async (req, res) => {
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
 
     const contextPrompt = buildPrompt(question, conferences, journals);
+
     const finalPrompt = `
-Ngữ cảnh hội thoại gần đây:
+Ngữ cảnh trò chuyện gần đây:
 ${memoryText}
+
 
 ${contextPrompt}
 `;
@@ -311,7 +313,6 @@ ${contextPrompt}
     console.log(finalPrompt);
 
     let answer;
-
     try {
       answer = await callLLM(finalPrompt, model_id);
     } catch (e) {
@@ -328,30 +329,10 @@ ${contextPrompt}
     }
     answer = answer.trim();
 
-/*     // Chỉ lưu vào DB khi không có chat_history để tránh duplicating
-    if (!Array.isArray(req.body.chat_history)) {
-      try {
-        if (question.trim()) {
-          await addMemory(sid, "user", question.trim());
-        }
-        if (answer.length > 0) {
-          await addMemory(sid, "assistant", answer);
-        }
-      } catch (e) {
-        console.warn("addMemory failed:", e);
-      }
-    } */
+    // Không lưu câu hỏi và câu trả lời vào bộ nhớ để tránh lỗi MongoDB
+    // Nếu bạn muốn bật, tự kiểm tra trước khi sử dụng addMemory
 
-    const responseTime = Date.now() - start;
-    const tokenCount = (() => {
-      try {
-        return encode(finalPrompt).length + encode(answer).length;
-      } catch {
-        return null;
-      }
-    })();
-
-    // Lưu log câu hỏi, câu trả lời
+    // Ghi log cuộc hội thoại
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -359,29 +340,27 @@ ${contextPrompt}
         answer,
         sessionId: sid,
         model_id,
-        responseTime,
-        tokenCount,
-        createdAt: new Date()
+        createdAt: new Date(),
+        responseTimeMs: Date.now() - start,
       });
     } catch (e) {
       console.error("Log insert error:", e);
     }
 
+    // Trả về câu trả lời cùng thông tin metadata
     return res.json({
       model_id,
       answer,
       retrieved: { conferences, journals },
       memoryCount: memoryEntries.length,
-      responseTime,
-      tokenCount
+      responseTimeMs: Date.now() - start,
     });
 
-  } catch (error) {
-    console.error("Unhandled error:", error);
+  } catch (err) {
+    console.error("Unhandled error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 
 if (!process.env.VERCEL) {
