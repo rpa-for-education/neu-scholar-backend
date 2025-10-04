@@ -14,7 +14,7 @@ import { encode } from "gpt-tokenizer";
 import { getDb } from "./db.js";
 import { fundVectorSearch, initEmbedding, embedText } from "./search.js";
 import { readDocxFromUrl } from "./search.js";
-import { addToMemory, getMemory } from "./memory.js";
+import { addMemory, getMemory } from "./memory.js";
 import { s3Client } from "./s3.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 
