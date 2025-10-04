@@ -1,3 +1,5 @@
+// Memory.js file content below ( bạn copy vào memory.js):
+
 import { getDb } from "./db.js";
 
 const DEFAULT_COLLECTION = process.env.SESSION_COLLECTION || "sessions";
@@ -13,10 +15,8 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
   const db = await getDb();
   const col = db.collection(DEFAULT_COLLECTION);
 
-  // Kiểm tra document hiện tại
   const doc = await col.findOne({ sessionId: sid });
   if (doc && !Array.isArray(doc.entries)) {
-    // Chuẩn hóa trường entries thành mảng nếu cần
     await col.updateOne({ sessionId: sid }, [{ $set: { entries: { $cond: [{ $isArray: "$entries" }, "$entries", []] } } }]);
   }
 
@@ -25,12 +25,7 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
     { sessionId: sid },
     {
       $setOnInsert: { sessionId: sid, createdAt: new Date() },
-      $push: {
-        entries: {
-          $each: [entry],
-          $slice: -maxEntries
-        }
-      }
+      $push: { entries: { $each: [entry], $slice: -maxEntries } }
     },
     { upsert: true }
   );
@@ -41,7 +36,6 @@ export async function getMemory(sessionId, limit = DEFAULT_MAX) {
   if (!sid) return [];
   const db = await getDb();
   const col = db.collection(DEFAULT_COLLECTION);
-
   const doc = await col.findOne({ sessionId: sid }, { projection: { entries: 1 } });
   if (!doc?.entries) return [];
   return Array.isArray(doc.entries) ? doc.entries.slice(-limit) : [];

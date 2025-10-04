@@ -7,7 +7,7 @@ import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; 
 import { encode } from "gpt-tokenizer";
-import { addToMemory, getMemory } from "./memory.js";
+import { addMemory, getMemory } from "./memory.js";
 
 const app = express();
 const PORT = 4000;
@@ -31,7 +31,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Hàm format text trả lời cho rõ ràng, dễ đọc hơn
+// Format trả lời
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -41,10 +41,7 @@ function formatAnswerText(rawText) {
 }
 
 function parseBool(v) { return String(v).toLowerCase() === "true"; }
-
-function getProjection(includeVector) {
-  return includeVector ? {} : { vector: 0 };
-}
+function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
 // MongoDB helpers
 let db;
@@ -59,7 +56,7 @@ async function Conferences() {
   return getCollection("conference");
 }
 
-// Health check endpoint
+// Health
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -68,7 +65,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Journals CRUD operations remain unchanged
+// Journals CRUD
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -139,7 +136,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-// Conferences CRUD operations remain unchanged
+// Conferences CRUD
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -207,6 +204,7 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
+
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
@@ -217,9 +215,11 @@ async function fetchArticles() {
   }
 }
 
+
 function buildPrompt(question, conferences = [], journals = []) {
   let context =
     "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
+
 
   if (conferences.length) {
     context += "Danh sách hội thảo:\n";
@@ -230,6 +230,7 @@ function buildPrompt(question, conferences = [], journals = []) {
     context += "Không có hội thảo phù hợp.\n\n";
   }
 
+
   if (journals.length) {
     context += "Danh sách tạp chí:\n";
     journals.slice(0, 10).forEach((j, i) => {
@@ -239,9 +240,11 @@ function buildPrompt(question, conferences = [], journals = []) {
     context += "Không có tạp chí phù hợp.\n\n";
   }
 
+
   context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
   return context;
 }
+
 
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
@@ -250,6 +253,7 @@ app.post("/api/agent", async (req, res) => {
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
+
 
     let conferences = [];
     let journals = [];
@@ -275,7 +279,9 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
+
     const sid = req.sessionID;
+
 
     // Short-term memory strictly from chat_history in request body
     let memoryEntries = [];
@@ -296,16 +302,19 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
+
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
     const contextPrompt = buildPrompt(question, conferences, journals);
     const finalPrompt = `
 Ngữ cảnh hội thoại gần đây:
 ${memoryText}
 
+
 ${contextPrompt}
 `;
     console.log("===== Prompt =====");
     console.log(finalPrompt);
+
 
     let answer;
     try {
@@ -319,16 +328,16 @@ ${contextPrompt}
       answer = formatAnswerText(answer);
     }
 
+
     if (!req.body.chat_history) {
       try {
-        await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
-        await addToMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
+        await addMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
+        await addMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
-        console.warn("addToMemory failed:", e);
+        console.warn("addMemory failed:", e);
       }
     }
 
-    console.log("req.body.chat_history");
 
     const responseTime = Date.now() - start;
     const tokenCount = (() => {
@@ -338,6 +347,7 @@ ${contextPrompt}
         return null;
       }
     })();
+
 
     try {
       const col = await getCollection("chatlogs");
@@ -354,6 +364,7 @@ ${contextPrompt}
       console.error("Log insert error:", e);
     }
 
+
     res.json({
       model_id,
       answer,
@@ -368,6 +379,7 @@ ${contextPrompt}
   }
 });
 
+
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`API listening on http://localhost:${PORT}`);
@@ -378,5 +390,6 @@ if (!process.env.VERCEL) {
     }
   });
 }
+
 
 export default app;
