@@ -328,15 +328,21 @@ ${contextPrompt}
       answer = formatAnswerText(answer);
     }
 
-
     if (!req.body.chat_history) {
       try {
-        await addMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
+        if (typeof question === "string" && question.trim()) {
+          await addMemory(sid, "user", question.trim(), DEFAULT_SHORT_MEMORY_SIZE);
+        }
+        if (typeof answer !== "string") {
+          answer = JSON.stringify(answer);
+        }
+        if (answer.trim) answer = answer.trim();
         await addMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
         console.warn("addMemory failed:", e);
       }
     }
+
 
 
     const responseTime = Date.now() - start;
