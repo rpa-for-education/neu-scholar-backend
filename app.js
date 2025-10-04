@@ -7,8 +7,7 @@ import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; 
 import { encode } from "gpt-tokenizer";
-import { addMemory as addToMemory, getMemory } from "./memory.js";
-
+import { addToMemory, getMemory } from "./memory.js";
 
 const app = express();
 const PORT = 4000;
@@ -16,7 +15,6 @@ const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất 
-
 
 // ===== Middleware =====
 app.use(cors());
@@ -28,13 +26,10 @@ app.use(session({
 }));
 app.use(express.json({ limit: "10mb" }));
 
-
 app.use((req, _res, next) => {
   console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
-
-
 
 // Hàm format text trả lời cho rõ ràng, dễ đọc hơn
 function formatAnswerText(rawText) {
@@ -47,7 +42,6 @@ function formatAnswerText(rawText) {
 
 function parseBool(v) { return String(v).toLowerCase() === "true"; }
 
-// Dùng để cấu hình projection bỏ vector khi cần thiết
 function getProjection(includeVector) {
   return includeVector ? {} : { vector: 0 };
 }
@@ -74,7 +68,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Journals CRUD operations remain same
+// Journals CRUD operations remain unchanged
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -145,7 +139,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-// Conferences CRUD operations remain the same
+// Conferences CRUD operations remain unchanged
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -213,7 +207,6 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-// Fetch external articles for fallback
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
@@ -224,7 +217,6 @@ async function fetchArticles() {
   }
 }
 
-// Compose prompt for LLM
 function buildPrompt(question, conferences = [], journals = []) {
   let context =
     "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
@@ -251,7 +243,6 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
-// Agent endpoint
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
@@ -260,7 +251,8 @@ app.post("/api/agent", async (req, res) => {
       return res.status(400).json({ error: "Missing question" });
     }
 
-    let conferences = [], journals = [];
+    let conferences = [];
+    let journals = [];
     
     try {
       conferences = await conferenceVectorSearch(question, Number(topk));
@@ -284,8 +276,8 @@ app.post("/api/agent", async (req, res) => {
     }
 
     const sid = req.sessionID;
-    
-    // Strictly pull short-term memory from chat_history in request body
+
+    // Short-term memory strictly from chat_history in request body
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
       console.log("DEBUG chat_history content:");
@@ -293,10 +285,9 @@ app.post("/api/agent", async (req, res) => {
         console.log(`[${idx}] role=${entry.role}, content=${entry.content}`)
       );
       const recentHistory = req.body.chat_history.slice(-DEFAULT_SHORT_MEMORY_SIZE * 2);
-      memoryEntries = recentHistory.map(entry => ({
-        role: entry.role || "user",
-        text: entry.content || ""
-      })).filter(m => m.text.trim());
+      memoryEntries = recentHistory
+        .map(entry => ({ role: entry.role || "user", text: entry.content || "" }))
+        .filter(m => m.text.trim());
     } else {
       try {
         memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
@@ -327,8 +318,7 @@ ${contextPrompt}
     if (typeof answer === 'string') {
       answer = formatAnswerText(answer);
     }
-    
-    // Only save memory if chat_history is NOT present (avoid duplicate storage)
+
     if (!req.body.chat_history) {
       try {
         await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
@@ -337,7 +327,7 @@ ${contextPrompt}
         console.warn("addToMemory failed:", e);
       }
     }
-    
+
     const responseTime = Date.now() - start;
     const tokenCount = (() => {
       try {
@@ -346,7 +336,7 @@ ${contextPrompt}
         return null;
       }
     })();
-    
+
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -361,7 +351,7 @@ ${contextPrompt}
     } catch (e) {
       console.error("Log insert error:", e);
     }
-    
+
     res.json({
       model_id,
       answer,
@@ -376,7 +366,6 @@ ${contextPrompt}
   }
 });
 
-// Start server & preload embeddings
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`API listening on http://localhost:${PORT}`);
