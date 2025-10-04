@@ -42,7 +42,7 @@ app.use(
     cookie: { secure: false },
   })
 );
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 app.use((req, _res, next) => {
   console.log("📩 Request:", { method: req.method, url: req.url });
@@ -169,150 +169,73 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Journals CRUD
-app.get("/api/journals", async (req, res) => {
-  try {
-    const col = await Journals();
-    const cursor = col
-      .find({}, { projection: { title: 1, categories: 1, publisher: 1 } })
-      .limit(DEFAULT_LIMIT_JOURNAL)
-      .batchSize(1000);
-    const items = [];
-    await cursor.forEach((item) => {
-      items.push({
-        name: item.title,
-        quartiles: item.categories,
-        publisher: item.publisher,
-      });
-    });
-    res.json({ total: items.length, items });
-  } catch (err) {
-    console.error("❌ /api/journals error:", err);
-    res.status(500).json({ error: "Failed to fetch journals", detail: err.message });
-  }
-});
+// ============================= FILE FROM URL LOGIC =============================
+async function fetchAndEmbedFiles(fileUrls) {
+  if (!Array.isArray(fileUrls) || fileUrls.length === 0) return [];
 
-app.get("/api/journals/:id", async (req, res) => {
-  try {
-    const projection = getProjection(parseBool(req.query.includeVector));
-    const { ObjectId } = await import("mongodb");
-    const col = await Journals();
-    const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
-    if (!doc) return res.status(404).json({ error: "Journal not found" });
-    res.json(doc);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch journal", detail: err.message });
-  }
-});
+  if (!db) db = await getDb();
+  const fileCol = db.collection(FILES_COLLECTION);
+  const results = [];
 
-app.post("/api/journals", async (req, res) => {
-  try {
-    const col = await Journals();
-    const result = await col.insertOne(req.body);
-    res.status(201).json({ _id: result.insertedId, ...req.body });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to create journal", detail: err.message });
-  }
-});
+  for (const link of fileUrls) {
+    try {
+      const existing = await fileCol.findOne({ url: link });
+      if (existing) {
+        results.push(existing);
+        continue;
+      }
 
-app.put("/api/journals/:id", async (req, res) => {
-  try {
-    const { ObjectId } = await import("mongodb");
-    const col = await Journals();
-    const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return res.status(404).json({ error: "Journal not found" });
-    res.json(result.value);
-  } catch (err) {
-    res.status(400).json({ error: "Failed to update journal", detail: err.message });
-  }
-});
+      console.log("📄 Fetching file from URL:", link);
+      const resp = await fetch(link);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      const ext = link.toLowerCase().endsWith(".pdf")
+        ? ".pdf"
+        : link.toLowerCase().endsWith(".docx")
+        ? ".docx"
+        : ".txt";
 
-app.delete("/api/journals/:id", async (req, res) => {
-  try {
-    const { ObjectId } = await import("mongodb");
-    const col = await Journals();
-    const result = await col.findOneAndDelete({ _id: new ObjectId(req.params.id) });
-    if (!result.value) return res.status(404).json({ error: "Journal not found" });
-    res.json({ message: "Journal deleted", deleted: result.value });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to delete journal", detail: err.message });
-  }
-});
+      let extractedText = "";
+      if (ext === ".pdf") {
+        try {
+          const data = await pdfParse(buffer);
+          extractedText = data.text || "";
+        } catch (e) {
+          console.error("pdf parse error:", e);
+        }
+      } else if (ext === ".docx") {
+        try {
+          const { value } = await mammoth.extractRawText({ buffer });
+          extractedText = value || "";
+        } catch (e) {
+          console.error("mammoth error:", e);
+          try {
+            extractedText = await readDocxFromUrl(link);
+          } catch {
+            extractedText = "";
+          }
+        }
+      } else {
+        extractedText = buffer.toString("utf8");
+      }
 
-// Conferences CRUD
-app.get("/api/conferences", async (req, res) => {
-  try {
-    const col = await Conferences();
-    const cursor = col
-      .find({}, { projection: { _id: 0, name: 1, url: 1 } })
-      .sort({ created_time: -1 })
-      .limit(DEFAULT_LIMIT_CONFERENCE)
-      .batchSize(500);
-    const items = [];
-    await cursor.forEach((item) => {
-      items.push(item);
-    });
-    res.json({ total: items.length, items });
-  } catch (err) {
-    console.error("❌ /api/conferences error:", err);
-    res.status(500).json({ error: "Failed to fetch conferences", detail: err.message });
+      const embedding = extractedText.trim() ? await embedText(extractedText) : null;
+      const doc = {
+        name: link.split("/").pop(),
+        url: link,
+        text: extractedText,
+        vector: embedding,
+        uploadedAt: new Date(),
+      };
+      await fileCol.insertOne(doc);
+      results.push(doc);
+    } catch (err) {
+      console.error("❌ Failed to fetch/embed file:", link, err);
+    }
   }
-});
 
-app.get("/api/conferences/:id", async (req, res) => {
-  try {
-    const projection = getProjection(parseBool(req.query.includeVector));
-    const { ObjectId } = await import("mongodb");
-    const col = await Conferences();
-    const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
-    if (!doc) return res.status(404).json({ error: "Conference not found" });
-    res.json(doc);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch conference", detail: err.message });
-  }
-});
-
-app.post("/api/conferences", async (req, res) => {
-  try {
-    const col = await Conferences();
-    const result = await col.insertOne(req.body);
-    res.status(201).json({ _id: result.insertedId, ...req.body });
-  } catch (err) {
-    res.status(400).json({ error: "Failed to create conference", detail: err.message });
-  }
-});
-
-app.put("/api/conferences/:id", async (req, res) => {
-  try {
-    const { ObjectId } = await import("mongodb");
-    const col = await Conferences();
-    const result = await col.findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return res.status(404).json({ error: "Conference not found" });
-    res.json(result.value);
-  } catch (err) {
-    res.status(400).json({ error: "Failed to update conference", detail: err.message });
-  }
-});
-
-app.delete("/api/conferences/:id", async (req, res) => {
-  try {
-    const { ObjectId } = await import("mongodb");
-    const col = await Conferences();
-    const result = await col.findOneAndDelete({ _id: new ObjectId(req.params.id) });
-    if (!result.value) return res.status(404).json({ error: "Conference not found" });
-    res.json({ message: "Conference deleted", deleted: result.value });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to delete conference", detail: err.message });
-  }
-});
+  return results;
+}
 
 // ============================= AGENT =============================
 async function fetchArticles() {
@@ -350,6 +273,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
+// ============================= AGENT ENDPOINT =============================
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
 
@@ -358,8 +282,6 @@ app.post("/api/agent", async (req, res) => {
     const fileCol = db.collection(FILES_COLLECTION);
 
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5, file_name } = req.body;
-
-    console.log(req.body);
 
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
@@ -392,74 +314,16 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
-    // ✅ XỬ LÝ FILE LINK
-    try {
-      if (Array.isArray(file_name) && file_name.length > 0) {
-        for (const link of file_name) {
-          const existing = await fileCol.findOne({ url: link });
-          if (!existing) {
-            try {
-              console.log("📄 Đang tải file:", link);
-              const resp = await fetch(link);
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-              const buffer = Buffer.from(await resp.arrayBuffer());
-              const ext = link.toLowerCase().endsWith(".pdf")
-                ? ".pdf"
-                : link.toLowerCase().endsWith(".docx")
-                ? ".docx"
-                : ".txt";
-
-              let extractedText = "";
-              if (ext === ".pdf") {
-                try {
-                  const data = await pdfParse(buffer);
-                  extractedText = data.text || "";
-                } catch (e) {
-                  console.error("pdf parse error:", e);
-                }
-              } else if (ext === ".docx") {
-                try {
-                  const { value } = await mammoth.extractRawText({ buffer });
-                  extractedText = value || "";
-                } catch (e) {
-                  console.error("mammoth error:", e);
-                  try {
-                    extractedText = await readDocxFromUrl(link);
-                  } catch {
-                    extractedText = "";
-                  }
-                }
-              } else {
-                extractedText = buffer.toString("utf8");
-              }
-
-              try {
-                const embedding = extractedText.trim() ? await embedText(extractedText) : null;
-                await fileCol.insertOne({
-                  name: link.split("/").pop(),
-                  url: link,
-                  text: extractedText,
-                  vector: embedding,
-                  uploadedAt: new Date(),
-                });
-              } catch (e) {
-                console.error("Indexing fetched file failed:", e);
-              }
-            } catch (fetchErr) {
-              console.error("❌ Không thể đọc file link:", link, fetchErr);
-            }
-          }
-        }
-
-        const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
-        fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
-        fileHits = foundFiles.slice(0, k);
+    if (Array.isArray(file_name) && file_name.length > 0) {
+      const fetchedFiles = await fetchAndEmbedFiles(file_name);
+      fileHits = fetchedFiles.slice(0, k);
+      fileContext = fetchedFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
+      if (fileContext.trim()) {
+        fileContext = `Dưới đây là các file người dùng đã tải lên có liên quan:\n${fileContext}\n\n`;
       }
-    } catch (e) {
-      console.error("❌ Lỗi xử lý file links:", e);
     }
 
-    // Lấy short-term memory
+    // Short-term memory
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history)) {
       const recentHistory = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
@@ -473,10 +337,6 @@ app.post("/api/agent", async (req, res) => {
 
     const memoryText = memoryEntries.map((m) => `- [${m.role}] ${m.text}`).join("\n");
     const contextPrompt = buildPrompt(question, conferences, journals);
-
-    if (fileContext.trim()) {
-      fileContext = `Dưới đây là các file người dùng đã tải lên có liên quan:\n${fileContext}\n\n`;
-    }
 
     const finalPrompt = `
 ${contextPrompt}
@@ -534,6 +394,7 @@ ${fileContext}
   }
 });
 
+// ============================= START SERVER =============================
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`API listening on http://localhost:${PORT}`);
