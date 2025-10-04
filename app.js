@@ -6,26 +6,27 @@ import multer from "multer";
 import fs from "fs";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import mammoth from "mammoth";
-import fetch from "node-fetch"; // ✅ fetch để tải file từ link
+import fetch from "node-fetch";
 
 import axios from "axios";
 import { callLLM } from "./llm.js";
-import { journalVectorSearch, conferenceVectorSearch, initEmbedding, embedText } from "./search.js";
+import { journalVectorSearch, conferenceVectorSearch, initEmbedding, embedText, readDocxFromUrl } from "./search.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
 import { addMemory, getMemory } from "./memory.js";
 import { s3Client } from "./s3.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { ObjectId } from "mongodb";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
+const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
-const MAX_SHORT_HISTORY = 5; // 5 cặp hỏi - đáp gần nhất
+const MAX_SHORT_HISTORY = 5;
 
-// ===== Middleware =====
 app.use(cors());
 app.use(
   session({
@@ -42,7 +43,6 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Format trả lời
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -58,7 +58,6 @@ function getProjection(includeVector) {
   return includeVector ? {} : { vector: 0 };
 }
 
-// MongoDB helpers
 let db;
 async function getCollection(name) {
   if (!db) db = await getDb();
@@ -73,74 +72,6 @@ async function Conferences() {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ============================= PROCESS FILE BUFFER =============================
-async function processFileBuffer(fileBuffer, fileName, fileUrl, fileCol) {
-  try {
-    const ext = fileName.toLowerCase().endsWith(".pdf")
-      ? ".pdf"
-      : fileName.toLowerCase().endsWith(".docx")
-      ? ".docx"
-      : ".txt";
-
-    let extractedText = "";
-
-    if (ext === ".pdf") {
-      const data = await pdfParse(fileBuffer);
-      extractedText = data.text || "";
-    } else if (ext === ".docx") {
-      const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
-      extractedText = value || "";
-    } else {
-      extractedText = fileBuffer.toString("utf8");
-    }
-
-    if (extractedText.trim()) {
-      const embedding = await embedText(extractedText);
-      await fileCol.insertOne({
-        name: fileName,
-        url: fileUrl,
-        text: extractedText,
-        vector: embedding,
-        uploadedAt: new Date(),
-      });
-    }
-
-    return extractedText;
-  } catch (err) {
-    console.error(`❌ Không thể xử lý file ${fileName}:`, err);
-    return "";
-  }
-}
-
-// Xử lý file từ URL (file_name array trong /api/agent)
-async function processFileLinks(file_name, fileCol, k) {
-  const fileHits = [];
-  let fileContext = "";
-
-  if (!Array.isArray(file_name) || file_name.length === 0) return { fileHits, fileContext };
-
-  for (const link of file_name) {
-    const existing = await fileCol.findOne({ url: link });
-    if (!existing) {
-      try {
-        console.log("📄 Đang tải file:", link);
-        const resp = await fetch(link);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const buffer = Buffer.from(await resp.arrayBuffer());
-        const fileName = link.split("/").pop() || `file_${Date.now()}`;
-        await processFileBuffer(buffer, fileName, link, fileCol);
-      } catch (fetchErr) {
-        console.error("❌ Không thể đọc file link:", link, fetchErr);
-      }
-    }
-  }
-
-  const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
-  fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
-  return { fileHits: foundFiles.slice(0, k), fileContext };
-}
-
-// ============================= UPLOAD FILE API =============================
 app.post("/api/upload", upload.array("file"), async (req, res) => {
   try {
     const { folder, userEmail } = req.body;
@@ -161,7 +92,6 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
       const prefix = userEmail || folder || "";
       const key = prefix ? `${prefix}/${uniqueName}` : uniqueName;
 
-      // upload to S3 / MinIO
       await s3Client.send(
         new PutObjectCommand({
           Bucket: process.env.MINIO_BUCKET_NAME,
@@ -173,7 +103,28 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
 
       const fileUrl = `http://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${process.env.MINIO_BUCKET_NAME}/${encodeURIComponent(key)}`;
 
-      await processFileBuffer(file.buffer, uniqueName, fileUrl, fileCol);
+      let extractedText = "";
+      if (ext === ".pdf") {
+        const data = await pdfParse(file.buffer);
+        extractedText = data.text || "";
+      } else if (ext === ".docx") {
+        const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+        extractedText = value || "";
+      } else if (ext === ".txt") {
+        extractedText = file.buffer.toString("utf8");
+      }
+
+      if (extractedText.trim()) {
+        const embedding = await embedText(extractedText);
+        await fileCol.insertOne({
+          name: uniqueName,
+          url: fileUrl,
+          text: extractedText,
+          vector: embedding,
+          uploadedAt: new Date(),
+        });
+      }
+
       uploadedUrls.push(fileUrl);
     }
 
@@ -184,7 +135,6 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
   }
 });
 
-// ============================= HEALTH CHECK =============================
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -193,7 +143,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// ============================= JOURNALS CRUD =============================
+// Journals CRUD
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -219,7 +169,6 @@ app.get("/api/journals", async (req, res) => {
 app.get("/api/journals/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
-    const { ObjectId } = await import("mongodb");
     const col = await Journals();
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Journal not found" });
@@ -241,7 +190,6 @@ app.post("/api/journals", async (req, res) => {
 
 app.put("/api/journals/:id", async (req, res) => {
   try {
-    const { ObjectId } = await import("mongodb");
     const col = await Journals();
     const result = await col.findOneAndUpdate(
       { _id: new ObjectId(req.params.id) },
@@ -257,7 +205,6 @@ app.put("/api/journals/:id", async (req, res) => {
 
 app.delete("/api/journals/:id", async (req, res) => {
   try {
-    const { ObjectId } = await import("mongodb");
     const col = await Journals();
     const result = await col.findOneAndDelete({ _id: new ObjectId(req.params.id) });
     if (!result.value) return res.status(404).json({ error: "Journal not found" });
@@ -267,7 +214,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-// ============================= CONFERENCES CRUD =============================
+// Conferences CRUD
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -277,7 +224,9 @@ app.get("/api/conferences", async (req, res) => {
       .limit(DEFAULT_LIMIT_CONFERENCE)
       .batchSize(500);
     const items = [];
-    await cursor.forEach((item) => items.push(item));
+    await cursor.forEach((item) => {
+      items.push(item);
+    });
     res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
@@ -288,7 +237,6 @@ app.get("/api/conferences", async (req, res) => {
 app.get("/api/conferences/:id", async (req, res) => {
   try {
     const projection = getProjection(parseBool(req.query.includeVector));
-    const { ObjectId } = await import("mongodb");
     const col = await Conferences();
     const doc = await col.findOne({ _id: new ObjectId(req.params.id) }, { projection });
     if (!doc) return res.status(404).json({ error: "Conference not found" });
@@ -310,7 +258,6 @@ app.post("/api/conferences", async (req, res) => {
 
 app.put("/api/conferences/:id", async (req, res) => {
   try {
-    const { ObjectId } = await import("mongodb");
     const col = await Conferences();
     const result = await col.findOneAndUpdate(
       { _id: new ObjectId(req.params.id) },
@@ -326,7 +273,6 @@ app.put("/api/conferences/:id", async (req, res) => {
 
 app.delete("/api/conferences/:id", async (req, res) => {
   try {
-    const { ObjectId } = await import("mongodb");
     const col = await Conferences();
     const result = await col.findOneAndDelete({ _id: new ObjectId(req.params.id) });
     if (!result.value) return res.status(404).json({ error: "Conference not found" });
@@ -336,44 +282,7 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-// ============================= FETCH ARTICLES =============================
-async function fetchArticles() {
-  try {
-    const res = await axios.get(process.env.API_RESEARCH);
-    return Array.isArray(res.data) ? res.data : [];
-  } catch (err) {
-    console.error("❌ fetchArticles error:", err.message);
-    return [];
-  }
-}
-
-// ============================= BUILD PROMPT =============================
-function buildPrompt(question, conferences = [], journals = []) {
-  let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
-
-  if (conferences.length) {
-    context += "Danh sách hội thảo:\n";
-    conferences.slice(0, 10).forEach((c, i) => {
-      context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
-    });
-  } else {
-    context += "Không có hội thảo phù hợp.\n\n";
-  }
-
-  if (journals.length) {
-    context += "Danh sách tạp chí:\n";
-    journals.slice(0, 10).forEach((j, i) => {
-      context += `Tạp chí ${i + 1}:\n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
-    });
-  } else {
-    context += "Không có tạp chí phù hợp.\n\n";
-  }
-
-  context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
-  return context;
-}
-
-// ============================= AGENT API =============================
+// ============================= AGENT HANDLER =============================
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
 
@@ -383,8 +292,6 @@ app.post("/api/agent", async (req, res) => {
 
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5, file_name } = req.body;
 
-    console.log(req.body);
-
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
@@ -392,6 +299,7 @@ app.post("/api/agent", async (req, res) => {
     const k = Math.max(1, Math.min(parseInt(topk, 10) || 5, 50));
     let conferences = [];
     let journals = [];
+    let hits = [];
     let fileHits = [];
     let fileContext = "";
 
@@ -407,107 +315,150 @@ app.post("/api/agent", async (req, res) => {
       console.error("journalVectorSearch error:", e);
     }
 
-    if (conferences.length === 0 && journals.length === 0) {
-      try {
-        const articles = await fetchArticles();
-        conferences = articles.slice(0, Number(k));
-      } catch (e) {
-        console.error("fetchArticles error:", e);
+    // ✅ XỬ LÝ FILE LINK
+    try {
+      if (Array.isArray(file_name) && file_name.length > 0) {
+        for (const link of file_name) {
+          const existing = await fileCol.findOne({ url: link });
+          if (!existing) {
+            try {
+              console.log("📄 Đang tải file:", link);
+              const resp = await fetch(link);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+              const buffer = Buffer.from(await resp.arrayBuffer());
+              const ext = link.toLowerCase().endsWith(".pdf")
+                ? ".pdf"
+                : link.toLowerCase().endsWith(".docx")
+                ? ".docx"
+                : ".txt";
+
+              let extractedText = "";
+
+              if (ext === ".pdf") {
+                const data = await pdfParse(buffer);
+                extractedText = data.text || "";
+              } else if (ext === ".docx") {
+                const { value } = await mammoth.extractRawText({ buffer });
+                extractedText = value || "";
+              } else {
+                extractedText = buffer.toString("utf8");
+              }
+
+              if (extractedText.trim()) {
+                const embedding = await embedText(extractedText);
+                await fileCol.insertOne({
+                  name: link.split("/").pop(),
+                  url: link,
+                  text: extractedText,
+                  vector: embedding,
+                  uploadedAt: new Date(),
+                });
+              }
+            } catch (fetchErr) {
+              console.error("❌ Không thể đọc file link:", link, fetchErr);
+            }
+          }
+        }
+
+        const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
+
+        fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
+
+        fileHits = foundFiles.slice(0, k);
+      } else {
+        fileHits = [];
+        fileContext = "";
       }
+    } catch (e) {
+      console.error("❌ Lỗi xử lý file links:", e);
+      fileHits = [];
+      fileContext = "";
     }
 
-    // ✅ XỬ LÝ FILE LINK
-    const fileResult = await processFileLinks(file_name, fileCol, k);
-    fileHits = fileResult.fileHits;
-    fileContext = fileResult.fileContext;
-
-    // Lấy short-term memory từ chat_history
+    // Lấy short-term memory
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history)) {
       const recentHistory = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
       memoryEntries = recentHistory
-        .map((entry) => ({
-          role: entry.role || "user",
-          text: entry.content || "",
-        }))
+        .map((entry) => ({ role: entry.role || "user", text: entry.content || "" }))
         .filter((m) => m.text.trim().length > 0);
     }
 
     const memoryText = memoryEntries.map((m) => `- [${m.role}] ${m.text}`).join("\n");
 
-    const contextPrompt = buildPrompt(question, conferences, journals);
+    let contextText = journals
+      .map(
+        (f, i) =>
+          `${i + 1}. ${f.title || ""} - ${f.publisher || ""} - ${f.url || ""}`
+      )
+      .join("\n");
 
     if (fileContext.trim()) {
       fileContext = `Dưới đây là các file người dùng đã tải lên có liên quan:\n${fileContext}\n\n`;
     }
 
-    const finalPrompt = `
-      ${contextPrompt}
+    const promptText = `
+Người dùng hỏi: "${question}"
 
-      ${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
+${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
+Dưới đây là danh sách journals/conferences có liên quan:
+${contextText}
 
-      ${fileContext}
-    `;
+${fileContext}Hãy trả lời bằng tiếng Việt, trích dẫn tên journal/conference hoặc file và đường dẫn.
+Nếu không có dữ liệu phù hợp thì hãy nói rõ ràng "Không tìm thấy dữ liệu phù hợp".
+`;
 
-    console.log("===== Prompt =====");
-    console.log(finalPrompt);
+    console.log("=== PROMPT ===\n", promptText, "\n=== END PROMPT ===");
 
-    let answer;
+    const llmRes = await callLLM(promptText, model_id);
+
+    let text = "";
+    let provider = null;
+    if (typeof llmRes === "string") text = llmRes;
+    else if (llmRes && typeof llmRes === "object") {
+      text = llmRes.answer ?? llmRes.text ?? llmRes.content ?? "";
+      provider = llmRes.provider ?? null;
+    }
+
+    text = formatAnswerText(text);
+
+    let prompt_tokens = null,
+      answer_tokens = null,
+      tokens_used = null;
     try {
-      answer = await callLLM(finalPrompt, model_id);
-    } catch (e) {
-      console.error("callLLM error:", e);
-      return res.status(500).json({ error: "Failed to call LLM service" });
-    }
+      prompt_tokens = encode(promptText).length;
+      answer_tokens = encode(text).length;
+      tokens_used = prompt_tokens + answer_tokens;
+    } catch (_) {}
 
-    if (typeof answer !== "string") {
-      try {
-        answer = JSON.stringify(answer);
-      } catch {
-        answer = "";
-      }
-    }
-    answer = answer.trim();
+    const response_time_ms = Date.now() - start;
 
-    // Ghi log cuộc hội thoại
-    try {
-      const col = await getCollection("chatlogs");
-      await col.insertOne({
-        question,
-        answer,
-        sessionId: req.body.session_id,
-        model_id,
-        createdAt: new Date(),
-        responseTimeMs: Date.now() - start,
-      });
-    } catch (e) {
-      console.error("Log insert error:", e);
-    }
-
-    // Trả về câu trả lời cùng thông tin metadata
     return res.json({
       model_id,
-      answer,
-      retrieved: { conferences, journals, files: fileHits },
-      memoryCount: memoryEntries.length,
-      responseTimeMs: Date.now() - start,
+      answer: text,
+      retrieved: { journals: journals.slice(0, 5), files: fileHits.slice(0, 5) },
+      memory: { entries_count: memoryEntries.length },
+      meta: { response_time_ms, tokens_used, prompt_tokens, answer_tokens },
     });
   } catch (err) {
-    console.error("Unhandled error:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("❌ /api/agent error:", err);
+    return res.status(500).json({ error: err.message || "Internal error" });
   }
 });
 
-// ============================= START SERVER =============================
+// ============================= SERVER STARTUP =============================
 if (!process.env.VERCEL) {
-  app.listen(PORT, async () => {
-    console.log(`API listening on http://localhost:${PORT}`);
+  (async () => {
     try {
+      db = await getDb();
       await initEmbedding();
+      app.listen(PORT, () => console.log(`🚀 API running at http://localhost:${PORT}`));
     } catch (e) {
-      console.error("Embedding initialization error:", e);
+      console.error("❌ Startup error:", e);
+      process.exit(1);
     }
-  });
+  })();
 }
 
 export default app;
