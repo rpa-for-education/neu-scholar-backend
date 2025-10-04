@@ -15,6 +15,7 @@ const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất 
+const MAX_SHORT_HISTORY = 5; // 5 cặp hỏi - đáp gần nhất
 
 // ===== Middleware =====
 app.use(cors());
@@ -66,11 +67,9 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
-
     const cursor = col.find({}, { projection: { title: 1, categories: 1, publisher: 1 } })
                       .limit(DEFAULT_LIMIT_JOURNAL)
                       .batchSize(1000);
-
     const items = [];
     await cursor.forEach(item => {
       items.push({
@@ -79,7 +78,6 @@ app.get("/api/journals", async (req, res) => {
         publisher: item.publisher
       });
     });
-
     res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/journals error:", err);
@@ -140,15 +138,12 @@ app.delete("/api/journals/:id", async (req, res) => {
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
-
     const cursor = col.find({}, { projection: { _id: 0, name: 1, url: 1 } })
                       .sort({ created_time: -1 })
                       .limit(DEFAULT_LIMIT_CONFERENCE)
                       .batchSize(500);
-
     const items = [];
     await cursor.forEach(item => items.push(item));
-
     res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
@@ -277,25 +272,35 @@ app.post("/api/agent", async (req, res) => {
       console.error("Journal vector search failed:", e.message);
     }
 
-    // fallback nếu không có kết quả
-    if (!conferences?.length && !journals?.length) {
+    if (!conferences.length && !journals.length) {
       const articles = await fetchArticles();
       conferences = articles.slice(0, topk);
     }
 
     const sid = req.sessionID;
-    // console.log("Prompt content:", req.body);
 
+    // Short-term memory — CHỈ lấy từ chat_history
     let memoryEntries = [];
-    try {
-      memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
-    } catch (e) {
-      console.warn("⚠️ getMemory failed:", e);
-      memoryEntries = [];
+    if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
+      console.log("DEBUG chat_history:");
+      req.body.chat_history.forEach((entry, idx) => {
+        console.log(`[${idx}] role: ${entry.role}, content: ${entry.content}`);
+      });
+      const recentHistory = req.body.chat_history.slice(-DEFAULT_SHORT_MEMORY_SIZE * 2);
+      memoryEntries = recentHistory.map(entry => ({
+        role: entry.role || "user",
+        text: entry.content || ""
+      })).filter(m => m.text.trim());
+    } else {
+      try {
+        memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
+      } catch (e) {
+        console.warn("⚠️ getMemory failed:", e);
+        memoryEntries = [];
+      }
     }
 
-    let memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
-
+    const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
     const prompt = buildPrompt(question, conferences, journals);
 
     const finalPrompt = `
@@ -305,89 +310,59 @@ ${memoryText}
 ${prompt}
 `;
 
-    let answer = await callLLM(finalPrompt, model_id);
+    console.log("===== Prompt =====\n", finalPrompt);
 
-    // Format answer cho dễ đọc
+    let answer = await callLLM(finalPrompt, model_id);
     if (typeof answer === "string") {
       answer = formatAnswerText(answer);
     }
 
-    try {
-      await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
-      await addToMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
-    } catch (e) {
-      console.warn("⚠️ addToMemory failed:", e);
+    // Nếu client không gửi chat_history mới lưu memory
+    if (!req.body.chat_history) {
+      try {
+        await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
+        await addToMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
+      } catch (e) {
+        console.warn("⚠️ addToMemory failed:", e);
+      }
     }
 
-    const response_time_ms = Date.now() - start;
-    const asked_at = new Date().toISOString();
-    const answered_at = new Date().toISOString();
+    const responseTimeMs = Date.now() - start;
+    const tokensUsed = (() => {
+      try {
+        return encode(finalPrompt).length + encode(answer).length;
+      } catch {
+        return null;
+      }
+    })();
 
-    const prompt_tokens = encode(finalPrompt).length;
-    const answer_tokens = encode(typeof answer === "string" ? answer : JSON.stringify(answer)).length;
-    const tokens_used = prompt_tokens + answer_tokens;
-
-    const logBase = {
-      question,
-      asked_at,
-      answer,
-      answered_at,
-      withLLM: true,
-      model_id,
-      provider: model_id.includes("qwen") ? "qwen" : "openai",
-      model: model_id,
-      topk: Number(topk),
-    };
-
-    const score_conf = conferences?.length || 0;
-    const score_jour = journals?.length || 0;
-
-    let type = null;
-    let hits = [];
-    if (score_conf > score_jour) {
-      type = "conference";
-      hits = conferences;
-    } else if (score_jour > score_conf) {
-      type = "journal";
-      hits = journals;
-    } else if (score_conf > 0 && score_jour > 0) {
-      type = "both";
-      hits = { conferences, journals };
-    }
-
+    // Log cuộc hội thoại
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
-        ...logBase,
-        type,
-        score_conf,
-        score_jour,
-        hits,
-        response_time_ms,
-        prompt_tokens,
-        answer_tokens,
-        tokens_used,
-        createdAt: new Date(),
+        question,
+        answer,
+        sessionId: sid,
+        model_id,
+        responseTimeMs,
+        tokensUsed,
+        createdAt: new Date()
       });
-    } catch (err) {
-      console.error("❌ Lỗi ghi log:", err.message);
+    } catch (e) {
+      console.error("❌ Log save failed:", e);
     }
 
     res.json({
       model_id,
       answer,
       retrieved: { conference: conferences, journal: journals },
-      memory: { entries_count: memoryEntries.length },
-      meta: {
-        response_time_ms,
-        tokens_used,
-        prompt_tokens,
-        answer_tokens
-      }
+      memoryCount: memoryEntries.length,
+      responseTimeMs,
+      tokensUsed
     });
 
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message || "Internal error" });
   }
 });
 
