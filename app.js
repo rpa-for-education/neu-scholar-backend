@@ -328,7 +328,7 @@ ${contextPrompt}
     }
     answer = answer.trim();
 
-    // Chỉ lưu vào DB khi không có chat_history để tránh duplicating
+/*     // Chỉ lưu vào DB khi không có chat_history để tránh duplicating
     if (!Array.isArray(req.body.chat_history)) {
       try {
         if (question.trim()) {
@@ -340,7 +340,7 @@ ${contextPrompt}
       } catch (e) {
         console.warn("addMemory failed:", e);
       }
-    }
+    } */
 
     const responseTime = Date.now() - start;
     const tokenCount = (() => {
