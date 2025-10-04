@@ -253,6 +253,9 @@ app.post("/api/agent", async (req, res) => {
   try {
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body;
 
+    console.log(req.body);
+
+    
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
