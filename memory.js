@@ -13,15 +13,13 @@ function normalizeSessionId(sessionId) {
  * Chỉ ghi những message có text là chuỗi không rỗng
  */
 export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX) {
-  const sid = normalizeSessionId(sessionId);
+  const sid = normalizeId(sessionId);
   if (!sid) return;
 
-  // Chuyển text sang string nếu cần
-  if (typeof text !== "string") {
+  if (typeof text !== 'string') {
     try {
       text = JSON.stringify(text);
     } catch {
-      // Nếu không chuyển được, không ghi
       return;
     }
   }
@@ -31,8 +29,8 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
   const db = await getDb();
   const col = db.collection(DEFAULT_COLLECTION);
 
-  // Kiểm tra nếu document tồn tại và entries không phải array => chuẩn hóa thành mảng rỗng
   const doc = await col.findOne({ sessionId: sid });
+
   if (doc && doc.entries && !Array.isArray(doc.entries)) {
     await col.updateOne({ sessionId: sid }, { $set: { entries: [] } });
   }
@@ -47,6 +45,7 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
     { upsert: true }
   );
 }
+
 
 /**
  * Lấy mảng entries đã lưu trữ gần nhất của session, theo limit
