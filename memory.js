@@ -8,30 +8,38 @@ function normalizeSessionId(sessionId) {
 }
 
 /**
- * Lưu message vào mảng entries của document sessionId, tạo mới nếu chưa có
- * Chuẩn hóa entries thành mảng nếu cần tránh lỗi conflict MongoDB
+ * Lưu message vào mảng entries của document sessionId, tạo mới nếu chưa có.
+ * Chuẩn hóa entries thành mảng để tránh lỗi conflict MongoDB.
  */
 export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX) {
   const sessionIdStr = normalizeSessionId(sessionId);
   if (!sessionIdStr) return;
 
+  // Chuyển text thành chuỗi nếu không phải
+  if (typeof text !== "string") {
+    try {
+      text = JSON.stringify(text);
+    } catch {
+      return; // Không lưu nếu không thể chuyển thành chuỗi
+    }
+  }
+  text = text.trim();
+  if (!text) return;
+
   const db = await getDb();
   const col = db.collection(DEFAULT_COLLECTION);
 
-  const entry = { role, text, createdAt: new Date() };
-
-  // Lấy doc hiện tại
+  // Lấy document hiện tại
   const doc = await col.findOne({ sessionId: sessionIdStr });
 
-  // Nếu tồn tại và entries không phải array, chuẩn hóa về mảng rỗng
-  if (doc && !Array.isArray(doc.entries)) {
-    await col.updateOne(
-      { sessionId: sessionIdStr },
-      [{ $set: { entries: { $cond: [{ $isArray: "$entries" }, "$entries", []] } } }]
-    );
+  // Nếu tồn tại và entries không phải mảng, chuẩn hóa thành mảng rỗng
+  if (doc && doc.entries && !Array.isArray(doc.entries)) {
+    await col.updateOne({ sessionId: sessionIdStr }, { $set: { entries: [] } });
   }
 
-  // Cập nhật/Thêm message mới, giới hạn maxEntries
+  const entry = { role, text, createdAt: new Date() };
+
+  // Thêm entry mới, giữ giới hạn số phần tử trong mảng
   await col.updateOne(
     { sessionId: sessionIdStr },
     {
@@ -43,7 +51,7 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
 }
 
 /**
- * Lấy mảng entries gần nhất của session
+ * Lấy mảng entries gần nhất của session.
  */
 export async function getMemory(sessionId, limit = DEFAULT_MAX) {
   const sessionIdStr = normalizeSessionId(sessionId);
@@ -54,11 +62,11 @@ export async function getMemory(sessionId, limit = DEFAULT_MAX) {
 
   const doc = await col.findOne({ sessionId: sessionIdStr }, { projection: { entries: 1 } });
   if (!doc?.entries) return [];
-  return doc.entries.slice(-limit);
+  return Array.isArray(doc.entries) ? doc.entries.slice(-limit) : [];
 }
 
 /**
- * Xóa toàn bộ memory của session
+ * Xóa toàn bộ memory của session.
  */
 export async function clearMemory(sessionId) {
   const sessionIdStr = normalizeSessionId(sessionId);
