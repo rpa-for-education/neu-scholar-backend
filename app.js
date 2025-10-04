@@ -1,16 +1,23 @@
+// app.js
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import session from "express-session";
 import multer from "multer";
 import fs from "fs";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import fetch from "node-fetch"; // ✅ thêm fetch để tải file từ link
+import fetch from "node-fetch";
 
 import axios from "axios";
 import { callLLM } from "./llm.js";
-import { journalVectorSearch, conferenceVectorSearch, initEmbedding, embedText, readDocxFromUrl } from "./search.js";
+import {
+  journalVectorSearch,
+  conferenceVectorSearch,
+  initEmbedding,
+  embedText,
+  readDocxFromUrl,
+} from "./search.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
 import { addMemory, getMemory } from "./memory.js";
@@ -96,35 +103,65 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
       const key = prefix ? `${prefix}/${uniqueName}` : uniqueName;
 
       // upload to S3 / MinIO
-      await s3Client.send(
-        new PutObjectCommand({
-          Bucket: process.env.MINIO_BUCKET_NAME,
-          Key: key,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-        })
-      );
+      try {
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: process.env.MINIO_BUCKET_NAME,
+            Key: key,
+            Body: file.buffer,
+            ContentType: file.mimetype,
+          })
+        );
+      } catch (err) {
+        console.error("❌ S3 upload failed:", err);
+        // continue: still try to process text & store metadata (URL may be invalid)
+      }
 
-      const fileUrl = `http://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${process.env.MINIO_BUCKET_NAME}/${encodeURIComponent(key)}`;
+      const fileUrl = `http://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${process.env.MINIO_BUCKET_NAME}/${encodeURIComponent(
+        key
+      )}`;
 
       let extractedText = "";
       if (ext === ".pdf") {
-        const data = await pdfParse(file.buffer);
-        extractedText = data.text || "";
+        try {
+          const data = await pdfParse(file.buffer);
+          extractedText = data.text || "";
+        } catch (e) {
+          console.error("❌ pdfParse error:", e);
+          extractedText = "";
+        }
       } else if (ext === ".docx") {
-        const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-        extractedText = value || "";
+        try {
+          const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+          extractedText = value || "";
+        } catch (e) {
+          console.error("❌ mammoth docx parse error:", e);
+          extractedText = "";
+        }
       } else if (ext === ".txt") {
         extractedText = file.buffer.toString("utf8");
       }
 
       if (extractedText.trim()) {
-        const embedding = await embedText(extractedText);
+        try {
+          const embedding = await embedText(extractedText);
+          await fileCol.insertOne({
+            name: uniqueName,
+            url: fileUrl,
+            text: extractedText,
+            vector: embedding,
+            uploadedAt: new Date(),
+          });
+        } catch (e) {
+          console.error("❌ Indexing uploaded file failed:", e);
+        }
+      } else {
+        // store metadata without text if needed
         await fileCol.insertOne({
           name: uniqueName,
           url: fileUrl,
           text: extractedText,
-          vector: embedding,
+          vector: null,
           uploadedAt: new Date(),
         });
       }
@@ -392,22 +429,50 @@ app.post("/api/agent", async (req, res) => {
               let extractedText = "";
 
               if (ext === ".pdf") {
-                const data = await pdfParse(buffer);
-                extractedText = data.text || "";
+                try {
+                  const data = await pdfParse(buffer);
+                  extractedText = data.text || "";
+                } catch (e) {
+                  console.error("pdf parse error:", e);
+                  extractedText = "";
+                }
               } else if (ext === ".docx") {
-                const { value } = await mammoth.extractRawText({ buffer });
-                extractedText = value || "";
+                try {
+                  const { value } = await mammoth.extractRawText({ buffer });
+                  extractedText = value || "";
+                } catch (e) {
+                  console.error("mammoth error:", e);
+                  // fallback: try readDocxFromUrl which uses docx-parser
+                  try {
+                    extractedText = await readDocxFromUrl(link);
+                  } catch (ee) {
+                    extractedText = "";
+                  }
+                }
               } else {
                 extractedText = buffer.toString("utf8");
               }
 
               if (extractedText.trim()) {
-                const embedding = await embedText(extractedText);
+                try {
+                  const embedding = await embedText(extractedText);
+                  await fileCol.insertOne({
+                    name: link.split("/").pop(),
+                    url: link,
+                    text: extractedText,
+                    vector: embedding,
+                    uploadedAt: new Date(),
+                  });
+                } catch (e) {
+                  console.error("Indexing fetched file failed:", e);
+                }
+              } else {
+                // still insert metadata so file shows up in file list
                 await fileCol.insertOne({
                   name: link.split("/").pop(),
                   url: link,
                   text: extractedText,
-                  vector: embedding,
+                  vector: null,
                   uploadedAt: new Date(),
                 });
               }

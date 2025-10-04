@@ -1,4 +1,5 @@
 // search.js
+// Kết hợp logic tìm kiếm (conference/journal), đọc file, embedding (local Xenova hoặc fallback OpenAI)
 
 process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
 process.env.HF_HUB_CACHE = process.env.HF_HUB_CACHE || "/tmp/hf_hub_cache";
@@ -13,16 +14,17 @@ import fsSync from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import * as docx from "docx-parser";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-
-// Note: we don't import pipeline at top-level to avoid cache issues on serverless;
-// initEmbedding will dynamically import @xenova/transformers when needed.
+import { getDb } from "./db.js";
 
 const client = new MongoClient(process.env.MONGODB_URI);
 const dbName = process.env.MONGODB_DB || "fitneu";
 
+// Giới hạn topK (có thể cấu hình qua .env)
 const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
+
+// Vector collection / fields
 const VECTOR_INDEX_NAME = process.env.VECTOR_INDEX_FUND || "vector_index_fund";
 const VECTOR_PATH = process.env.VECTOR_PATH || "vector";
 const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
@@ -32,6 +34,7 @@ let usingRemoteEmbed = false;
 
 /**
  * Try to initialize local embedder (Xenova). If it fails -> mark to use remote.
+ * dynamic import to allow setting env vars first.
  */
 export async function initEmbedding() {
   if (embedder || usingRemoteEmbed) return true;
@@ -47,6 +50,7 @@ export async function initEmbedding() {
 
   try {
     console.log(`⏳ Attempting to load JS embedding model: ${modelName}`);
+
     const transformers = await import("@xenova/transformers");
     try {
       if (transformers && transformers.env) {
@@ -56,6 +60,7 @@ export async function initEmbedding() {
     } catch (ee) {
       // ignore
     }
+
     const { pipeline } = transformers;
     embedder = await pipeline("feature-extraction", modelName);
     console.log("✅ Embedder ready (local Xenova)");
@@ -136,6 +141,7 @@ export async function embedText(text) {
  * Hỗ trợ: .pdf, .docx, .txt
  */
 export async function readFileContent(inputPathOrUrl) {
+  // If it's a URL -> fetch into /tmp
   let tmpPath = null;
   let buffer = null;
 
@@ -154,11 +160,11 @@ export async function readFileContent(inputPathOrUrl) {
   const ext = (path.extname(String(filePath)) || "").toLowerCase();
 
   if (ext === ".pdf") {
-    const dataBuffer = buffer || (await fs.readFile(filePath));
+    const dataBuffer = buffer || await fs.readFile(filePath);
     const pdf = await pdfParse(dataBuffer);
     return pdf.text || "";
   } else if (ext === ".docx") {
-    const dataBuffer = buffer || (await fs.readFile(filePath));
+    const dataBuffer = buffer || await fs.readFile(filePath);
     const { value } = await mammoth.extractRawText({ buffer: dataBuffer });
     return value || "";
   } else {
@@ -168,7 +174,9 @@ export async function readFileContent(inputPathOrUrl) {
 }
 
 /**
- * Đọc nội dung .docx từ URL
+ * Đọc nội dung .docx từ URL (dùng docx-parser fallback)
+ * @param {string} url
+ * @returns {Promise<string>} text content
  */
 export async function readDocxFromUrl(url) {
   try {
@@ -197,6 +205,7 @@ export async function readDocxFromUrl(url) {
 
 /**
  * Upload filePathOrUrl -> đọc -> embed -> lưu Mongo
+ * - filePathOrUrl có thể là đường dẫn local hoặc URL (http/https)
  */
 export async function uploadAndIndexFile(filePathOrUrl) {
   const db = await getDb();
@@ -210,7 +219,7 @@ export async function uploadAndIndexFile(filePathOrUrl) {
   const vector = await embed(content);
 
   const doc = {
-    text: content.slice(0, 20000),
+    text: content.slice(0, 20000), // lưu giới hạn
     [VECTOR_PATH]: vector,
     source: filePathOrUrl,
     uploadedAt: new Date(),
@@ -265,65 +274,57 @@ export async function fundVectorSearch(query, topk = 5) {
   }));
 }
 
-/**
- * search for conferences & journals (alias)
- */
+// --- search for conferences & journals (alias) ---
 export async function search({ question, topk = 5 }) {
   await client.connect();
-  const db = client.db(dbName);
+  const dbCli = client.db(dbName);
 
   const queryVector = await embed(question);
   const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
 
-  const confResults = await db
-    .collection("conference")
-    .aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_conference",
-          path: "vector",
-          queryVector,
-          numCandidates: 100,
-          limit: safeTopK,
-          similarity: "cosine",
-        },
+  const confResults = await dbCli.collection("conference").aggregate([
+    {
+      $vectorSearch: {
+        index: "vector_index_conference",
+        path: "vector",
+        queryVector,
+        numCandidates: 100,
+        limit: safeTopK,
+        similarity: "cosine",
       },
-      {
-        $project: {
-          _id: 0,
-          vector: 0,
-          created_time: 0,
-          modified_time: 0,
-          score: { $meta: "vectorSearchScore" },
-        },
+    },
+    {
+      $project: {
+        _id: 0,
+        vector: 0,
+        created_time: 0,
+        modified_time: 0,
+        score: { $meta: "vectorSearchScore" },
       },
-    ])
-    .toArray();
+    },
+  ]).toArray();
 
-  const journalResults = await db
-    .collection("journal")
-    .aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_journal",
-          path: "vector",
-          queryVector,
-          numCandidates: 100,
-          limit: safeTopK,
-          similarity: "cosine",
-        },
+  const journalResults = await dbCli.collection("journal").aggregate([
+    {
+      $vectorSearch: {
+        index: "vector_index_journal",
+        path: "vector",
+        queryVector,
+        numCandidates: 100,
+        limit: safeTopK,
+        similarity: "cosine",
       },
-      {
-        $project: {
-          _id: 0,
-          vector: 0,
-          created_time: 0,
-          modified_time: 0,
-          score: { $meta: "vectorSearchScore" },
-        },
+    },
+    {
+      $project: {
+        _id: 0,
+        vector: 0,
+        created_time: 0,
+        modified_time: 0,
+        score: { $meta: "vectorSearchScore" },
       },
-    ])
-    .toArray();
+    },
+  ]).toArray();
 
   return {
     conference: confResults,
