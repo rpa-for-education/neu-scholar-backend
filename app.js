@@ -255,7 +255,7 @@ app.post("/api/agent", async (req, res) => {
 
     console.log(req.body);
 
-    
+
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
@@ -288,18 +288,21 @@ app.post("/api/agent", async (req, res) => {
 
     // Lấy short-term memory từ chat_history nếu có, không dùng DB lưu bộ nhớ
     let memoryEntries = [];
-    if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
-      memoryEntries = req.body.chat_history
-        .slice(-2 * DEFAULT_SHORT_MEMORY)  // lấy gấp đôi short memory
-        .map((entry) => ({ role: entry.role || "user", text: entry.content || "" }))
-        .filter((m) => m.text && m.text.trim().length > 0);
-    } else {
-      try {
-        memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY);
-      } catch (e) {
-        console.warn("getMemory error:", e);
-      }
+    if (Array.isArray(req.body.chat_history)) {
+      console.log("DEBUG chat_history:");
+      req.body.chat_history.forEach((entry, idx) => {
+        console.log(`[${idx}] role: ${entry.role}, content: ${entry.content}`);
+      });
+      const recentHistory = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
+      memoryEntries = recentHistory.map(entry => ({
+        role: entry.role || "user",
+        text: entry.content || ""
+      })).filter(m => m.text.trim().length > 0);
     }
+
+    const contextText = hits.map((f, i) =>
+      `${i + 1}. ${f["OPPORTUNITY TITLE"] || ""} - ${f["AGENCY NAME"] || ""} - ${f["OPPORTUNITY URL"] || ""}`
+    ).join("\n");
 
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
 
