@@ -328,6 +328,8 @@ ${contextPrompt}
       }
     }
 
+    console.log("req.body.chat_history");
+
     const responseTime = Date.now() - start;
     const tokenCount = (() => {
       try {
