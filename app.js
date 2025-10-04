@@ -306,9 +306,9 @@ app.post("/api/agent", async (req, res) => {
     const contextPrompt = buildPrompt(question, conferences, journals);
 
     const finalPrompt = `
-      ${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
-
       ${contextPrompt}
+
+      ${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
 `;
 
     console.log("===== Prompt =====");
