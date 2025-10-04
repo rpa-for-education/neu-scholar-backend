@@ -301,20 +301,14 @@ app.post("/api/agent", async (req, res) => {
       })).filter(m => m.text.trim().length > 0);
     }
 
-    const contextText = hits.map((f, i) =>
-      `${i + 1}. ${f["OPPORTUNITY TITLE"] || ""} - ${f["AGENCY NAME"] || ""} - ${f["OPPORTUNITY URL"] || ""}`
-    ).join("\n");
-
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
 
     const contextPrompt = buildPrompt(question, conferences, journals);
 
     const finalPrompt = `
-Ngữ cảnh trò chuyện gần đây:
-${memoryText}
+      ${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
 
-
-${contextPrompt}
+      ${contextPrompt}
 `;
 
     console.log("===== Prompt =====");
