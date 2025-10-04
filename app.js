@@ -15,7 +15,6 @@ const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất 
-const MAX_SHORT_HISTORY = 5; // 5 cặp hỏi - đáp gần nhất
 
 // ===== Middleware =====
 app.use(cors());
@@ -33,7 +32,6 @@ app.use((req, _res, next) => {
 });
 
 /* ===================== Helpers ===================== */
-// Hàm format text trả lời cho đẹp và dễ đọc
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -211,7 +209,6 @@ async function fetchArticles() {
   }
 }
 
-/* ===================== Chuẩn hóa context ===================== */
 function buildPrompt(question, conferences = [], journals = []) {
   let context =
     "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
@@ -279,7 +276,7 @@ app.post("/api/agent", async (req, res) => {
 
     const sid = req.sessionID;
 
-    // Short-term memory — CHỈ lấy từ chat_history
+    // Short-term memory chỉ lấy từ chat_history
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
       console.log("DEBUG chat_history:");
@@ -317,7 +314,6 @@ ${prompt}
       answer = formatAnswerText(answer);
     }
 
-    // Nếu client không gửi chat_history mới lưu memory
     if (!req.body.chat_history) {
       try {
         await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
@@ -336,7 +332,6 @@ ${prompt}
       }
     })();
 
-    // Log cuộc hội thoại
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -373,5 +368,6 @@ if (!process.env.VERCEL) {
     initEmbedding().catch(e => console.error("Embedding preload failed:", e.message));
   });
 }
+
 
 export default app;
