@@ -1,23 +1,16 @@
-// app.js
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import session from "express-session";
 import multer from "multer";
 import fs from "fs";
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import mammoth from "mammoth";
-import fetch from "node-fetch";
+import fetch from "node-fetch"; // ✅ fetch để tải file từ link
 
 import axios from "axios";
 import { callLLM } from "./llm.js";
-import {
-  journalVectorSearch,
-  conferenceVectorSearch,
-  initEmbedding,
-  embedText,
-  readDocxFromUrl,
-} from "./search.js";
+import { journalVectorSearch, conferenceVectorSearch, initEmbedding, embedText } from "./search.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
 import { addMemory, getMemory } from "./memory.js";
@@ -29,7 +22,6 @@ const PORT = process.env.PORT || 4000;
 const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
-const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const MAX_SHORT_HISTORY = 5; // 5 cặp hỏi - đáp gần nhất
 
@@ -81,6 +73,73 @@ async function Conferences() {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+// ============================= PROCESS FILE BUFFER =============================
+async function processFileBuffer(fileBuffer, fileName, fileUrl, fileCol) {
+  try {
+    const ext = fileName.toLowerCase().endsWith(".pdf")
+      ? ".pdf"
+      : fileName.toLowerCase().endsWith(".docx")
+      ? ".docx"
+      : ".txt";
+
+    let extractedText = "";
+
+    if (ext === ".pdf") {
+      const data = await pdfParse(fileBuffer);
+      extractedText = data.text || "";
+    } else if (ext === ".docx") {
+      const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
+      extractedText = value || "";
+    } else {
+      extractedText = fileBuffer.toString("utf8");
+    }
+
+    if (extractedText.trim()) {
+      const embedding = await embedText(extractedText);
+      await fileCol.insertOne({
+        name: fileName,
+        url: fileUrl,
+        text: extractedText,
+        vector: embedding,
+        uploadedAt: new Date(),
+      });
+    }
+
+    return extractedText;
+  } catch (err) {
+    console.error(`❌ Không thể xử lý file ${fileName}:`, err);
+    return "";
+  }
+}
+
+// Xử lý file từ URL (file_name array trong /api/agent)
+async function processFileLinks(file_name, fileCol, k) {
+  const fileHits = [];
+  let fileContext = "";
+
+  if (!Array.isArray(file_name) || file_name.length === 0) return { fileHits, fileContext };
+
+  for (const link of file_name) {
+    const existing = await fileCol.findOne({ url: link });
+    if (!existing) {
+      try {
+        console.log("📄 Đang tải file:", link);
+        const resp = await fetch(link);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        const fileName = link.split("/").pop() || `file_${Date.now()}`;
+        await processFileBuffer(buffer, fileName, link, fileCol);
+      } catch (fetchErr) {
+        console.error("❌ Không thể đọc file link:", link, fetchErr);
+      }
+    }
+  }
+
+  const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
+  fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
+  return { fileHits: foundFiles.slice(0, k), fileContext };
+}
+
 // ============================= UPLOAD FILE API =============================
 app.post("/api/upload", upload.array("file"), async (req, res) => {
   try {
@@ -103,69 +162,18 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
       const key = prefix ? `${prefix}/${uniqueName}` : uniqueName;
 
       // upload to S3 / MinIO
-      try {
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: process.env.MINIO_BUCKET_NAME,
-            Key: key,
-            Body: file.buffer,
-            ContentType: file.mimetype,
-          })
-        );
-      } catch (err) {
-        console.error("❌ S3 upload failed:", err);
-        // continue: still try to process text & store metadata (URL may be invalid)
-      }
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: process.env.MINIO_BUCKET_NAME,
+          Key: key,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+        })
+      );
 
-      const fileUrl = `http://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${process.env.MINIO_BUCKET_NAME}/${encodeURIComponent(
-        key
-      )}`;
+      const fileUrl = `http://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${process.env.MINIO_BUCKET_NAME}/${encodeURIComponent(key)}`;
 
-      let extractedText = "";
-      if (ext === ".pdf") {
-        try {
-          const data = await pdfParse(file.buffer);
-          extractedText = data.text || "";
-        } catch (e) {
-          console.error("❌ pdfParse error:", e);
-          extractedText = "";
-        }
-      } else if (ext === ".docx") {
-        try {
-          const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-          extractedText = value || "";
-        } catch (e) {
-          console.error("❌ mammoth docx parse error:", e);
-          extractedText = "";
-        }
-      } else if (ext === ".txt") {
-        extractedText = file.buffer.toString("utf8");
-      }
-
-      if (extractedText.trim()) {
-        try {
-          const embedding = await embedText(extractedText);
-          await fileCol.insertOne({
-            name: uniqueName,
-            url: fileUrl,
-            text: extractedText,
-            vector: embedding,
-            uploadedAt: new Date(),
-          });
-        } catch (e) {
-          console.error("❌ Indexing uploaded file failed:", e);
-        }
-      } else {
-        // store metadata without text if needed
-        await fileCol.insertOne({
-          name: uniqueName,
-          url: fileUrl,
-          text: extractedText,
-          vector: null,
-          uploadedAt: new Date(),
-        });
-      }
-
+      await processFileBuffer(file.buffer, uniqueName, fileUrl, fileCol);
       uploadedUrls.push(fileUrl);
     }
 
@@ -185,7 +193,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Journals CRUD
+// ============================= JOURNALS CRUD =============================
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -259,7 +267,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-// Conferences CRUD
+// ============================= CONFERENCES CRUD =============================
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -269,9 +277,7 @@ app.get("/api/conferences", async (req, res) => {
       .limit(DEFAULT_LIMIT_CONFERENCE)
       .batchSize(500);
     const items = [];
-    await cursor.forEach((item) => {
-      items.push(item);
-    });
+    await cursor.forEach((item) => items.push(item));
     res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
@@ -330,6 +336,7 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
+// ============================= FETCH ARTICLES =============================
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
@@ -340,6 +347,7 @@ async function fetchArticles() {
   }
 }
 
+// ============================= BUILD PROMPT =============================
 function buildPrompt(question, conferences = [], journals = []) {
   let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
 
@@ -365,6 +373,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
+// ============================= AGENT API =============================
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
 
@@ -383,7 +392,6 @@ app.post("/api/agent", async (req, res) => {
     const k = Math.max(1, Math.min(parseInt(topk, 10) || 5, 50));
     let conferences = [];
     let journals = [];
-    let hits = [];
     let fileHits = [];
     let fileContext = "";
 
@@ -408,102 +416,14 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
-    // ✅ XỬ LÝ FILE LINK (theo logic giống 2 file trước)
-    try {
-      if (Array.isArray(file_name) && file_name.length > 0) {
-        for (const link of file_name) {
-          const existing = await fileCol.findOne({ url: link });
-          if (!existing) {
-            try {
-              console.log("📄 Đang tải file:", link);
-              const resp = await fetch(link);
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    // ✅ XỬ LÝ FILE LINK
+    const fileResult = await processFileLinks(file_name, fileCol, k);
+    fileHits = fileResult.fileHits;
+    fileContext = fileResult.fileContext;
 
-              const buffer = Buffer.from(await resp.arrayBuffer());
-              const ext = link.toLowerCase().endsWith(".pdf")
-                ? ".pdf"
-                : link.toLowerCase().endsWith(".docx")
-                ? ".docx"
-                : ".txt";
-
-              let extractedText = "";
-
-              if (ext === ".pdf") {
-                try {
-                  const data = await pdfParse(buffer);
-                  extractedText = data.text || "";
-                } catch (e) {
-                  console.error("pdf parse error:", e);
-                  extractedText = "";
-                }
-              } else if (ext === ".docx") {
-                try {
-                  const { value } = await mammoth.extractRawText({ buffer });
-                  extractedText = value || "";
-                } catch (e) {
-                  console.error("mammoth error:", e);
-                  // fallback: try readDocxFromUrl which uses docx-parser
-                  try {
-                    extractedText = await readDocxFromUrl(link);
-                  } catch (ee) {
-                    extractedText = "";
-                  }
-                }
-              } else {
-                extractedText = buffer.toString("utf8");
-              }
-
-              if (extractedText.trim()) {
-                try {
-                  const embedding = await embedText(extractedText);
-                  await fileCol.insertOne({
-                    name: link.split("/").pop(),
-                    url: link,
-                    text: extractedText,
-                    vector: embedding,
-                    uploadedAt: new Date(),
-                  });
-                } catch (e) {
-                  console.error("Indexing fetched file failed:", e);
-                }
-              } else {
-                // still insert metadata so file shows up in file list
-                await fileCol.insertOne({
-                  name: link.split("/").pop(),
-                  url: link,
-                  text: extractedText,
-                  vector: null,
-                  uploadedAt: new Date(),
-                });
-              }
-            } catch (fetchErr) {
-              console.error("❌ Không thể đọc file link:", link, fetchErr);
-            }
-          }
-        }
-
-        const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
-
-        fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
-
-        fileHits = foundFiles.slice(0, k);
-      } else {
-        fileHits = [];
-        fileContext = "";
-      }
-    } catch (e) {
-      console.error("❌ Lỗi xử lý file links:", e);
-      fileHits = [];
-      fileContext = "";
-    }
-
-    // Lấy short-term memory từ chat_history nếu có, không dùng DB lưu bộ nhớ
+    // Lấy short-term memory từ chat_history
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history)) {
-      console.log("DEBUG chat_history:");
-      req.body.chat_history.forEach((entry, idx) => {
-        console.log(`[${idx}] role: ${entry.role}, content: ${entry.content}`);
-      });
       const recentHistory = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
       memoryEntries = recentHistory
         .map((entry) => ({
@@ -527,7 +447,7 @@ app.post("/api/agent", async (req, res) => {
       ${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
 
       ${fileContext}
-`;
+    `;
 
     console.log("===== Prompt =====");
     console.log(finalPrompt);
@@ -578,6 +498,7 @@ app.post("/api/agent", async (req, res) => {
   }
 });
 
+// ============================= START SERVER =============================
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`API listening on http://localhost:${PORT}`);
