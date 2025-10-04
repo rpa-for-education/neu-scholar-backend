@@ -11,7 +11,7 @@ function normalizeSessionId(sessionId) {
  * Lưu message vào mảng entries của document sessionId, tạo mới nếu chưa có
  * Chuẩn hóa entries thành mảng nếu cần tránh lỗi conflict MongoDB
  */
-export async function addToMemory(sessionId, role, text, maxEntries = DEFAULT_MAX) {
+export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX) {
   const sessionIdStr = normalizeSessionId(sessionId);
   if (!sessionIdStr) return;
 
