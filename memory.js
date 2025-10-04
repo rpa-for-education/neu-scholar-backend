@@ -13,7 +13,7 @@ function normalizeSessionId(sessionId) {
  * Chỉ ghi những message có text là chuỗi không rỗng
  */
 export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX) {
-  const sid = normalizeId(sessionId);
+  const sid = normalizeSessionId(sessionId);
   if (!sid) return;
 
   if (typeof text !== 'string') {
