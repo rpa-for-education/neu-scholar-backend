@@ -16,6 +16,7 @@ const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
+const MAX_SHORT_HISTORY = 5; // 5 cặp hỏi - đáp gần nhất
 
 // ===== Middleware =====
 app.use(cors());
