@@ -249,52 +249,54 @@ function buildPrompt(question, conferences = [], journals = []) {
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
-    const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body || {};
+    const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body;
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
 
-
     let conferences = [];
     let journals = [];
-    
+
     try {
       conferences = await conferenceVectorSearch(question, Number(topk));
     } catch (e) {
-      console.error("conferenceVectorSearch error:", e.message);
+      console.error("conferenceVectorSearch error:", e);
     }
-    
+
     try {
       journals = await journalVectorSearch(question, Number(topk));
     } catch (e) {
-      console.error("journalVectorSearch error:", e.message);
+      console.error("journalVectorSearch error:", e);
     }
-    
-    if (!conferences.length && !journals.length) {
+
+    if (conferences.length === 0 && journals.length === 0) {
       try {
         const articles = await fetchArticles();
-        conferences = articles.slice(0, topk);
+        conferences = articles.slice(0, Number(topk));
       } catch (e) {
-        console.error("fetchArticles error:", e.message);
+        console.error("fetchArticles error:", e);
       }
     }
 
-
     const sid = req.sessionID;
-
 
     // Short-term memory strictly from chat_history in request body
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
-      console.log("DEBUG chat_history content:");
+      console.log("DEBUG chat_history:");
       req.body.chat_history.forEach((entry, idx) =>
         console.log(`[${idx}] role=${entry.role}, content=${entry.content}`)
       );
-      const recentHistory = req.body.chat_history.slice(-DEFAULT_SHORT_MEMORY_SIZE * 2);
-      memoryEntries = recentHistory
-        .map(entry => ({ role: entry.role || "user", text: entry.content || "" }))
-        .filter(m => m.text.trim());
+
+      const recent = req.body.chat_history.slice(-DEFAULT_SHORT_MEMORY_SIZE * 2);
+      memoryEntries = recent
+        .map(entry => ({
+          role: entry.role || "user",
+          text: entry.content || ""
+        }))
+        .filter(m => typeof m.text === "string" && m.text.trim().length > 0);
     } else {
+      // No chat_history provided, fallback to fetching from DB
       try {
         memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
@@ -302,19 +304,18 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
-
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
+
     const contextPrompt = buildPrompt(question, conferences, journals);
     const finalPrompt = `
 Ngữ cảnh hội thoại gần đây:
 ${memoryText}
 
-
 ${contextPrompt}
 `;
+
     console.log("===== Prompt =====");
     console.log(finalPrompt);
-
 
     let answer;
     try {
@@ -323,27 +324,26 @@ ${contextPrompt}
       console.error("callLLM error:", e);
       return res.status(500).json({ error: "Failed to call LLM service" });
     }
-    
-    if (typeof answer === 'string') {
-      answer = formatAnswerText(answer);
-    }
 
-    if (!req.body.chat_history) {
+    if (typeof answer !== "string") {
+      // Nếu là object, convert sang string
+      answer = JSON.stringify(answer);
+    }
+    answer = answer.trim();
+
+    // Nếu không có chat_history trong request, thì mới lưu vào DB (để tránh lưu message trùng)
+    if (!Array.isArray(req.body.chat_history)) {
       try {
         if (typeof question === "string" && question.trim()) {
           await addMemory(sid, "user", question.trim(), DEFAULT_SHORT_MEMORY_SIZE);
         }
-        if (typeof answer !== "string") {
-          answer = JSON.stringify(answer);
+        if (typeof answer === "string" && answer.trim()) {
+          await addMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
         }
-        if (answer.trim) answer = answer.trim();
-        await addMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
         console.warn("addMemory failed:", e);
       }
     }
-
-
 
     const responseTime = Date.now() - start;
     const tokenCount = (() => {
@@ -354,7 +354,7 @@ ${contextPrompt}
       }
     })();
 
-
+    // Log cuộc gọi
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -370,7 +370,6 @@ ${contextPrompt}
       console.error("Log insert error:", e);
     }
 
-
     res.json({
       model_id,
       answer,
@@ -379,11 +378,13 @@ ${contextPrompt}
       responseTime,
       tokenCount
     });
+
   } catch (err) {
     console.error("Unhandled error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 
 if (!process.env.VERCEL) {
