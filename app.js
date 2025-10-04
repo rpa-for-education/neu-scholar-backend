@@ -7,7 +7,8 @@ import { callLLM } from "./llm.js";
 import { journalVectorSearch, conferenceVectorSearch, initEmbedding } from "./search.js";
 import { getDb } from "./db.js"; 
 import { encode } from "gpt-tokenizer";
-import { addToMemory, getMemory } from "./memory.js";
+import { addMemory as addToMemory, getMemory } from "./memory.js";
+
 
 const app = express();
 const PORT = 4000;
@@ -16,22 +17,26 @@ const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY_SIZE = 10; // nhớ 10 câu gần nhất 
 
+
 // ===== Middleware =====
 app.use(cors());
 app.use(session({
-  secret: process.env.SESSION_SECRET || "fitneu2025",
+  secret: process.env.SESSION_SECRET || "fitsecret",
   resave: false,
   saveUninitialized: true,
   cookie: { secure: false }
 }));
 app.use(express.json({ limit: "10mb" }));
 
+
 app.use((req, _res, next) => {
   console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
 
-/* ===================== Helpers ===================== */
+
+
+// Hàm format text trả lời cho rõ ràng, dễ đọc hơn
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -41,18 +46,26 @@ function formatAnswerText(rawText) {
 }
 
 function parseBool(v) { return String(v).toLowerCase() === "true"; }
-function getProjection(includeVector) { return includeVector ? {} : { vector: 0 }; }
 
-/* ===================== MongoDB ===================== */
+// Dùng để cấu hình projection bỏ vector khi cần thiết
+function getProjection(includeVector) {
+  return includeVector ? {} : { vector: 0 };
+}
+
+// MongoDB helpers
 let db;
 async function getCollection(name) {
   if (!db) db = await getDb();
   return db.collection(name);
 }
-async function Journals() { return getCollection("journal"); }
-async function Conferences() { return getCollection("conference"); }
+async function Journals() {
+  return getCollection("journal");
+}
+async function Conferences() {
+  return getCollection("conference");
+}
 
-/* ===================== HEALTH ===================== */
+// Health check endpoint
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -61,7 +74,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-/* ===================== JOURNALS CRUD ===================== */
+// Journals CRUD operations remain same
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -132,7 +145,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-/* ===================== CONFERENCES CRUD ===================== */
+// Conferences CRUD operations remain the same
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -141,7 +154,9 @@ app.get("/api/conferences", async (req, res) => {
                       .limit(DEFAULT_LIMIT_CONFERENCE)
                       .batchSize(500);
     const items = [];
-    await cursor.forEach(item => items.push(item));
+    await cursor.forEach(item => {
+      items.push(item);
+    });
     res.json({ total: items.length, items });
   } catch (err) {
     console.error("❌ /api/conferences error:", err);
@@ -198,17 +213,18 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-/* ===================== API ngoài + Agent ===================== */
+// Fetch external articles for fallback
 async function fetchArticles() {
   try {
     const res = await axios.get(process.env.API_RESEARCH);
     return Array.isArray(res.data) ? res.data : [];
   } catch (err) {
-    console.error("❌ Lỗi fetchArticles:", err.message);
+    console.error("❌ fetchArticles error:", err.message);
     return [];
   }
 }
 
+// Compose prompt for LLM
 function buildPrompt(question, conferences = [], journals = []) {
   let context =
     "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
@@ -216,14 +232,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   if (conferences.length) {
     context += "Danh sách hội thảo:\n";
     conferences.slice(0, 10).forEach((c, i) => {
-      context += `Hội thảo ${i + 1}: 
-- Tên: ${c.name || c.title || "Không có"} 
-- Acronym: ${c.acronym || "Không có"} 
-- Địa điểm: ${c.location || "Không có"} 
-- Hạn nộp: ${c.deadline || "Không có"} 
-- Ngày tổ chức: ${c.start_date || "Không có"} 
-- Chủ đề: ${c.topics || "Không có"} 
-- Link: ${c.url || "Không có"}\n\n`;
+      context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
     });
   } else {
     context += "Không có hội thảo phù hợp.\n\n";
@@ -232,12 +241,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   if (journals.length) {
     context += "Danh sách tạp chí:\n";
     journals.slice(0, 10).forEach((j, i) => {
-      context += `Tạp chí ${i + 1}: 
-- Tên: ${j.title || "Không có"} 
-- Nhà xuất bản: ${j.publisher || "Không có"} 
-- Lĩnh vực: ${j.areas || "Không có"} 
-- Danh mục: ${j.categories || "Không có"} 
-- ISSN: ${j.issn || "Không có"}\n\n`;
+      context += `Tạp chí ${i + 1}:\n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
     });
   } else {
     context += "Không có tạp chí phù hợp.\n\n";
@@ -247,42 +251,47 @@ function buildPrompt(question, conferences = [], journals = []) {
   return context;
 }
 
-/* ===================== Agent API (short-term memory) ===================== */
+// Agent endpoint
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
     const { question, model_id = DEFAULT_MODEL_ID, topk = 5 } = req.body || {};
-    if (!question?.trim()) {
+    if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
 
-    let conferences = [];
-    let journals = [];
+    let conferences = [], journals = [];
+    
     try {
       conferences = await conferenceVectorSearch(question, Number(topk));
     } catch (e) {
-      console.error("Conference vector search failed:", e.message);
+      console.error("conferenceVectorSearch error:", e.message);
     }
+    
     try {
       journals = await journalVectorSearch(question, Number(topk));
     } catch (e) {
-      console.error("Journal vector search failed:", e.message);
+      console.error("journalVectorSearch error:", e.message);
     }
-
+    
     if (!conferences.length && !journals.length) {
-      const articles = await fetchArticles();
-      conferences = articles.slice(0, topk);
+      try {
+        const articles = await fetchArticles();
+        conferences = articles.slice(0, topk);
+      } catch (e) {
+        console.error("fetchArticles error:", e.message);
+      }
     }
 
     const sid = req.sessionID;
-
-    // Short-term memory chỉ lấy từ chat_history
+    
+    // Strictly pull short-term memory from chat_history in request body
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history) && req.body.chat_history.length) {
-      console.log("DEBUG chat_history:");
-      req.body.chat_history.forEach((entry, idx) => {
-        console.log(`[${idx}] role: ${entry.role}, content: ${entry.content}`);
-      });
+      console.log("DEBUG chat_history content:");
+      req.body.chat_history.forEach((entry, idx) =>
+        console.log(`[${idx}] role=${entry.role}, content=${entry.content}`)
+      );
       const recentHistory = req.body.chat_history.slice(-DEFAULT_SHORT_MEMORY_SIZE * 2);
       memoryEntries = recentHistory.map(entry => ({
         role: entry.role || "user",
@@ -292,46 +301,52 @@ app.post("/api/agent", async (req, res) => {
       try {
         memoryEntries = await getMemory(sid, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
-        console.warn("⚠️ getMemory failed:", e);
-        memoryEntries = [];
+        console.warn("getMemory error:", e);
       }
     }
 
     const memoryText = memoryEntries.map(m => `- [${m.role}] ${m.text}`).join("\n");
-    const prompt = buildPrompt(question, conferences, journals);
-
+    const contextPrompt = buildPrompt(question, conferences, journals);
     const finalPrompt = `
 Ngữ cảnh hội thoại gần đây:
 ${memoryText}
 
-${prompt}
+${contextPrompt}
 `;
+    console.log("===== Prompt =====");
+    console.log(finalPrompt);
 
-    console.log("===== Prompt =====\n", finalPrompt);
-
-    let answer = await callLLM(finalPrompt, model_id);
-    if (typeof answer === "string") {
+    let answer;
+    try {
+      answer = await callLLM(finalPrompt, model_id);
+    } catch (e) {
+      console.error("callLLM error:", e);
+      return res.status(500).json({ error: "Failed to call LLM service" });
+    }
+    
+    if (typeof answer === 'string') {
       answer = formatAnswerText(answer);
     }
-
+    
+    // Only save memory if chat_history is NOT present (avoid duplicate storage)
     if (!req.body.chat_history) {
       try {
         await addToMemory(sid, "user", question, DEFAULT_SHORT_MEMORY_SIZE);
         await addToMemory(sid, "assistant", answer, DEFAULT_SHORT_MEMORY_SIZE);
       } catch (e) {
-        console.warn("⚠️ addToMemory failed:", e);
+        console.warn("addToMemory failed:", e);
       }
     }
-
-    const responseTimeMs = Date.now() - start;
-    const tokensUsed = (() => {
+    
+    const responseTime = Date.now() - start;
+    const tokenCount = (() => {
       try {
         return encode(finalPrompt).length + encode(answer).length;
       } catch {
         return null;
       }
     })();
-
+    
     try {
       const col = await getCollection("chatlogs");
       await col.insertOne({
@@ -339,35 +354,38 @@ ${prompt}
         answer,
         sessionId: sid,
         model_id,
-        responseTimeMs,
-        tokensUsed,
+        responseTime,
+        tokenCount,
         createdAt: new Date()
       });
     } catch (e) {
-      console.error("❌ Log save failed:", e);
+      console.error("Log insert error:", e);
     }
-
+    
     res.json({
       model_id,
       answer,
-      retrieved: { conference: conferences, journal: journals },
+      retrieved: { conferences, journals },
       memoryCount: memoryEntries.length,
-      responseTimeMs,
-      tokensUsed
+      responseTime,
+      tokenCount
     });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message || "Internal error" });
+  } catch (err) {
+    console.error("Unhandled error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-/* ===================== Boot ===================== */
+// Start server & preload embeddings
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
-    console.log(`➡️ API listening on http://localhost:${PORT}`);
-    initEmbedding().catch(e => console.error("Embedding preload failed:", e.message));
+    console.log(`API listening on http://localhost:${PORT}`);
+    try {
+      await initEmbedding();
+    } catch (e) {
+      console.error("Embedding initialization error:", e);
+    }
   });
 }
-
 
 export default app;
