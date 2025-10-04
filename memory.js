@@ -17,11 +17,10 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
 
   // Đảm bảo text là chuỗi trước khi trim
   if (typeof text !== "string") {
-    // Chuyển về chuỗi JSON hoặc bỏ qua nếu không hợp lệ
     try {
       text = JSON.stringify(text);
     } catch {
-      return; // Ko lưu nếu không thể chuyển thành chuỗi
+      return; // Không lưu nếu không thể chuyển thành chuỗi
     }
   }
 
@@ -31,19 +30,20 @@ export async function addMemory(sessionId, role, text, maxEntries = DEFAULT_MAX)
   const db = await getDb();
   const col = db.collection(DEFAULT_COLLECTION);
 
-  // Kiểm tra document hiện tại
+  // Lấy document hiện tại
   const doc = await col.findOne({ sessionId: sessionIdStr });
+
+  // Nếu tồn tại và entries không phải là array, chuẩn hóa thành mảng rỗng
   if (doc && !Array.isArray(doc.entries)) {
-    // Chuẩn hóa entries thành mảng nếu cần
     await col.updateOne(
       { sessionId: sessionIdStr },
-      [{ $set: { entries: { $cond: [{ $isArray: "$entries" }, "$entries", []] } } }]
+      { $set: { entries: [] } }
     );
   }
 
   const entry = { role, text, createdAt: new Date() };
 
-  // Thêm entry mới với giới hạn maxEntries
+  // Thêm entry mới, giữ giới hạn maxEntries
   await col.updateOne(
     { sessionId: sessionIdStr },
     {
