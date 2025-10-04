@@ -281,7 +281,7 @@ app.post("/api/agent", async (req, res) => {
       }
     }
 
-    const sid = req.sessionID;
+    const sid = req.body.session_id;
 
     // Lấy short-term memory từ chat_history nếu có, không dùng DB lưu bộ nhớ
     let memoryEntries = [];
