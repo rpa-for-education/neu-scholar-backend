@@ -4,7 +4,6 @@ import cors from "cors";
 import session from "express-session";
 import multer from "multer";
 import fs from "fs";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import fetch from "node-fetch";
 
@@ -121,6 +120,8 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
       let extractedText = "";
       if (ext === ".pdf") {
         try {
+          // dynamic import to avoid pdf-parse loading test file at module init (fix Vercel ENOENT)
+          const { default: pdfParse } = await import("pdf-parse");
           const data = await pdfParse(file.buffer);
           extractedText = data.text || "";
         } catch (e) {
@@ -366,6 +367,8 @@ async function processFileUrl(fileUrl) {
     let extractedText = "";
     if (ext === ".pdf") {
       try {
+        // dynamic import here as well
+        const { default: pdfParse } = await import("pdf-parse");
         const data = await pdfParse(buffer);
         extractedText = data.text || "";
       } catch (e) {

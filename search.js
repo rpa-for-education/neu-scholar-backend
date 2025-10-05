@@ -1,4 +1,3 @@
-// search.js
 // Kết hợp logic tìm kiếm (conference/journal), đọc file, embedding (local Xenova hoặc fallback OpenAI)
 
 process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
@@ -14,7 +13,6 @@ import fsSync from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import * as docx from "docx-parser";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import { getDb } from "./db.js";
 
@@ -161,8 +159,15 @@ export async function readFileContent(inputPathOrUrl) {
 
   if (ext === ".pdf") {
     const dataBuffer = buffer || await fs.readFile(filePath);
-    const pdf = await pdfParse(dataBuffer);
-    return pdf.text || "";
+    try {
+      // dynamic import to avoid pdf-parse module init reading test files in serverless env
+      const { default: pdfParse } = await import("pdf-parse");
+      const pdf = await pdfParse(dataBuffer);
+      return pdf.text || "";
+    } catch (e) {
+      console.error("❌ pdfParse error in readFileContent:", e);
+      throw e;
+    }
   } else if (ext === ".docx") {
     const dataBuffer = buffer || await fs.readFile(filePath);
     const { value } = await mammoth.extractRawText({ buffer: dataBuffer });
