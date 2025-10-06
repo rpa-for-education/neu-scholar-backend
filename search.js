@@ -43,7 +43,7 @@ export async function initEmbedding() {
         transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
         transformers.env.useFSCache = true;
       }
-    } catch (ee) { }
+    } catch (ee) {}
     const { pipeline } = transformers;
     embedder = await pipeline("feature-extraction", modelName);
     console.log("✅ Embedder ready (local Xenova)");
@@ -283,7 +283,7 @@ export async function journalVectorSearch(question, topk = 5) {
   return result.journal;
 }
 
-// ========== VECTOR SEARCH CHO FILE UPLOAD ==========
+// Thêm hàm tìm kiếm vector file upload
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const VECTOR_INDEX_UPLOADED_FILES = "vector_index_uploaded_files";
 export async function uploadedFilesVectorSearch(query, topk = 5) {

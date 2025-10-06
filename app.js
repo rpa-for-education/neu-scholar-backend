@@ -15,7 +15,7 @@ import {
   initEmbedding,
   embedText,
   readDocxFromUrl,
-  uploadedFilesVectorSearch // Thêm dòng này để gọi vector search file
+  uploadedFilesVectorSearch
 } from "./search.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
@@ -32,7 +32,6 @@ const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const MAX_SHORT_HISTORY = 5;
 
-// ===== Middleware =====
 app.use(cors());
 app.use(
   session({
@@ -49,7 +48,6 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Format trả lời
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -65,7 +63,6 @@ function getProjection(includeVector) {
   return includeVector ? {} : { vector: 0 };
 }
 
-// MongoDB helpers
 let db;
 async function getCollection(name) {
   if (!db) db = await getDb();
@@ -124,11 +121,9 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
         }
       } else if (ext === ".docx") {
         try {
-          const arrayBuffer = file.buffer.buffer.slice(
-            file.buffer.byteOffset,
-            file.buffer.byteOffset + file.buffer.byteLength
-          );
-          const { value } = await mammoth.extractRawText({ arrayBuffer });
+          // Dùng buffer thay vì arrayBuffer để tránh lỗi mammoth trên Node.js
+          const buffer = file.buffer;
+          const { value } = await mammoth.extractRawText({ buffer });
           extractedText = value || "";
         } catch (e) {
           console.error("❌ mammoth docx parse error:", e);
@@ -157,7 +152,7 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
   }
 });
 
-// ============================= TÌM KIẾM NỘI DUNG FILE ĐÃ UPLOAD =============================
+// ============================= SEARCH UPLOADED FILES VECTOR API =============================
 app.post("/api/search_files", async (req, res) => {
   try {
     const { query, topk } = req.body;
@@ -170,7 +165,7 @@ app.post("/api/search_files", async (req, res) => {
   }
 });
 
-// ============================= HEALTH CHECK =============================
+// HEALTH CHECK
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -179,7 +174,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// ============================= Journals CRUD =============================
+// Journals CRUD
 app.get("/api/journals", async (req, res) => {
   try {
     const col = await Journals();
@@ -253,7 +248,7 @@ app.delete("/api/journals/:id", async (req, res) => {
   }
 });
 
-// ============================= Conferences CRUD =============================
+// Conferences CRUD
 app.get("/api/conferences", async (req, res) => {
   try {
     const col = await Conferences();
@@ -324,85 +319,7 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
-// ============================= AGENT =============================
-async function fetchArticles() {
-  try {
-    const res = await axios.get(process.env.API_RESEARCH);
-    return Array.isArray(res.data) ? res.data : [];
-  } catch (err) {
-    console.error("❌ fetchArticles error:", err.message);
-    return [];
-  }
-}
-
-function buildPrompt(question, conferences = [], journals = []) {
-  let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
-  if (conferences.length) {
-    context += "Danh sách hội thảo:\n";
-    conferences.slice(0, 10).forEach((c, i) => {
-      context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
-    });
-  } else {
-    context += "Không có hội thảo phù hợp.\n\n";
-  }
-  if (journals.length) {
-    context += "Danh sách tạp chí:\n";
-    journals.slice(0, 10).forEach((j, i) => {
-      context += `Tạp chí ${i + 1}:\n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
-    });
-  } else {
-    context += "Không có tạp chí phù hợp.\n\n";
-  }
-  context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
-  return context;
-}
-
-async function processFileUrl(fileUrl) {
-  try {
-    const resp = await fetch(fileUrl);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const arrayBuffer = await resp.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const ext = fileUrl.toLowerCase().endsWith(".pdf")
-      ? ".pdf"
-      : fileUrl.toLowerCase().endsWith(".docx")
-      ? ".docx"
-      : ".txt";
-    let extractedText = "";
-    if (ext === ".pdf") {
-      try {
-        const { default: pdfParse } = await import("pdf-parse");
-        const data = await pdfParse(buffer);
-        extractedText = data.text || "";
-      } catch (e) {
-        console.error("❌ pdfParse error:", e);
-        extractedText = "";
-      }
-    } else if (ext === ".docx") {
-      try {
-        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-        const { value } = await mammoth.extractRawText({ arrayBuffer });
-        extractedText = value || "";
-      } catch (e) {
-        console.error("❌ mammoth extract error:", e);
-        try {
-          extractedText = await readDocxFromUrl(fileUrl);
-        } catch (fallbackErr) {
-          console.error("❌ readDocxFromUrl fallback error:", fallbackErr);
-          extractedText = "";
-        }
-      }
-    } else {
-      extractedText = buffer.toString("utf8");
-    }
-    const embedding = extractedText.trim() ? await embedText(extractedText) : null;
-    return { name: fileUrl.split("/").pop(), url: fileUrl, text: extractedText, vector: embedding };
-  } catch (err) {
-    console.error("processFileUrl error:", fileUrl, err);
-    return null;
-  }
-}
-
+// AGENT API
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
   try {
