@@ -43,7 +43,7 @@ export async function initEmbedding() {
         transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
         transformers.env.useFSCache = true;
       }
-    } catch (ee) {}
+    } catch (ee) { }
     const { pipeline } = transformers;
     embedder = await pipeline("feature-extraction", modelName);
     console.log("✅ Embedder ready (local Xenova)");

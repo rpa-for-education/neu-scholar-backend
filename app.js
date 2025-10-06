@@ -32,6 +32,7 @@ const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const MAX_SHORT_HISTORY = 5;
 
+// ===== Middleware =====
 app.use(cors());
 app.use(
   session({
@@ -48,6 +49,7 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Format trả lời
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -76,6 +78,32 @@ async function Conferences() {
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// ====== ĐỊNH NGHĨA LẠI HÀM buildPrompt ======
+function buildPrompt(question, conferences = [], journals = []) {
+  let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
+
+  if (conferences.length) {
+    context += "Danh sách hội thảo:\n";
+    conferences.slice(0, 10).forEach((c, i) => {
+      context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
+    });
+  } else {
+    context += "Không có hội thảo phù hợp.\n\n";
+  }
+
+  if (journals.length) {
+    context += "Danh sách tạp chí:\n";
+    journals.slice(0, 10).forEach((j, i) => {
+      context += `Tạp chí ${i + 1}:\n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
+    });
+  } else {
+    context += "Không có tạp chí phù hợp.\n\n";
+  }
+
+  context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
+  return context;
+}
 
 // ============================= UPLOAD FILE API =============================
 app.post("/api/upload", upload.array("file"), async (req, res) => {
@@ -121,7 +149,7 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
         }
       } else if (ext === ".docx") {
         try {
-          // Dùng buffer thay vì arrayBuffer để tránh lỗi mammoth trên Node.js
+          // Sửa lỗi Mammoth bằng cách truyền buffer trực tiếp
           const buffer = file.buffer;
           const { value } = await mammoth.extractRawText({ buffer });
           extractedText = value || "";
@@ -152,7 +180,7 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
   }
 });
 
-// ============================= SEARCH UPLOADED FILES VECTOR API =============================
+// ============================= SEARCH VECTOR FILE UPLOAD API =============================
 app.post("/api/search_files", async (req, res) => {
   try {
     const { query, topk } = req.body;
@@ -165,7 +193,7 @@ app.post("/api/search_files", async (req, res) => {
   }
 });
 
-// HEALTH CHECK
+// ============================= HEALTH CHECK =============================
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
