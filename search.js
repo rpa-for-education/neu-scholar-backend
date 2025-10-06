@@ -1,4 +1,3 @@
-// ==================== ENV CACHE CONFIG ====================
 process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
 process.env.HF_HUB_CACHE = process.env.HF_HUB_CACHE || "/tmp/hf_hub_cache";
 process.env.HF_HOME = process.env.HF_HOME || "/tmp/hf_home";
@@ -8,218 +7,316 @@ process.env.HOME = process.env.HOME || "/tmp";
 
 import { MongoClient } from "mongodb";
 import fs from "fs/promises";
+import fsSync from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import * as docx from "docx-parser";
 import mammoth from "mammoth";
 import { getDb } from "./db.js";
 
-// ==================== CONSTANTS ====================
 const client = new MongoClient(process.env.MONGODB_URI);
 const dbName = process.env.MONGODB_DB || "fitneu";
 
 const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
+
+const VECTOR_INDEX_NAME = process.env.VECTOR_INDEX_FUND || "vector_index_fund";
 const VECTOR_PATH = process.env.VECTOR_PATH || "vector";
-const VECTOR_INDEX_FUND = process.env.VECTOR_INDEX_FUND || "vector_index_fund";
-const VECTOR_INDEX_UPLOADED = process.env.VECTOR_INDEX_UPLOADED || "vector_index_uploaded_files";
-const COLLECTION_FUND = process.env.MONGO_COLLECTION || "fund";
-const COLLECTION_UPLOADED = "uploaded_files";
+const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
 
-// ==================== EMBEDDING SETUP ====================
 let embedder = null;
+let usingRemoteEmbed = false;
 
-/** Khởi tạo local embedder Xenova (768 chiều) */
 export async function initEmbedding() {
-  if (embedder) return true;
-  const modelName = process.env.EMBEDDING_MODEL || "Xenova/paraphrase-multilingual-mpnet-base-v2";
+  if (embedder || usingRemoteEmbed) return true;
+  if (String(process.env.USE_REMOTE_EMBEDDING || "").toLowerCase() === "true") {
+    usingRemoteEmbed = true;
+    console.info("ℹ️ Using remote embedding (forced by USE_REMOTE_EMBEDDING=true)");
+    return true;
+  }
+  const model = process.env.EMBEDDING_MODEL || "Xenova/paraphrase-multilingual-mpnet-base-v2";
+  const modelName = model.startsWith("Xenova/") ? model : `Xenova/${model}`;
   try {
+    console.log(`⏳ Attempting to load JS embedding model: ${modelName}`);
     const transformers = await import("@xenova/transformers");
-    transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
+    try {
+      if (transformers && transformers.env) {
+        transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
+        transformers.env.useFSCache = true;
+      }
+    } catch (ee) { }
     const { pipeline } = transformers;
     embedder = await pipeline("feature-extraction", modelName);
-    console.log("✅ Local Xenova embedder loaded (768 dimensions)");
+    console.log("✅ Embedder ready (local Xenova)");
     return true;
   } catch (err) {
-    console.error("❌ Failed to init Xenova embedder:", err);
-    throw err;
+    console.warn("⚠️ Failed to init local embedder, will fallback to remote embeddings if available.", err?.message || err);
+    usingRemoteEmbed = true;
+    return true;
   }
 }
 
-/** Sinh vector embedding từ text */
-export async function embedText(text) {
-  if (!embedder) await initEmbedding();
-  try {
-    const out = await embedder(text, { pooling: "mean", normalize: true });
-    const vector = Array.from(out.data);
-    if (vector.length !== 768) {
-      console.warn(`⚠️ Embedding dimension = ${vector.length}, expected 768`);
+async function remoteEmbeddingOpenAI(text) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("No OPENAI_API_KEY provided for remote embedding.");
+  const body = {
+    model: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
+    input: text,
+  };
+  const resp = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`OpenAI embed failed: ${resp.status} ${txt}`);
+  }
+  const j = await resp.json();
+  const vec = j.data && j.data[0] && j.data[0].embedding;
+  if (!vec) throw new Error("Invalid embedding response from OpenAI");
+  return vec;
+}
+
+async function embed(text) {
+  if (!embedder && !usingRemoteEmbed) {
+    await initEmbedding();
+  }
+  if (embedder) {
+    try {
+      const out = await embedder(text, { pooling: "mean", normalize: true });
+      return Array.from(out.data);
+    } catch (e) {
+      console.warn("⚠️ Local embedder failed during embed(), switching to remote:", e?.message || e);
+      usingRemoteEmbed = true;
+      embedder = null;
     }
-    return vector;
-  } catch (err) {
-    console.error("❌ Embedding error:", err);
-    throw err;
+  }
+  try {
+    return await remoteEmbeddingOpenAI(text);
+  } catch (e) {
+    console.error("❌ Remote embedding also failed:", e?.message || e);
+    throw e;
   }
 }
 
-// ==================== FILE READING ====================
-export async function readFileContent(inputPathOrUrl) {
-  let buffer = null;
-  let tmpPath = null;
+export async function embedText(text) {
+  return embed(text);
+}
 
-  if (inputPathOrUrl.startsWith("http://") || inputPathOrUrl.startsWith("https://")) {
-    const res = await fetch(inputPathOrUrl);
-    if (!res.ok) throw new Error(`Failed to fetch file: ${res.status}`);
-    const ab = await res.arrayBuffer();
+export async function readFileContent(inputPathOrUrl) {
+  let tmpPath = null;
+  let buffer = null;
+  if (typeof inputPathOrUrl === "string" && (inputPathOrUrl.startsWith("http://") || inputPathOrUrl.startsWith("https://"))) {
+    const resp = await fetch(inputPathOrUrl);
+    if (!resp.ok) {
+      throw new Error(`Failed to fetch ${inputPathOrUrl}: ${resp.status}`);
+    }
+    const ab = await resp.arrayBuffer();
     buffer = Buffer.from(ab);
     tmpPath = path.join("/tmp", `${Date.now()}_${path.basename(new URL(inputPathOrUrl).pathname)}`);
     await fs.writeFile(tmpPath, buffer);
   }
-
   const filePath = tmpPath || inputPathOrUrl;
-  const ext = path.extname(filePath).toLowerCase();
-  const data = buffer || await fs.readFile(filePath);
-
+  const ext = (path.extname(String(filePath)) || "").toLowerCase();
   if (ext === ".pdf") {
-    const { default: pdfParse } = await import("pdf-parse");
-    const pdf = await pdfParse(data);
-    return pdf.text || "";
+    const dataBuffer = buffer || await fs.readFile(filePath);
+    try {
+      const { default: pdfParse } = await import("pdf-parse");
+      const pdf = await pdfParse(dataBuffer);
+      return pdf.text || "";
+    } catch (e) {
+      console.error("❌ pdfParse error in readFileContent:", e);
+      throw e;
+    }
   } else if (ext === ".docx") {
-    const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    const { value } = await mammoth.extractRawText({ arrayBuffer });
+    const dataBuffer = buffer || await fs.readFile(filePath);
+    const { value } = await mammoth.extractRawText({ buffer: dataBuffer });
     return value || "";
   } else {
-    return data.toString("utf8");
+    const txt = await fs.readFile(filePath, "utf8");
+    return txt || "";
   }
 }
 
 export async function readDocxFromUrl(url) {
   try {
+    console.log(`📄 Đang tải nội dung file từ: ${url}`);
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const ab = await res.arrayBuffer();
-    const tmp = `/tmp/${Date.now()}.docx`;
-    await fs.writeFile(tmp, Buffer.from(ab));
-    const text = await new Promise((resolve, reject) =>
-      docx.parseDocx(tmp, (data) => (data ? resolve(data) : reject("Empty data")))
-    );
+    if (!res.ok) throw new Error(`❌ Lỗi tải file: ${res.statusText}`);
+    const arrayBuffer = await res.arrayBuffer();
+    const tempPath = `/tmp/${Date.now()}_temp.docx`;
+    await fs.writeFile(tempPath, Buffer.from(arrayBuffer));
+    const text = await new Promise((resolve, reject) => {
+      docx.parseDocx(tempPath, (data) => {
+        if (!data) reject("❌ Không thể đọc nội dung file");
+        else resolve(data);
+      });
+    });
+    console.log("✅ Đọc file thành công, độ dài:", text.length);
     return text;
-  } catch (e) {
-    console.error("readDocxFromUrl error:", e);
+  } catch (err) {
+    console.error("⚠️ Lỗi khi đọc file docx:", err);
     return "";
   }
 }
 
-// ==================== UPLOAD & INDEX ====================
 export async function uploadAndIndexFile(filePathOrUrl) {
   const db = await getDb();
-  const col = db.collection(COLLECTION_UPLOADED);
-
+  const col = db.collection(MONGO_COLLECTION);
   const content = await readFileContent(filePathOrUrl);
-  if (!content.trim()) throw new Error("❌ File empty or unreadable");
-
-  const vector = await embedText(content);
+  if (!content || !content.trim()) {
+    throw new Error("❌ File rỗng hoặc không đọc được nội dung.");
+  }
+  const vector = await embed(content);
   const doc = {
-    name: path.basename(filePathOrUrl),
-    url: filePathOrUrl,
     text: content.slice(0, 20000),
     [VECTOR_PATH]: vector,
+    source: filePathOrUrl,
     uploadedAt: new Date(),
   };
-
-  const res = await col.insertOne(doc);
-  console.log(`✅ Indexed file: ${res.insertedId}`);
-  return res;
+  const result = await col.insertOne(doc);
+  console.log(`✅ File đã được index vào MongoDB với _id=${result.insertedId}`);
+  return result;
 }
 
-// ==================== VECTOR SEARCH ====================
-async function genericVectorSearch(collection, indexName, query, { limit = 5, filter = null } = {}) {
+export async function fundVectorSearch(query, topk = 5) {
   const db = await getDb();
-  const col = db.collection(collection);
-  const queryVector = await embedText(query);
-  const safeTopK = Math.min(Number(limit) || 5, MAX_TOPK);
-
-  const pipeline = [
+  const col = db.collection(MONGO_COLLECTION);
+  const queryVector = await embed(query);
+  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
+  console.log(`🔎 Querying with vector length: ${queryVector.length}, topK=${safeTopK}`);
+  const pipelineAgg = [
     {
       $vectorSearch: {
-        index: indexName,
+        index: VECTOR_INDEX_NAME,
         path: VECTOR_PATH,
         queryVector,
         numCandidates: safeTopK * 10,
         limit: safeTopK,
         similarity: "cosine",
-        filter: filter || undefined,
       },
     },
     {
       $project: {
+        [VECTOR_PATH]: 0,
         score: { $meta: "vectorSearchScore" },
-        name: 1,
-        text: { $substr: ["$text", 0, 400] },
-        url: 1,
-        uploadedAt: 1,
       },
     },
-    { $sort: { score: -1, uploadedAt: -1 } },
   ];
-
-  const results = await col.aggregate(pipeline).toArray();
-  return results.map((r) => ({ ...r, score: parseFloat(r.score?.toFixed(4)) }));
+  const items = await col.aggregate(pipelineAgg).toArray();
+  if (!items || items.length === 0) {
+    console.warn("⚠️ No results found for query:", query);
+    return [];
+  }
+  return items.map((d) => ({
+    ...d,
+    _id: String(d._id),
+  }));
 }
 
-export async function fundVectorSearch(query, limit = 5) {
-  return genericVectorSearch(COLLECTION_FUND, VECTOR_INDEX_FUND, query, { limit });
-}
-
-export async function uploadedFileVectorSearch(query, limit = 5, filter = "") {
-  const filterQuery = filter
-    ? {
-        $or: [
-          { name: { $regex: filter, $options: "i" } },
-          { text: { $regex: filter, $options: "i" } },
-        ],
-      }
-    : null;
-  return genericVectorSearch(COLLECTION_UPLOADED, VECTOR_INDEX_UPLOADED, query, {
-    limit,
-    filter: filterQuery,
-  });
-}
-
-export async function searchConferenceAndJournal(question, topk = 5) {
+export async function search({ question, topk = 5 }) {
   await client.connect();
   const dbCli = client.db(dbName);
-  const qVec = await embedText(question);
+  const queryVector = await embed(question);
+  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
 
-  const searchAgg = (indexName) => [
+  const confResults = await dbCli.collection("conference").aggregate([
     {
       $vectorSearch: {
-        index: indexName,
+        index: "vector_index_conference",
         path: "vector",
-        queryVector: qVec,
+        queryVector,
         numCandidates: 100,
-        limit: topk,
+        limit: safeTopK,
         similarity: "cosine",
       },
     },
     {
       $project: {
+        _id: 0,
+        vector: 0,
+        created_time: 0,
+        modified_time: 0,
         score: { $meta: "vectorSearchScore" },
-        title: 1,
-        abstract: 1,
+      },
+    },
+  ]).toArray();
+
+  const journalResults = await dbCli.collection("journal").aggregate([
+    {
+      $vectorSearch: {
+        index: "vector_index_journal",
+        path: "vector",
+        queryVector,
+        numCandidates: 100,
+        limit: safeTopK,
+        similarity: "cosine",
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        vector: 0,
+        created_time: 0,
+        modified_time: 0,
+        score: { $meta: "vectorSearchScore" },
+      },
+    },
+  ]).toArray();
+
+  return {
+    conference: confResults,
+    journal: journalResults,
+  };
+}
+
+export async function conferenceVectorSearch(question, topk = 5) {
+  const result = await search({ question, topk });
+  return result.conference;
+}
+
+export async function journalVectorSearch(question, topk = 5) {
+  const result = await search({ question, topk });
+  return result.journal;
+}
+
+// ========== VECTOR SEARCH CHO FILE UPLOAD ==========
+const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
+const VECTOR_INDEX_UPLOADED_FILES = "vector_index_uploaded_files";
+export async function uploadedFilesVectorSearch(query, topk = 5) {
+  const db = await getDb();
+  const col = db.collection(FILES_COLLECTION);
+  const queryVector = await embedText(query);
+  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
+
+  const pipeline = [
+    {
+      $vectorSearch: {
+        index: VECTOR_INDEX_UPLOADED_FILES,
+        path: "vector",
+        queryVector,
+        numCandidates: safeTopK * 10,
+        limit: safeTopK,
+        similarity: "cosine",
+      },
+    },
+    {
+      $project: {
+        vector: 0,
+        name: 1,
+        text: 1,
+        url: 1,
+        uploadedAt: 1,
+        score: { $meta: "vectorSearchScore" },
       },
     },
   ];
-
-  const [conf, journal] = await Promise.all([
-    dbCli.collection("conference").aggregate(searchAgg("vector_index_conference")).toArray(),
-    dbCli.collection("journal").aggregate(searchAgg("vector_index_journal")).toArray(),
-  ]);
-
-  return { conference: conf, journal };
+  const results = await col.aggregate(pipeline).toArray();
+  return results.map(d => ({
+    ...d,
+    _id: String(d._id)
+  }));
 }
-
-export const conferenceVectorSearch = async (q, k = 5) =>
-  (await searchConferenceAndJournal(q, k)).conference;
-
-export const journalVectorSearch = async (q, k = 5) =>
-  (await searchConferenceAndJournal(q, k)).journal;
