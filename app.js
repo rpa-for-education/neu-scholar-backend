@@ -372,21 +372,29 @@ async function processFileUrl(fileUrl) {
         const data = await pdfParse(buffer);
         extractedText = data.text || "";
       } catch (e) {
-        console.error("pdfParse error:", e);
+        console.error("❌ pdfParse error:", e);
+        extractedText = "";
       }
+
     } else if (ext === ".docx") {
       try {
-        const { value } = await mammoth.extractRawText({ buffer });
+        // Chuyển Buffer → ArrayBuffer để mammoth hiểu được
+        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        const { value } = await mammoth.extractRawText({ arrayBuffer });
         extractedText = value || "";
       } catch (e) {
-        console.error("mammoth extract error:", e);
+        console.error("❌ mammoth extract error:", e);
         try {
+          // fallback: đọc trực tiếp từ URL (phòng khi buffer lỗi)
           extractedText = await readDocxFromUrl(fileUrl);
-        } catch {
+        } catch (fallbackErr) {
+          console.error("❌ readDocxFromUrl fallback error:", fallbackErr);
           extractedText = "";
         }
       }
+
     } else {
+      // fallback cho file .txt, .md, .json,...
       extractedText = buffer.toString("utf8");
     }
 

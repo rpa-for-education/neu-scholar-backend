@@ -1,348 +1,122 @@
-// Kết hợp logic tìm kiếm (conference/journal), đọc file, embedding (local Xenova hoặc fallback OpenAI)
-
-process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
-process.env.HF_HUB_CACHE = process.env.HF_HUB_CACHE || "/tmp/hf_hub_cache";
-process.env.HF_HOME = process.env.HF_HOME || "/tmp/hf_home";
-process.env.XDG_CACHE_HOME = process.env.XDG_CACHE_HOME || "/tmp";
-process.env.TMPDIR = process.env.TMPDIR || "/tmp";
-process.env.HOME = process.env.HOME || "/tmp";
-
-import { MongoClient } from "mongodb";
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
-import fetch from "node-fetch";
-import * as docx from "docx-parser";
-import mammoth from "mammoth";
+// search.js
 import { getDb } from "./db.js";
+import { pipeline } from "@xenova/transformers";
 
-const client = new MongoClient(process.env.MONGODB_URI);
-const dbName = process.env.MONGODB_DB || "fitneu";
-
-// Giới hạn topK (có thể cấu hình qua .env)
-const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
-
-// Vector collection / fields
-const VECTOR_INDEX_NAME = process.env.VECTOR_INDEX_FUND || "vector_index_fund";
-const VECTOR_PATH = process.env.VECTOR_PATH || "vector";
-const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
-
+// ================== GLOBAL CONFIG & CACHE ==================
 let embedder = null;
-let usingRemoteEmbed = false;
 
 /**
- * Try to initialize local embedder (Xenova). If it fails -> mark to use remote.
- * dynamic import to allow setting env vars first.
+ * Khởi tạo model embedding (chỉ load 1 lần)
+ * Model: paraphrase-multilingual-mpnet-base-v2 (768 chiều)
  */
 export async function initEmbedding() {
-  if (embedder || usingRemoteEmbed) return true;
+  if (embedder) return embedder;
 
-  if (String(process.env.USE_REMOTE_EMBEDDING || "").toLowerCase() === "true") {
-    usingRemoteEmbed = true;
-    console.info("ℹ️ Using remote embedding (forced by USE_REMOTE_EMBEDDING=true)");
-    return true;
-  }
-
-  const model = process.env.EMBEDDING_MODEL || "Xenova/paraphrase-multilingual-mpnet-base-v2";
-  const modelName = model.startsWith("Xenova/") ? model : `Xenova/${model}`;
-
-  try {
-    console.log(`⏳ Attempting to load JS embedding model: ${modelName}`);
-
-    const transformers = await import("@xenova/transformers");
-    try {
-      if (transformers && transformers.env) {
-        transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
-        transformers.env.useFSCache = true;
-      }
-    } catch (ee) {
-      // ignore
-    }
-
-    const { pipeline } = transformers;
-    embedder = await pipeline("feature-extraction", modelName);
-    console.log("✅ Embedder ready (local Xenova)");
-    return true;
-  } catch (err) {
-    console.warn("⚠️ Failed to init local embedder, will fallback to remote embeddings if available.", err?.message || err);
-    usingRemoteEmbed = true;
-    return true;
-  }
-}
-
-/**
- * Remote embedding (OpenAI) fallback
- */
-async function remoteEmbeddingOpenAI(text) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("No OPENAI_API_KEY provided for remote embedding.");
-
-  const body = {
-    model: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
-    input: text,
-  };
-
-  const resp = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
+  console.log("🧠 Loading embedding model: Xenova/paraphrase-multilingual-mpnet-base-v2 ...");
+  embedder = await pipeline("feature-extraction", "Xenova/paraphrase-multilingual-mpnet-base-v2", {
+    quantized: true,
   });
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`OpenAI embed failed: ${resp.status} ${txt}`);
-  }
-
-  const j = await resp.json();
-  const vec = j.data && j.data[0] && j.data[0].embedding;
-  if (!vec) throw new Error("Invalid embedding response from OpenAI");
-  return vec;
+  console.log("✅ Model loaded successfully (768 dimensions)");
+  return embedder;
 }
 
 /**
  * Sinh vector embedding từ text
- * - nếu có embedder local thì dùng, nếu không dùng OpenAI (nếu có API key)
+ * - Không dùng OpenAI API
+ * - Giới hạn text dài để tránh quá tải bộ nhớ
  */
-async function embed(text) {
-  if (!embedder && !usingRemoteEmbed) {
-    await initEmbedding();
-  }
-
-  if (embedder) {
-    try {
-      const out = await embedder(text, { pooling: "mean", normalize: true });
-      return Array.from(out.data);
-    } catch (e) {
-      console.warn("⚠️ Local embedder failed during embed(), switching to remote:", e?.message || e);
-      usingRemoteEmbed = true;
-      embedder = null;
-    }
-  }
-
-  try {
-    return await remoteEmbeddingOpenAI(text);
-  } catch (e) {
-    console.error("❌ Remote embedding also failed:", e?.message || e);
-    throw e;
-  }
-}
-
 export async function embedText(text) {
-  return embed(text);
+  if (!text || typeof text !== "string") return null;
+  await initEmbedding();
+
+  // Cắt text quá dài để tránh tắc RAM
+  const maxLen = 3000;
+  const safeText =
+    text.length > maxLen
+      ? text.slice(0, maxLen / 2) + " ... " + text.slice(-maxLen / 2)
+      : text;
+
+  const start = Date.now();
+  const out = await embedder(safeText, { pooling: "mean", normalize: true });
+  const vector = Array.from(out.data);
+  console.log(`⚡ Embedded (${vector.length} dims) in ${Date.now() - start} ms`);
+  return vector;
 }
 
 /**
- * Đọc nội dung từ file path hoặc URL
- * Hỗ trợ: .pdf, .docx, .txt
+ * Thực hiện vector search chung
  */
-export async function readFileContent(inputPathOrUrl) {
-  // If it's a URL -> fetch into /tmp
-  let tmpPath = null;
-  let buffer = null;
-
-  if (typeof inputPathOrUrl === "string" && (inputPathOrUrl.startsWith("http://") || inputPathOrUrl.startsWith("https://"))) {
-    const resp = await fetch(inputPathOrUrl);
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch ${inputPathOrUrl}: ${resp.status}`);
-    }
-    const ab = await resp.arrayBuffer();
-    buffer = Buffer.from(ab);
-    tmpPath = path.join("/tmp", `${Date.now()}_${path.basename(new URL(inputPathOrUrl).pathname)}`);
-    await fs.writeFile(tmpPath, buffer);
-  }
-
-  const filePath = tmpPath || inputPathOrUrl;
-  const ext = (path.extname(String(filePath)) || "").toLowerCase();
-
-  if (ext === ".pdf") {
-    const dataBuffer = buffer || await fs.readFile(filePath);
-    try {
-      // dynamic import to avoid pdf-parse module init reading test files in serverless env
-      const { default: pdfParse } = await import("pdf-parse");
-      const pdf = await pdfParse(dataBuffer);
-      return pdf.text || "";
-    } catch (e) {
-      console.error("❌ pdfParse error in readFileContent:", e);
-      throw e;
-    }
-  } else if (ext === ".docx") {
-    const dataBuffer = buffer || await fs.readFile(filePath);
-    const { value } = await mammoth.extractRawText({ buffer: dataBuffer });
-    return value || "";
-  } else {
-    const txt = await fs.readFile(filePath, "utf8");
-    return txt || "";
-  }
-}
-
-/**
- * Đọc nội dung .docx từ URL (dùng docx-parser fallback)
- * @param {string} url
- * @returns {Promise<string>} text content
- */
-export async function readDocxFromUrl(url) {
-  try {
-    console.log(`📄 Đang tải nội dung file từ: ${url}`);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`❌ Lỗi tải file: ${res.statusText}`);
-    const arrayBuffer = await res.arrayBuffer();
-
-    const tempPath = `/tmp/${Date.now()}_temp.docx`;
-    await fs.writeFile(tempPath, Buffer.from(arrayBuffer));
-
-    const text = await new Promise((resolve, reject) => {
-      docx.parseDocx(tempPath, (data) => {
-        if (!data) reject("❌ Không thể đọc nội dung file");
-        else resolve(data);
-      });
-    });
-
-    console.log("✅ Đọc file thành công, độ dài:", text.length);
-    return text;
-  } catch (err) {
-    console.error("⚠️ Lỗi khi đọc file docx:", err);
-    return "";
-  }
-}
-
-/**
- * Upload filePathOrUrl -> đọc -> embed -> lưu Mongo
- * - filePathOrUrl có thể là đường dẫn local hoặc URL (http/https)
- */
-export async function uploadAndIndexFile(filePathOrUrl) {
+async function vectorSearch(collectionName, query, limit = 5) {
   const db = await getDb();
-  const col = db.collection(MONGO_COLLECTION);
+  const collection = db.collection(collectionName);
+  const queryVector = await embedText(query);
+  if (!queryVector) return [];
 
-  const content = await readFileContent(filePathOrUrl);
-  if (!content || !content.trim()) {
-    throw new Error("❌ File rỗng hoặc không đọc được nội dung.");
-  }
-
-  const vector = await embed(content);
-
-  const doc = {
-    text: content.slice(0, 20000), // lưu giới hạn
-    [VECTOR_PATH]: vector,
-    source: filePathOrUrl,
-    uploadedAt: new Date(),
-  };
-
-  const result = await col.insertOne(doc);
-  console.log(`✅ File đã được index vào MongoDB với _id=${result.insertedId}`);
-  return result;
-}
-
-/**
- * Vector search trên collection 'fund'
- */
-export async function fundVectorSearch(query, topk = 5) {
-  const db = await getDb();
-  const col = db.collection(MONGO_COLLECTION);
-
-  const queryVector = await embed(query);
-  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
-
-  console.log(`🔎 Querying with vector length: ${queryVector.length}, topK=${safeTopK}`);
-
-  const pipelineAgg = [
+  const pipelineStages = [
     {
       $vectorSearch: {
-        index: VECTOR_INDEX_NAME,
-        path: VECTOR_PATH,
         queryVector,
-        numCandidates: safeTopK * 10,
-        limit: safeTopK,
-        similarity: "cosine",
+        path: "vector",
+        numCandidates: limit * 10,
+        limit,
+        index: `vector_index_${collectionName}`,
       },
     },
     {
       $project: {
-        [VECTOR_PATH]: 0,
+        _id: 1,
+        title: 1,
+        name: 1,
+        url: 1,
+        publisher: 1,
+        categories: 1,
         score: { $meta: "vectorSearchScore" },
       },
     },
   ];
 
-  const items = await col.aggregate(pipelineAgg).toArray();
+  const start = Date.now();
+  const results = await collection.aggregate(pipelineStages).toArray();
+  console.log(
+    `🔍 Vector search on [${collectionName}] -> ${results.length} results (${Date.now() - start} ms)`
+  );
+  return results;
+}
 
-  if (!items || items.length === 0) {
-    console.warn("⚠️ No results found for query:", query);
-    return [];
+// ================== SEARCH WRAPPERS ==================
+export async function journalVectorSearch(query, limit = 5) {
+  return vectorSearch("journal", query, limit);
+}
+
+export async function conferenceVectorSearch(query, limit = 5) {
+  return vectorSearch("conference", query, limit);
+}
+
+export async function uploadedFilesVectorSearch(query, limit = 5) {
+  return vectorSearch("uploaded_files", query, limit);
+}
+
+// ================== DOCX READER (fallback) ==================
+export async function readDocxFromUrl(fileUrl) {
+  try {
+    const resp = await fetch(fileUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+
+    const mammoth = await import("mammoth");
+    const { value } = await mammoth.extractRawText({ arrayBuffer });
+    return value || "";
+  } catch (err) {
+    console.error("❌ readDocxFromUrl error:", err);
+    return "";
   }
-
-  return items.map((d) => ({
-    ...d,
-    _id: String(d._id),
-  }));
 }
 
-// --- search for conferences & journals (alias) ---
-export async function search({ question, topk = 5 }) {
-  await client.connect();
-  const dbCli = client.db(dbName);
-
-  const queryVector = await embed(question);
-  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
-
-  const confResults = await dbCli.collection("conference").aggregate([
-    {
-      $vectorSearch: {
-        index: "vector_index_conference",
-        path: "vector",
-        queryVector,
-        numCandidates: 100,
-        limit: safeTopK,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        vector: 0,
-        created_time: 0,
-        modified_time: 0,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ]).toArray();
-
-  const journalResults = await dbCli.collection("journal").aggregate([
-    {
-      $vectorSearch: {
-        index: "vector_index_journal",
-        path: "vector",
-        queryVector,
-        numCandidates: 100,
-        limit: safeTopK,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        vector: 0,
-        created_time: 0,
-        modified_time: 0,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ]).toArray();
-
-  return {
-    conference: confResults,
-    journal: journalResults,
-  };
-}
-
-export async function conferenceVectorSearch(question, topk = 5) {
-  const result = await search({ question, topk });
-  return result.conference;
-}
-
-export async function journalVectorSearch(question, topk = 5) {
-  const result = await search({ question, topk });
-  return result.journal;
-}
+export default {
+  initEmbedding,
+  embedText,
+  journalVectorSearch,
+  conferenceVectorSearch,
+  uploadedFilesVectorSearch,
+  readDocxFromUrl,
+};
