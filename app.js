@@ -32,7 +32,6 @@ const DEFAULT_SHORT_MEMORY = 10;
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const MAX_SHORT_HISTORY = 5;
 
-// ===== Middleware =====
 app.use(cors());
 app.use(
   session({
@@ -49,7 +48,6 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Format trả lời
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -79,7 +77,6 @@ async function Conferences() {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ====== ĐỊNH NGHĨA LẠI HÀM buildPrompt ======
 function buildPrompt(question, conferences = [], journals = []) {
   let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
 
@@ -95,7 +92,7 @@ function buildPrompt(question, conferences = [], journals = []) {
   if (journals.length) {
     context += "Danh sách tạp chí:\n";
     journals.slice(0, 10).forEach((j, i) => {
-      context += `Tạp chí ${i + 1}:\n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
+      context += `Tạp chí ${i + 1}: \n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
     });
   } else {
     context += "Không có tạp chí phù hợp.\n\n";
@@ -149,7 +146,6 @@ app.post("/api/upload", upload.array("file"), async (req, res) => {
         }
       } else if (ext === ".docx") {
         try {
-          // Sửa lỗi Mammoth bằng cách truyền buffer trực tiếp
           const buffer = file.buffer;
           const { value } = await mammoth.extractRawText({ buffer });
           extractedText = value || "";
@@ -201,6 +197,8 @@ app.get("/api/health", (_req, res) => {
     time: new Date().toISOString(),
   });
 });
+
+// The rest of your original journal, conference, and agent APIs remain unchanged
 
 // Journals CRUD
 app.get("/api/journals", async (req, res) => {
@@ -462,6 +460,61 @@ ${fileContext}
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+async function fetchArticles() {
+  try {
+    const res = await axios.get(process.env.API_RESEARCH);
+    return Array.isArray(res.data) ? res.data : [];
+  } catch (err) {
+    console.error("❌ fetchArticles error:", err.message);
+    return [];
+  }
+}
+
+async function processFileUrl(fileUrl) {
+  try {
+    const resp = await fetch(fileUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const ext = fileUrl.toLowerCase().endsWith(".pdf")
+      ? ".pdf"
+      : fileUrl.toLowerCase().endsWith(".docx")
+      ? ".docx"
+      : ".txt";
+
+    let extractedText = "";
+    if (ext === ".pdf") {
+      try {
+        const { default: pdfParse } = await import("pdf-parse");
+        const data = await pdfParse(buffer);
+        extractedText = data.text || "";
+      } catch (e) {
+        console.error("❌ pdfParse error:", e);
+        extractedText = "";
+      }
+    } else if (ext === ".docx") {
+      try {
+        extractedText = (await mammoth.extractRawText({ buffer })).value || "";
+      } catch (e) {
+        console.error("❌ mammoth extract error:", e);
+        try {
+          extractedText = await readDocxFromUrl(fileUrl);
+        } catch (fallbackErr) {
+          console.error("❌ readDocxFromUrl fallback error:", fallbackErr);
+          extractedText = "";
+        }
+      }
+    } else {
+      extractedText = buffer.toString("utf8");
+    }
+    const embedding = extractedText.trim() ? await embedText(extractedText) : null;
+    return { name: fileUrl.split("/").pop(), url: fileUrl, text: extractedText, vector: embedding };
+  } catch (err) {
+    console.error("processFileUrl error:", fileUrl, err);
+    return null;
+  }
+}
 
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
