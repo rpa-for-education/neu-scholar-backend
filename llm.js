@@ -5,7 +5,7 @@ import axios from "axios";
 const modelMap = {
   // OpenAI
   "gpt-smart": { provider: "openai", model: "gpt-5-mini" },
-  "gpt-pro": { provider: "openai", model: "gpt-5" },
+  // "gpt-pro": { provider: "openai", model: "gpt-5" },
   "gpt-fast": { provider: "openai", model: "gpt-4.1-mini" },
 
   // Gemini
@@ -13,9 +13,9 @@ const modelMap = {
   "gemini-fast": { provider: "gemini", model: "gemini-2.5-flash-lite" },
   
   // Qwen
-  "qwen-smart": { provider: "qwen", model: "qwen-plus" },
-  "qwen-pro": { provider: "qwen", model: "qwen-max" },
-  "qwen-fast": { provider: "qwen", model: "qwen-flash" },
+  // "qwen-smart": { provider: "qwen", model: "qwen-plus" },
+  // "qwen-pro": { provider: "qwen", model: "qwen-max" },
+  // "qwen-fast": { provider: "qwen", model: "qwen-flash" },
 };
 
 // ===== OpenAI =====
@@ -161,9 +161,9 @@ export async function callLLM(prompt, model_id = "gpt-smart") {
       case "gemini":
         answer = await callGemini(prompt, info.model);
         break;
-      case "qwen":
-        answer = await callQwen(prompt, info.model);
-        break;
+      //case "qwen":
+      //  answer = await callQwen(prompt, info.model);
+      //  break;
     }
 
     return {
