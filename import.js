@@ -7,11 +7,26 @@ import cliProgress from "cli-progress";
 import ora from "ora";
 import { pipeline } from "@xenova/transformers";   // ✅ local embedding
 import "dotenv/config";
+import { v5 as uuidv5 } from "uuid";
+
+/**
+ * Namespace cố định
+ * KHÔNG ĐƯỢC thay đổi sau khi deploy
+ */
+const UUID_NAMESPACE = uuidv5.URL;
+
+/**
+ * Sinh Qdrant ID ổn định từ Mongo ObjectId
+ * @param {string|ObjectId} mongoId
+ */
+function qdrantIdFromKey(key) {
+  return uuidv5(String(key), UUID_NAMESPACE);
+}
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || "rpa";
-const API_RESEARCH = process.env.API_RESEARCH || "https://api.rpa4edu.shop/api_research.php";
-const API_JOURNAL = process.env.API_JOURNAL || "https://api.rpa4edu.shop/api_journal.php";
+const API_RESEARCH = process.env.API_RESEARCH || "https://api.rpa.asia/api_research.php";
+const API_JOURNAL = process.env.API_JOURNAL || "https://api.rpa.asia/api_journal.php";
 
 const client = new MongoClient(MONGODB_URI);
 
@@ -19,7 +34,7 @@ const client = new MongoClient(MONGODB_URI);
 let embedder = null;
 async function initEmbedder() {
   if (!embedder) {
-    console.log("⏳ Loading local embedding model (paraphrase-multilingual-mpnet-base-v2, 768d)...");
+    console.log("⏳ Loading local embedding model Xenova/paraphrase-multilingual-mpnet-base-v2");
     embedder = await pipeline("feature-extraction", "Xenova/paraphrase-multilingual-mpnet-base-v2");
     console.log("✅ Model loaded (768d)");
   }
@@ -88,6 +103,7 @@ function isEqualExceptVector(a, b) {
   return true;
 }
 
+
 // ===== Import collection =====
 async function importCollection(db, name, records, fields) {
   if (!records?.length) {
@@ -103,11 +119,16 @@ async function importCollection(db, name, records, fields) {
   spinner.succeed(`📊 ${records.length} total records to process in "${name}"`);
 
   // 🚀 Force update: ép import lại tất cả records
-  const toProcess = records.map(r => ({ item: r, reason: "force-update" }));
+  // const toProcess = records.map(r => ({ item: r, reason: "force-update" }));
+  const toProcess = records.filter(r => {
+    const old = existingMap.get(r._key);
+    if (!old) return true;
+    return !isEqualExceptVector(old, r);
+  });
 
   console.log(`📦 ${toProcess.length} docs will be re-imported into "${name}"...`);
 
-  const contents = toProcess.map(({ item }) =>
+  const contents = toProcess.map((item) =>
     fields
       .map((f) => {
         const val = item[f];
@@ -117,50 +138,85 @@ async function importCollection(db, name, records, fields) {
       .join(" ")
   );
 
-  const BATCH_SIZE = 25;
+
+  const BATCH_SIZE = 15;
   let vectors = [];
 
-  // 🟢 Bước 1: EMBEDDING
+  // 🟢 EMBEDDING
   const embedBar = new cliProgress.SingleBar(
     { format: `   → Embedding [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
     cliProgress.Presets.shades_classic
   );
   embedBar.start(contents.length, 0);
 
+  /*
   for (let i = 0; i < contents.length; i += BATCH_SIZE) {
     const batch = contents.slice(i, i + BATCH_SIZE);
     const vecs = await embedBatch(batch);
     vectors.push(...vecs);
     embedBar.update(Math.min(i + batch.length, contents.length));
   }
+  */
+  for (let i = 0; i < contents.length; i += BATCH_SIZE) {
+    const batch = contents.slice(i, i + BATCH_SIZE);
+    const vecs = await embedBatch(batch);
+    const points = [];
+
+    for (let j = 0; j < vecs.length; j++) {
+      const item = toProcess[i + j];
+
+      // ✅ MongoDB (metadata)
+      await db.collection(name).updateOne(
+        { _key: item._key },
+        { $set: { ...item, vector: vecs[j] } },
+        { upsert: true }
+      );
+
+      // ✅ Qdrant (vector search)
+      points.push({
+        // id: uuidv4(),
+        id: qdrantIdFromKey(item._key),
+        vector: vecs[j],
+        payload: {
+          type: name,                 // conference | journal | fund
+          key: item._key,
+          title: item.title || item.name || "",
+          publisher: item.publisher || "",
+          source: "neu-research",
+          // ref: item._key.slice(0, 200) // Giới hạn độ dài ref
+        },
+      });
+    }
+
+    // ✅ GỌI BƯỚC 3 Ở ĐÂY
+    await upsertQdrant(points);
+
+
+    embedBar.update(Math.min(i + batch.length, contents.length));
+  }
+
+
   embedBar.stop();
-  console.log("✔ Embedding finished (MiniLM-L12-v2, 768d)");
-
-  // 🟢 Bước 2: UPDATE DB
-  const limit = pLimit(10);
-  const updateBar = new cliProgress.SingleBar(
-    { format: `   → Writing DB [{bar}] {percentage}% | {value}/{total}`, hideCursor: true, barsize: 30 },
-    cliProgress.Presets.shades_classic
-  );
-  updateBar.start(toProcess.length, 0);
-
-  let done = 0;
-  await Promise.all(
-    toProcess.map(({ item }, idx) =>
-      limit(async () => {
-        await db.collection(name).updateOne(
-          { _key: item._key },
-          { $set: { ...item, vector: vectors[idx] } },
-          { upsert: true }
-        );
-        done++;
-        updateBar.update(done);
-      })
-    )
-  );
-  updateBar.stop();
-  console.log(`✔ Upserted ${toProcess.length} docs into "${name}"`);
+  console.log("✔ Xenova/paraphrase-multilingual-mpnet-base-v2");
 }
+
+async function upsertQdrant(points) {
+  if (!points.length) return;
+
+  await axios.put(
+    "https://research.neu.edu.vn/qdrant/collections/neu-scholar/points?wait=true",
+    {
+      points,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      timeout: 60000,
+    }
+  );
+}
+
 
 // ===== Main =====
 (async () => {
