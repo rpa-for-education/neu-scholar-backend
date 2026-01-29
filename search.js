@@ -5,7 +5,6 @@ process.env.XDG_CACHE_HOME = process.env.XDG_CACHE_HOME || "/tmp";
 process.env.TMPDIR = process.env.TMPDIR || "/tmp";
 process.env.HOME = process.env.HOME || "/tmp";
 
-import { MongoClient } from "mongodb";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -14,12 +13,7 @@ import * as docx from "docx-parser";
 import mammoth from "mammoth";
 import { getDb } from "./db.js";
 
-const client = new MongoClient(process.env.MONGODB_URI);
-const dbName = process.env.MONGODB_DB || "fitneu";
-
 const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
-
-const VECTOR_INDEX_NAME = process.env.VECTOR_INDEX_FUND || "vector_index_fund";
 const VECTOR_PATH = process.env.VECTOR_PATH || "vector";
 const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
 
@@ -182,72 +176,6 @@ export async function uploadAndIndexFile(filePathOrUrl) {
   return result;
 }
 
-export async function search({ question, topk = 5 }) {
-  await client.connect();
-  const dbCli = client.db(dbName);
-  const queryVector = await embed(question);
-  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
-
-  const confResults = await dbCli.collection("conference").aggregate([
-    {
-      $vectorSearch: {
-        index: "vector_index_conference",
-        path: "vector",
-        queryVector,
-        numCandidates: 100,
-        limit: safeTopK,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        vector: 0,
-        created_time: 0,
-        modified_time: 0,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ]).toArray();
-
-  const journalResults = await dbCli.collection("journal").aggregate([
-    {
-      $vectorSearch: {
-        index: "vector_index_journal",
-        path: "vector",
-        queryVector,
-        numCandidates: 100,
-        limit: safeTopK,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        vector: 0,
-        created_time: 0,
-        modified_time: 0,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ]).toArray();
-
-  return {
-    conference: confResults,
-    journal: journalResults,
-  };
-}
-
-export async function conferenceVectorSearch(question, topk = 5) {
-  const result = await search({ question, topk });
-  return result.conference;
-}
-
-export async function journalVectorSearch(question, topk = 5) {
-  const result = await search({ question, topk });
-  return result.journal;
-}
-
 // Thêm hàm tìm kiếm vector file upload
 const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
 const VECTOR_INDEX_UPLOADED_FILES = "vector_index_uploaded_files";
@@ -284,4 +212,54 @@ export async function uploadedFilesVectorSearch(query, topk = 5) {
     ...d,
     _id: String(d._id)
   }));
+}
+
+// =============================
+// SEARCH CONFERENCE + JOURNAL CHUNG
+// =============================
+export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
+  const db = await getDb();
+  const k = Math.min(Number(topk) || 5, MAX_TOPK);
+
+  const [conferences, journals] = await Promise.all([
+    db.collection("conference").aggregate([
+      {
+        $vectorSearch: {
+          index: "vector_index_conference",
+          path: "vector",
+          queryVector: vector,
+          numCandidates: Math.max(50, k * 10),
+          limit: k,
+          similarity: "cosine",
+        },
+      },
+      {
+        $project: {
+          vector: 0,
+          score: { $meta: "vectorSearchScore" },
+        },
+      },
+    ]).toArray(),
+
+    db.collection("journal").aggregate([
+      {
+        $vectorSearch: {
+          index: "vector_index_journal",
+          path: "vector",
+          queryVector: vector,
+          numCandidates: Math.max(50, k * 10),
+          limit: k,
+          similarity: "cosine",
+        },
+      },
+      {
+        $project: {
+          vector: 0,
+          score: { $meta: "vectorSearchScore" },
+        },
+      },
+    ]).toArray(),
+  ]);
+
+  return { conferences, journals };
 }

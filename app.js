@@ -10,12 +10,11 @@ import fetch from "node-fetch";
 import axios from "axios";
 import { callLLM } from "./llm.js";
 import {
-  journalVectorSearch,
-  conferenceVectorSearch,
   initEmbedding,
   embedText,
   readDocxFromUrl,
-  uploadedFilesVectorSearch
+  uploadedFilesVectorSearch,
+  searchConferenceJournalByVector
 } from "./search.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
@@ -82,7 +81,7 @@ function buildPrompt(question, conferences = [], journals = []) {
 
   if (conferences.length) {
     context += "Danh sách hội thảo:\n";
-    conferences.slice(0, 10).forEach((c, i) => {
+    conferences.slice(0, 5).forEach((c, i) => {
       context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
     });
   } else {
@@ -91,7 +90,7 @@ function buildPrompt(question, conferences = [], journals = []) {
 
   if (journals.length) {
     context += "Danh sách tạp chí:\n";
-    journals.slice(0, 10).forEach((j, i) => {
+    journals.slice(0, 5).forEach((j, i) => {
       context += `Tạp chí ${i + 1}: \n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
     });
   } else {
@@ -355,21 +354,41 @@ app.post("/api/agent", async (req, res) => {
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
+    const sessionId = req.body.session_id;
+
+    // lấy short-term memory từ DB
+    // const memoryEntries = await getMemory(sessionId, DEFAULT_SHORT_MEMORY);
+
+    // memory lâu dài từ DB
+    // const persistentMemory = await getMemory(sessionId, DEFAULT_SHORT_MEMORY);
+
     const k = Math.max(1, Math.min(parseInt(topk, 10) || 5, 50));
     let conferences = [];
     let journals = [];
     let fileHits = [];
     let fileContext = "";
+
     try {
-      conferences = await conferenceVectorSearch(question, Number(k));
+      // embed đúng 1 lần
+      const queryVector = await embedText(question);
+
+      // search conference + journal chung
+      const result = await searchConferenceJournalByVector({
+        vector: queryVector,
+        topk: k
+      });
+
+      conferences = result.conferences || [];
+      journals = result.journals || [];
+
     } catch (e) {
-      console.error("conferenceVectorSearch error:", e);
+      console.error("❌ vector search error:", e);
     }
-    try {
-      journals = await journalVectorSearch(question, Number(k));
-    } catch (e) {
-      console.error("journalVectorSearch error:", e);
-    }
+    console.log("🔎 VECTOR SEARCH RESULT", {
+      conferences: conferences.length,
+      journals: journals.length,
+    });
+
     if (conferences.length === 0 && journals.length === 0) {
       try {
         const articles = await fetchArticles();
@@ -448,6 +467,10 @@ ${fileContext}
     } catch (e) {
       console.error("Log insert error:", e);
     }
+    
+    await addMemory(sessionId, "user", question);
+    await addMemory(sessionId, "assistant", answer);
+
     return res.json({
       model_id,
       answer,
