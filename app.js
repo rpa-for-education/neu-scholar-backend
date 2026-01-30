@@ -47,6 +47,7 @@ app.use((req, _res, next) => {
   next();
 });
 
+/*
 function detectIntent(question) {
   const q = question.toLowerCase();
 
@@ -56,6 +57,7 @@ function detectIntent(question) {
 
   return "general";
 }
+*/
 
 function simpleRerank(items, question) {
   const q = question.toLowerCase();
@@ -434,28 +436,24 @@ app.post("/api/agent", async (req, res) => {
 
 
       // search conference + journal 
-      const intent = detectIntent(question);
-      let conferences = [];
-      let journals = [];
+      // const intent = detectIntent(question);
 
-      if (intent !== "general") {
-        const result = await searchConferenceJournalByVector({
-          vector: queryVector,
-          topk: k
-        });
+      const result = await searchConferenceJournalByVector({
+        vector: queryVector,
+        topk: k
+      });
 
-        conferences = result.conferences || [];
-        journals = result.journals || [];
+      conferences = result.conferences || [];
+      journals = result.journals || [];
 
-        // ✅ RERANK NGAY SAU SEARCH
-        conferences = simpleRerank(conferences, question).slice(0, 5);
-        journals = simpleRerank(journals, question).slice(0, 5);
+      // ✅ RERANK NGAY SAU SEARCH
+      conferences = simpleRerank(conferences, question).slice(0, 5);
+      journals = simpleRerank(journals, question).slice(0, 5);
 
-        console.log("AFTER RERANK", {
-          conf: conferences.map(c => c.name || c.title),
-          jour: journals.map(j => j.title)
-        });
-      }
+      console.log("AFTER RERANK", {
+        conf: conferences.map(c => c.name || c.title),
+        jour: journals.map(j => j.title)
+      });
 
     } catch (e) {
       console.error("❌ vector search error:", e);
