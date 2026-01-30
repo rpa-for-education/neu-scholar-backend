@@ -47,6 +47,27 @@ app.use((req, _res, next) => {
   next();
 });
 
+function detectIntent(question) {
+  const q = question.toLowerCase();
+
+  if (q.includes("conference") || q.includes("hội thảo")) return "conference";
+  if (q.includes("journal") || q.includes("tạp chí")) return "journal";
+  if (q.includes("so sánh") || q.includes("compare")) return "compare";
+
+  return "general";
+}
+
+function simpleRerank(items, question) {
+  const q = question.toLowerCase();
+  return items
+    .map(i => ({
+      ...i,
+      _score2: JSON.stringify(i).toLowerCase().includes(q) ? 1 : 0
+    }))
+    .sort((a, b) => b._score2 - a._score2);
+}
+
+
 function formatAnswerText(rawText) {
   if (!rawText) return "";
   let text = rawText.replace(/\*\*/g, "");
@@ -77,29 +98,64 @@ async function Conferences() {
 const upload = multer({ storage: multer.memoryStorage() });
 
 function buildPrompt(question, conferences = [], journals = []) {
-  let context = "Bạn là trợ lý học thuật, trả lời ngắn gọn, trích dẫn tên hội thảo/tạp chí liên quan.\n\n";
+  let context = `
+Bạn là trợ lý học thuật.
+Chỉ sử dụng dữ liệu được cung cấp bên dưới.
+KHÔNG được tự suy đoán hoặc bịa thêm hội thảo / tạp chí.
+Nếu không có dữ liệu phù hợp, hãy nói rõ: "Không tìm thấy hội thảo hoặc tạp chí phù hợp."
 
-  if (conferences.length) {
-    context += "Danh sách hội thảo:\n";
-    conferences.slice(0, 5).forEach((c, i) => {
-      context += `Hội thảo ${i + 1}: \n- Tên: ${c.name || c.title || "Không có"} \n- Acronym: ${c.acronym || "Không có"} \n- Địa điểm: ${c.location || "Không có"} \n- Hạn nộp: ${c.deadline || "Không có"} \n- Ngày tổ chức: ${c.start_date || "Không có"} \n- Chủ đề: ${c.topics || "Không có"} \n- Link: ${c.url || "Không có"}\n\n`;
+`;
+
+  // =====================
+  // CONFERENCES
+  // =====================
+  if (conferences.length > 0) {
+    context += "=== HỘI THẢO PHÙ HỢP ===\n";
+    conferences.forEach((c, i) => {
+      context += `[C${i + 1}]
+Tên: ${c.name || c.title || "Không có"}
+Acronym: ${c.acronym || "Không có"}
+Chủ đề: ${c.topics || "Không có"}
+Hạn nộp: ${c.deadline || "Không có"}
+Thời gian tổ chức: ${c.start_date || "Không có"}
+Địa điểm: ${c.location || "Không có"}
+Link: ${c.url || "Không có"}
+
+`;
     });
-  } else {
-    context += "Không có hội thảo phù hợp.\n\n";
   }
 
-  if (journals.length) {
-    context += "Danh sách tạp chí:\n";
-    journals.slice(0, 5).forEach((j, i) => {
-      context += `Tạp chí ${i + 1}: \n- Tên: ${j.title || "Không có"} \n- Nhà xuất bản: ${j.publisher || "Không có"} \n- Lĩnh vực: ${j.areas || "Không có"} \n- Danh mục: ${j.categories || "Không có"} \n- ISSN: ${j.issn || "Không có"}\n\n`;
+  // =====================
+  // JOURNALS
+  // =====================
+  if (journals.length > 0) {
+    context += "=== TẠP CHÍ PHÙ HỢP ===\n";
+    journals.forEach((j, i) => {
+      context += `[J${i + 1}]
+Tên: ${j.title || "Không có"}
+Nhà xuất bản: ${j.publisher || "Không có"}
+Lĩnh vực: ${j.areas || "Không có"}
+Danh mục: ${j.categories || "Không có"}
+ISSN: ${j.issn || "Không có"}
+
+`;
     });
-  } else {
-    context += "Không có tạp chí phù hợp.\n\n";
   }
 
-  context += `\nCâu hỏi: ${question}\n\nHãy trả lời bằng tiếng Việt hoặc ngôn ngữ của câu hỏi.`;
+  context += `
+=== CÂU HỎI ===
+${question}
+
+=== YÊU CẦU TRẢ LỜI ===
+- Trả lời ngắn gọn, học thuật
+- Luôn trích dẫn theo dạng [C1], [C2], [J1]...
+- Ưu tiên hội thảo/tạp chí phù hợp nhất
+- Nếu không có dữ liệu phù hợp → nói rõ ràng
+`;
+
   return context;
 }
+
 
 // ============================= UPLOAD FILE API =============================
 app.post("/api/upload", upload.array("file"), async (req, res) => {
@@ -370,16 +426,36 @@ app.post("/api/agent", async (req, res) => {
 
     try {
       // embed đúng 1 lần
-      const queryVector = await embedText(question);
+      const searchQuery = question
+        .replace(/\n+/g, " ")
+        .slice(0, 300);
 
-      // search conference + journal chung
-      const result = await searchConferenceJournalByVector({
-        vector: queryVector,
-        topk: k
-      });
+      const queryVector = await embedText(searchQuery);
 
-      conferences = result.conferences || [];
-      journals = result.journals || [];
+
+      // search conference + journal 
+      const intent = detectIntent(question);
+      let conferences = [];
+      let journals = [];
+
+      if (intent !== "general") {
+        const result = await searchConferenceJournalByVector({
+          vector: queryVector,
+          topk: k
+        });
+
+        conferences = result.conferences || [];
+        journals = result.journals || [];
+
+        // ✅ RERANK NGAY SAU SEARCH
+        conferences = simpleRerank(conferences, question).slice(0, 5);
+        journals = simpleRerank(journals, question).slice(0, 5);
+
+        console.log("AFTER RERANK", {
+          conf: conferences.map(c => c.name || c.title),
+          jour: journals.map(j => j.title)
+        });
+      }
 
     } catch (e) {
       console.error("❌ vector search error:", e);

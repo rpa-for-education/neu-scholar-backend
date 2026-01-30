@@ -263,3 +263,30 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
 
   return { conferences, journals };
 }
+
+export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
+  const db = await getDb();
+  const col = db.collection(FILES_COLLECTION);
+  const k = Math.min(Number(topk) || 5, MAX_TOPK);
+
+  const pipeline = [
+    {
+      $vectorSearch: {
+        index: VECTOR_INDEX_UPLOADED_FILES,
+        path: "vector",
+        queryVector,
+        numCandidates: k * 10,
+        limit: k,
+        similarity: "cosine",
+      },
+    },
+    {
+      $project: {
+        vector: 0,
+        score: { $meta: "vectorSearchScore" },
+      },
+    },
+  ];
+
+  return await col.aggregate(pipeline).toArray();
+}
