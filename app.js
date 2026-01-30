@@ -16,6 +16,14 @@ import {
   uploadedFilesVectorSearch,
   searchConferenceJournalByVector
 } from "./search.js";
+import {
+  detectDomain,
+  analyzeQuestion,
+  buildSemanticQuery,
+  applyFilters,
+  rankResults,
+  finalizeResults
+} from "./agentReasoning.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
 import { addMemory, getMemory } from "./memory.js";
@@ -46,28 +54,6 @@ app.use((req, _res, next) => {
   console.log("📩 Request:", { method: req.method, url: req.url });
   next();
 });
-
-/*
-function detectIntent(question) {
-  const q = question.toLowerCase();
-
-  if (q.includes("conference") || q.includes("hội thảo")) return "conference";
-  if (q.includes("journal") || q.includes("tạp chí")) return "journal";
-  if (q.includes("so sánh") || q.includes("compare")) return "compare";
-
-  return "general";
-}
-*/
-
-function simpleRerank(items, question) {
-  const q = question.toLowerCase();
-  return items
-    .map(i => ({
-      ...i,
-      _score2: JSON.stringify(i).toLowerCase().includes(q) ? 1 : 0
-    }))
-    .sort((a, b) => b._score2 - a._score2);
-}
 
 
 function formatAnswerText(rawText) {
@@ -101,28 +87,46 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 function buildPrompt(question, conferences = [], journals = []) {
   let context = `
-Bạn là trợ lý học thuật.
-Chỉ sử dụng dữ liệu được cung cấp bên dưới.
-KHÔNG được tự suy đoán hoặc bịa thêm hội thảo / tạp chí.
-Nếu không có dữ liệu phù hợp, hãy nói rõ: "Không tìm thấy hội thảo hoặc tạp chí phù hợp."
+BẠN LÀ AI AGENT TƯ VẤN HỌC THUẬT
+CHUYÊN VỀ HỘI THẢO & TẠP CHÍ KHOA HỌC
 
+ĐỐI TƯỢNG PHỤC VỤ:
+- Giảng viên đại học
+- Nghiên cứu sinh
+- Học viên cao học
+
+MỤC TIÊU:
+- Tư vấn lựa chọn hội thảo hoặc tạp chí phù hợp cho công bố khoa học
+
+NGUYÊN TẮC BẮT BUỘC (KHÔNG ĐƯỢC VI PHẠM):
+1. Chỉ sử dụng dữ liệu được cung cấp bên dưới
+2. Không sử dụng kiến thức bên ngoài
+3. Không bịa hội thảo hoặc tạp chí
+4. Không suy đoán
+5. Nếu dữ liệu không đủ → phải nói rõ
+
+CÂU TRẢ LỜI CHỈ ĐƯỢC PHÉP DỰA TRÊN DỮ LIỆU SAU
 `;
 
   // =====================
   // CONFERENCES
   // =====================
   if (conferences.length > 0) {
-    context += "=== HỘI THẢO PHÙ HỢP ===\n";
+    context += `
+================================
+DANH SÁCH HỘI THẢO
+================================
+`;
     conferences.forEach((c, i) => {
-      context += `[C${i + 1}]
-Tên: ${c.name || c.title || "Không có"}
+      context += `
+[C${i + 1}]
+Tên hội thảo: ${c.name || c.title || "Không có"}
 Acronym: ${c.acronym || "Không có"}
 Chủ đề: ${c.topics || "Không có"}
-Hạn nộp: ${c.deadline || "Không có"}
+Hạn nộp bài: ${c.deadline || "Không có"}
 Thời gian tổ chức: ${c.start_date || "Không có"}
 Địa điểm: ${c.location || "Không có"}
-Link: ${c.url || "Không có"}
-
+Website: ${c.url || "Không có"}
 `;
     });
   }
@@ -131,32 +135,60 @@ Link: ${c.url || "Không có"}
   // JOURNALS
   // =====================
   if (journals.length > 0) {
-    context += "=== TẠP CHÍ PHÙ HỢP ===\n";
+    context += `
+================================
+DANH SÁCH TẠP CHÍ
+================================
+`;
     journals.forEach((j, i) => {
-      context += `[J${i + 1}]
-Tên: ${j.title || "Không có"}
+      context += `
+[J${i + 1}]
+Tên tạp chí: ${j.title || "Không có"}
 Nhà xuất bản: ${j.publisher || "Không có"}
 Lĩnh vực: ${j.areas || "Không có"}
-Danh mục: ${j.categories || "Không có"}
+Danh mục / Quartile: ${j.categories || "Không có"}
 ISSN: ${j.issn || "Không có"}
-
 `;
     });
   }
 
+  // =====================
+  // QUESTION & OUTPUT CONTRACT
+  // =====================
   context += `
-=== CÂU HỎI ===
+================================
+CÂU HỎI
+================================
 ${question}
 
-=== YÊU CẦU TRẢ LỜI ===
-- Trả lời ngắn gọn, học thuật
-- Luôn trích dẫn theo dạng [C1], [C2], [J1]...
-- Ưu tiên hội thảo/tạp chí phù hợp nhất
-- Nếu không có dữ liệu phù hợp → nói rõ ràng
+================================
+YÊU CẦU BẮT BUỘC VỀ CÂU TRẢ LỜI
+================================
+- Trả lời bằng tiếng Việt
+- Văn phong học thuật
+- Rõ ràng, ngắn gọn, có lập luận
+
+BẮT BUỘC TRÍCH DẪN:
+- Khi đề cập hội thảo → [C1], [C2], ...
+- Khi đề cập tạp chí → [J1], [J2], ...
+
+CẤU TRÚC CÂU TRẢ LỜI PHẢI THEO:
+1. Nhận định tổng quan
+2. Phân tích / tư vấn cụ thể (kèm trích dẫn)
+3. Kết luận ngắn gọn
+
+KHÔNG ĐƯỢC:
+- Suy đoán
+- Viết ngoài dữ liệu
+- Mở rộng sang kiến thức chung
+- Viết lan man
 `;
 
   return context;
 }
+
+
+
 
 
 // ============================= UPLOAD FILE API =============================
@@ -405,158 +437,135 @@ app.delete("/api/conferences/:id", async (req, res) => {
 // AGENT API
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
+
   try {
-    if (!db) db = await getDb();
-    const fileCol = db.collection(FILES_COLLECTION);
-    const { question, model_id = DEFAULT_MODEL_ID, topk = 5, file_name } = req.body;
+    const {
+      question,
+      model_id = DEFAULT_MODEL_ID,
+      topk = 10,
+      file_name,
+      session_id
+    } = req.body;
+
     if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
-    const sessionId = req.body.session_id;
 
-    // lấy short-term memory từ DB
-    // const memoryEntries = await getMemory(sessionId, DEFAULT_SHORT_MEMORY);
+    // =========================
+    // 🧠 AGENT REASONING
+    // =========================
+    const domain = detectDomain(question);
+    const analysis = analyzeQuestion(question);
 
-    // memory lâu dài từ DB
-    // const persistentMemory = await getMemory(sessionId, DEFAULT_SHORT_MEMORY);
+    const semanticQuery = buildSemanticQuery(analysis, domain);
 
-    const k = Math.max(1, Math.min(parseInt(topk, 10) || 5, 50));
-    let conferences = [];
-    let journals = [];
-    let fileHits = [];
-    let fileContext = "";
+    // ❗ embed đúng 1 lần
+    const queryVector = await embedText(semanticQuery);
 
-    try {
-      // embed đúng 1 lần
-      const searchQuery = question
-        .replace(/\n+/g, " ")
-        .slice(0, 300);
-
-      const queryVector = await embedText(searchQuery);
-
-
-      // search conference + journal 
-      // const intent = detectIntent(question);
-
-      const result = await searchConferenceJournalByVector({
+    let { conferences, journals } =
+      await searchConferenceJournalByVector({
         vector: queryVector,
-        topk: k
+        topk: 50
       });
 
-      conferences = result.conferences || [];
-      journals = result.journals || [];
-
-      // ✅ RERANK NGAY SAU SEARCH
-      conferences = simpleRerank(conferences, question).slice(0, 5);
-      journals = simpleRerank(journals, question).slice(0, 5);
-
-      console.log("AFTER RERANK", {
-        conf: conferences.map(c => c.name || c.title),
-        jour: journals.map(j => j.title)
-      });
-
-    } catch (e) {
-      console.error("❌ vector search error:", e);
+    // =========================
+    // 🎓 FILTER + RANK
+    // =========================
+    if (domain === "journal" || domain === "both") {
+      journals = finalizeResults(
+        rankResults(
+          applyFilters(journals, analysis, "journal"),
+          "journal"
+        ),
+        Number(topk)
+      );
+    } else {
+      journals = [];
     }
-    console.log("🔎 VECTOR SEARCH RESULT", {
-      conferences: conferences.length,
-      journals: journals.length,
-    });
 
-    if (conferences.length === 0 && journals.length === 0) {
-      try {
-        const articles = await fetchArticles();
-        conferences = articles.slice(0, Number(k));
-      } catch (e) {
-        console.error("fetchArticles error:", e);
-      }
+    if (domain === "conference" || domain === "both") {
+      conferences = finalizeResults(
+        rankResults(
+          applyFilters(conferences, analysis, "conference"),
+          "conference"
+        ),
+        Number(topk)
+      );
+    } else {
+      conferences = [];
     }
-    if (Array.isArray(file_name) && file_name.length > 0) {
-      for (const link of file_name) {
-        const existing = await fileCol.findOne({ url: link });
-        if (!existing) {
-          const processed = await processFileUrl(link);
-          if (processed) {
-            try {
-              await fileCol.insertOne({ ...processed, uploadedAt: new Date() });
-            } catch (e) {
-              console.error("Insert file to DB failed:", e);
-            }
-          }
-        }
-      }
-      const foundFiles = await fileCol.find({ url: { $in: file_name } }).toArray();
-      fileContext = foundFiles.map((f, i) => `${i + 1}. ${f.name} - ${f.url}`).join("\n");
-      fileHits = foundFiles.slice(0, k);
-    }
+
+    // =========================
+    // 🧠 MEMORY (optional)
+    // =========================
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history)) {
-      const recentHistory = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
-      memoryEntries = recentHistory
-        .map((entry) => ({
-          role: entry.role || "user",
-          text: entry.content || "",
+      const recent = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
+      memoryEntries = recent
+        .map(m => ({
+          role: m.role,
+          text: m.content
         }))
-        .filter((m) => m.text.trim().length > 0);
+        .filter(m => m.text?.trim());
     }
-    const memoryText = memoryEntries.map((m) => `- [${m.role}] ${m.text}`).join("\n");
+
+    const memoryText = memoryEntries
+      .map(m => `- [${m.role}] ${m.text}`)
+      .join("\n");
+
+    // =========================
+    // 🧾 PROMPT
+    // =========================
     const contextPrompt = buildPrompt(question, conferences, journals);
-    if (fileContext.trim()) {
-      fileContext = `Dưới đây là các file người dùng đã tải lên có liên quan:\n${fileContext}\n\n`;
-    }
+
     const finalPrompt = `
 ${contextPrompt}
 
-${memoryText ? "Ngữ cảnh hội thoại gần đây:\n" + memoryText + "\n\n" : ""}
-
-${fileContext}
+${memoryText ? "Ngữ cảnh hội thoại:\n" + memoryText : ""}
 `;
-    console.log("===== Prompt =====");
-    console.log(finalPrompt);
-    let answer;
-    try {
-      answer = await callLLM(finalPrompt, model_id);
-    } catch (e) {
-      console.error("callLLM error:", e);
-      return res.status(500).json({ error: "Failed to call LLM service" });
-    }
-    if (typeof answer !== "string") {
-      try {
-        answer = JSON.stringify(answer);
-      } catch {
-        answer = "";
-      }
-    }
-    answer = answer.trim();
-    try {
-      const col = await getCollection("chatlogs");
-      await col.insertOne({
-        question,
-        answer,
-        sessionId: req.body.session_id,
-        model_id,
-        createdAt: new Date(),
-        responseTimeMs: Date.now() - start,
-      });
-    } catch (e) {
-      console.error("Log insert error:", e);
-    }
-    
-    await addMemory(sessionId, "user", question);
-    await addMemory(sessionId, "assistant", answer);
+
+    // =========================
+    // 🤖 LLM
+    // =========================
+    const answer = await callLLM(finalPrompt, model_id);
+
+    // =========================
+    // 💾 LOG
+    // =========================
+    const col = await getCollection("chatlogs");
+    await col.insertOne({
+      question,
+      answer,
+      domain,
+      analysis,
+      semanticQuery,
+      model_id,
+      session_id,
+      createdAt: new Date(),
+      responseTimeMs: Date.now() - start
+    });
+
+    await addMemory(session_id, "user", question);
+    await addMemory(session_id, "assistant", answer);
 
     return res.json({
       model_id,
       answer,
-      retrieved: { conferences, journals, files: fileHits },
-      memoryCount: memoryEntries.length,
-      responseTimeMs: Date.now() - start,
+      retrieved: {
+        conferences,
+        journals
+      },
+      domain,
+      analysis,
+      responseTimeMs: Date.now() - start
     });
+
   } catch (err) {
-    console.error("Unhandled error:", err);
+    console.error("❌ AGENT ERROR:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 async function fetchArticles() {
   try {
