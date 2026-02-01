@@ -26,7 +26,7 @@ import {
 } from "./agentReasoning.js";
 import { getDb } from "./db.js";
 import { encode } from "gpt-tokenizer";
-import { addMemory, getMemory } from "./memory.js";
+// import { addMemory, getMemory } from "./memory.js";
 import { s3Client } from "./s3.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 
@@ -545,8 +545,8 @@ ${memoryText ? "Ngữ cảnh hội thoại:\n" + memoryText : ""}
       responseTimeMs: Date.now() - start
     });
 
-    await addMemory(session_id, "user", question);
-    await addMemory(session_id, "assistant", answer);
+    // await addMemory(session_id, "user", question);
+    // await addMemory(session_id, "assistant", answer);
 
     return res.json({
       model_id,
