@@ -139,7 +139,7 @@ async function importCollection(db, name, records, fields) {
   );
 
 
-  const BATCH_SIZE = 15;
+  const BATCH_SIZE = 10;
   let vectors = [];
 
   // 🟢 EMBEDDING
@@ -173,6 +173,7 @@ async function importCollection(db, name, records, fields) {
       );
 
       // ✅ Qdrant (vector search)
+      /*
       points.push({
         // id: uuidv4(),
         id: qdrantIdFromKey(item._key),
@@ -186,10 +187,11 @@ async function importCollection(db, name, records, fields) {
           // ref: item._key.slice(0, 200) // Giới hạn độ dài ref
         },
       });
+      */
     }
 
     // ✅ GỌI BƯỚC 3 Ở ĐÂY
-    await upsertQdrant(points);
+    // await upsertQdrant(points);
 
 
     embedBar.update(Math.min(i + batch.length, contents.length));
@@ -200,11 +202,12 @@ async function importCollection(db, name, records, fields) {
   console.log("✔ Xenova/paraphrase-multilingual-mpnet-base-v2");
 }
 
+/*
 async function upsertQdrant(points) {
   if (!points.length) return;
 
   await axios.put(
-    "https://research.neu.edu.vn/qdrant/collections/neu-scholar/points?wait=true",
+    "https://research.neu.edu.vn/qdrant/collections/neu-scholar/points",
     {
       points,
     },
@@ -216,9 +219,11 @@ async function upsertQdrant(points) {
     }
   );
 }
+*/
 
 
 // ===== Main =====
+
 (async () => {
   try {
     await client.connect();
@@ -227,6 +232,19 @@ async function upsertQdrant(points) {
 
     const conferences = await fetchJsonStream(API_RESEARCH);
     console.log(`📊 Conferences fetched: ${conferences.length}`);
+
+    // 🔍 KIỂM TRA TRÙNG KEY – ĐẶT Ở ĐÂY
+    const keyCount = new Map();
+
+    for (const c of conferences) {
+      const key = `${c.acronym || ""} ${c.name || ""}`.trim();
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    }
+
+    const duplicated = [...keyCount.entries()].filter(([_, v]) => v > 1);
+
+    console.log("🔴 Duplicated keys:", duplicated.length);
+    console.log("🔎 Examples:", duplicated.slice(0, 10));
 
     const journals = await fetchJsonStream(API_JOURNAL);
     console.log(`📊 Journals fetched: ${journals.length}`);

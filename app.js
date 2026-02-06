@@ -148,6 +148,7 @@ Nhà xuất bản: ${j.publisher || "Không có"}
 Lĩnh vực: ${j.areas || "Không có"}
 Danh mục / Quartile: ${j.categories || "Không có"}
 ISSN: ${j.issn || "Không có"}
+Scimago Link: ${j.scimago_link || "Không có"}
 `;
     });
   }
@@ -168,14 +169,20 @@ YÊU CẦU BẮT BUỘC VỀ CÂU TRẢ LỜI
 - Văn phong học thuật
 - Rõ ràng, ngắn gọn, có lập luận
 
-BẮT BUỘC TRÍCH DẪN:
-- Khi đề cập hội thảo → [C1], [C2], ...
-- Khi đề cập tạp chí → [J1], [J2], ...
+BẮT BUỘC TRÍCH DẪN & LINK:
+- Khi đề cập tạp chí → [J1], [J2], ... và PHẢI phải kèm link Scimago Link, click được
+- Khi đề cập hội thảo → [C1], [C2], ... và PHẢI phải kèm link Website, click được
+
+BẮT BUỘC CUỐI CÂU TRẢ LỜI:
+- Phải có mục "Nguồn tham khảo"
+- Mỗi [Jx], [Cx] phải kèm link tương ứng
+- KHÔNG được gộp link, KHÔNG được viết chung chung
 
 CẤU TRÚC CÂU TRẢ LỜI PHẢI THEO:
 1. Nhận định tổng quan
 2. Phân tích / tư vấn cụ thể (kèm trích dẫn)
 3. Kết luận ngắn gọn
+4. Nguồn tham khảo
 
 KHÔNG ĐƯỢC:
 - Suy đoán
