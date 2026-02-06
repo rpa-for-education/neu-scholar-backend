@@ -476,6 +476,20 @@ app.post("/api/agent", async (req, res) => {
       });
 
     // =========================
+    // 🔧 NORMALIZE DATA (BẮT BUỘC)
+    // =========================
+    journals = journals.map(j => ({
+      ...j,
+      scimago_link: j.scimago_link ?? null
+    }));
+
+    conferences = conferences.map(c => ({
+      ...c,
+      url: c.url ?? null
+    }));
+
+
+    // =========================
     // 🎓 FILTER + RANK
     // =========================
     if (domain === "journal" || domain === "both") {
