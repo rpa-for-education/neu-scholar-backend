@@ -225,70 +225,70 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
     // =========================
     // CONFERENCES
     // =========================
-    db.collection("conference").aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_conference",
-          path: "vector",
-          queryVector: vector,
-          numCandidates: Math.max(50, k * 10),
-          limit: k,
-          similarity: "cosine",
+    db.collection("conference")
+      .aggregate([
+        {
+          $vectorSearch: {
+            index: "vector_index_conference",
+            path: "vector",
+            queryVector: vector,
+            numCandidates: Math.max(50, k * 10),
+            limit: k,
+            similarity: "cosine",
+          },
         },
-      },
-      {
-        // ⚠️ PHẢI GIỮ url để agent in link
-        $project: {
-          vector: 0,
-          score: { $meta: "vectorSearchScore" },
+        {
+          $project: {
+            vector: 0,
+            score: { $meta: "vectorSearchScore" },
 
-          // fields dùng cho prompt
-          name: 1,
-          title: 1,
-          acronym: 1,
-          topics: 1,
-          deadline: 1,
-          start_date: 1,
-          location: 1,
-          url: 1,
+            name: 1,
+            acronym: 1,
+            deadline: 1,
+            start_date: 1,
+            location: 1,
+            topics: 1,
+            url: 1, // ⭐ link hội thảo
+          },
         },
-      },
-    ]).toArray(),
+      ])
+      .toArray(),
 
     // =========================
     // JOURNALS
     // =========================
-    db.collection("journal").aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_journal",
-          path: "vector",
-          queryVector: vector,
-          numCandidates: Math.max(50, k * 10),
-          limit: k,
-          similarity: "cosine",
+    db.collection("journal")
+      .aggregate([
+        {
+          $vectorSearch: {
+            index: "vector_index_journal",
+            path: "vector",
+            queryVector: vector,
+            numCandidates: Math.max(50, k * 10),
+            limit: k,
+            similarity: "cosine",
+          },
         },
-      },
-      {
-        // ⚠️ PHẢI GIỮ scimago_link để agent in link
-        $project: {
-          vector: 0,
-          score: { $meta: "vectorSearchScore" },
+        {
+          $project: {
+            vector: 0,
+            score: { $meta: "vectorSearchScore" },
 
-          // fields dùng cho prompt
-          title: 1,
-          publisher: 1,
-          areas: 1,
-          categories: 1,
-          issn: 1,
-          scimago_link: 1,
+            title: 1,
+            publisher: 1,
+            areas: 1,
+            categories: 1,
+            issn: 1,
+            scimago_link: 1, // ⭐ link Scimago
+          },
         },
-      },
-    ]).toArray(),
+      ])
+      .toArray(),
   ]);
 
   return { conferences, journals };
 }
+
 
 
 export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
