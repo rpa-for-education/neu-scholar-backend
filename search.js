@@ -222,68 +222,58 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   const [conferences, journals] = await Promise.all([
-    // =========================
-    // CONFERENCES
-    // =========================
-    db.collection("conference")
-      .aggregate([
-        {
-          $vectorSearch: {
-            index: "vector_index_conference",
-            path: "vector",
-            queryVector: vector,
-            numCandidates: Math.max(50, k * 10),
-            limit: k,
-            similarity: "cosine",
-          },
+    // ================= CONFERENCES =================
+    db.collection("conference").aggregate([
+      {
+        $vectorSearch: {
+          index: "vector_index_conference",
+          path: "vector",
+          queryVector: vector,
+          numCandidates: Math.max(50, k * 10),
+          limit: k,
+          similarity: "cosine",
         },
-        {
-          $project: {
-            vector: 0,
-            score: { $meta: "vectorSearchScore" },
+      },
+      {
+        $project: {
+          vector: 0,
+          score: { $meta: "vectorSearchScore" },
+          name: 1,
+          acronym: 1,
+          deadline: 1,
+          start_date: 1,
+          location: 1,
+          topics: 1,
+          url: { $ifNull: ["$url", null] },
+        },
+      },
+    ]).toArray(),
 
-            name: 1,
-            acronym: 1,
-            deadline: 1,
-            start_date: 1,
-            location: 1,
-            topics: 1,
-            url: 1, // ⭐ link hội thảo
-          },
+    // ================= JOURNALS =================
+    db.collection("journal").aggregate([
+      {
+        $vectorSearch: {
+          index: "vector_index_journal",
+          path: "vector",
+          queryVector: vector,
+          numCandidates: Math.max(50, k * 10),
+          limit: k,
+          similarity: "cosine",
         },
-      ])
-      .toArray(),
-
-    // =========================
-    // JOURNALS
-    // =========================
-    db.collection("journal")
-      .aggregate([
-        {
-          $vectorSearch: {
-            index: "vector_index_journal",
-            path: "vector",
-            queryVector: vector,
-            numCandidates: Math.max(50, k * 10),
-            limit: k,
-            similarity: "cosine",
-          },
+      },
+      {
+        $project: {
+          vector: 0,
+          score: { $meta: "vectorSearchScore" },
+          title: 1,
+          publisher: 1,
+          areas: 1,
+          categories: 1,
+          issn: 1,
+          scimago_link: { $ifNull: ["$scimago_link", null] },
         },
-        {
-          $project: {
-            vector: 0,
-            score: { $meta: "vectorSearchScore" },
-
-            title: 1,
-            publisher: 1,
-            areas: 1,
-            categories: 1,
-            issn: 1,
-            scimago_link: 1, // ⭐ link Scimago
-          },
-        },
-      ])
-      .toArray(),
+      },
+    ]).toArray(),
   ]);
 
   return { conferences, journals };
