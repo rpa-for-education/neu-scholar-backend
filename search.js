@@ -215,13 +215,16 @@ export async function uploadedFilesVectorSearch(query, topk = 5) {
 }
 
 // =============================
-// SEARCH CONFERENCE + JOURNAL CHUNG
+// SEARCH CONFERENCE + JOURNAL (VECTOR SEARCH)
 // =============================
 export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   const [conferences, journals] = await Promise.all([
+    // =========================
+    // CONFERENCES
+    // =========================
     db.collection("conference").aggregate([
       {
         $vectorSearch: {
@@ -234,13 +237,27 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
         },
       },
       {
+        // ⚠️ PHẢI GIỮ url để agent in link
         $project: {
           vector: 0,
           score: { $meta: "vectorSearchScore" },
+
+          // fields dùng cho prompt
+          name: 1,
+          title: 1,
+          acronym: 1,
+          topics: 1,
+          deadline: 1,
+          start_date: 1,
+          location: 1,
+          url: 1,
         },
       },
     ]).toArray(),
 
+    // =========================
+    // JOURNALS
+    // =========================
     db.collection("journal").aggregate([
       {
         $vectorSearch: {
@@ -253,9 +270,18 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
         },
       },
       {
+        // ⚠️ PHẢI GIỮ scimago_link để agent in link
         $project: {
           vector: 0,
           score: { $meta: "vectorSearchScore" },
+
+          // fields dùng cho prompt
+          title: 1,
+          publisher: 1,
+          areas: 1,
+          categories: 1,
+          issn: 1,
+          scimago_link: 1,
         },
       },
     ]).toArray(),
@@ -263,6 +289,7 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
 
   return { conferences, journals };
 }
+
 
 export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
   const db = await getDb();
