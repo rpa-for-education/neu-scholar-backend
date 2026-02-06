@@ -205,7 +205,6 @@ YÊU CẦU TRÌNH BÀY:
 - Mỗi đề mục chính xuống dòng rõ ràng
 - Không gộp các đề mục
 
-
 KHÔNG ĐƯỢC:
 - Suy đoán
 - Viết ngoài dữ liệu
@@ -541,6 +540,7 @@ app.post("/api/agent", async (req, res) => {
     // =========================
     // 🧠 MEMORY (optional)
     // =========================
+    /*
     let memoryEntries = [];
     if (Array.isArray(req.body.chat_history)) {
       const recent = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
@@ -555,17 +555,21 @@ app.post("/api/agent", async (req, res) => {
     const memoryText = memoryEntries
       .map(m => `- [${m.role}] ${m.text}`)
       .join("\n");
+    */
 
     // =========================
     // 🧾 PROMPT
     // =========================
     const contextPrompt = buildPrompt(question, conferences, journals);
 
+    /*
     const finalPrompt = `
 ${contextPrompt}
 
 ${memoryText ? "Ngữ cảnh hội thoại:\n" + memoryText : ""}
 `;
+    */
+   const finalPrompt = contextPrompt;
 
     // =========================
     // 🤖 LLM
