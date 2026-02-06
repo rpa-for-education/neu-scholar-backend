@@ -125,7 +125,10 @@ Acronym: ${c.acronym || "Không có"}
 Chủ đề: ${c.topics || "Không có"}
 Hạn nộp bài: ${c.deadline || "Không có"}
 Thời gian tổ chức: ${c.start_date || "Không có"}
-Địa điểm: ${c.location || "Không có"}
+Địa điểm tổ chức:
+- Thành phố: ${c.city || c.location || "Không xác định"}
+- Quốc gia: ${c.country || "Không xác định"}
+- Khu vực: ${c.continent || "Không xác định"}
 Website: ${c.url || "Không có"}
 `;
     });
@@ -178,11 +181,30 @@ BẮT BUỘC CUỐI CÂU TRẢ LỜI:
 - Mỗi [Jx], [Cx] phải kèm link tương ứng
 - KHÔNG được gộp link, KHÔNG được viết chung chung
 
-CẤU TRÚC CÂU TRẢ LỜI PHẢI THEO:
-1. Nhận định tổng quan
-2. Phân tích / tư vấn cụ thể (kèm trích dẫn)
-3. Kết luận ngắn gọn
-4. Nguồn tham khảo
+CẤU TRÚC CÂU TRẢ LỜI BẮT BUỘC (TRÌNH BÀY MARKDOWN):
+
+**1. Nhận định tổng quan**
+- Viết thành đoạn văn hoàn chỉnh
+
+**2. Phân tích / tư vấn cụ thể**
+- Mỗi hội thảo / tạp chí là 1 gạch đầu dòng
+- Khi nhắc đến phải trích dẫn [C1], [J1] tương ứng
+- Link phải click được
+
+**3. Kết luận**
+- 2–3 câu, tóm tắt lựa chọn phù hợp
+
+**4. Nguồn tham khảo**
+- Liệt kê theo dạng:
+  - [C1] Tên hội thảo – Website
+  - [J1] Tên tạp chí – Scimago Link
+
+YÊU CẦU TRÌNH BÀY:
+- BẮT BUỘC dùng Markdown
+- Đề mục chính PHẢI in đậm (**)
+- Mỗi đề mục chính xuống dòng rõ ràng
+- Không gộp các đề mục
+
 
 KHÔNG ĐƯỢC:
 - Suy đoán

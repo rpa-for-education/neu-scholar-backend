@@ -240,7 +240,14 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
           acronym: 1,
           deadline: 1,
           start_date: 1,
+
+          // 🔥 LOCATION CHUẨN HOÁ
           location: 1,
+          city: 1,
+          country: 1,
+          country_code: 1,
+          continent: 1,
+          
           topics: 1,
           url: 1,
         },
