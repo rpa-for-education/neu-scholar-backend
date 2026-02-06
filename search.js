@@ -222,7 +222,6 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   const [conferences, journals] = await Promise.all([
-    // ================= CONFERENCES =================
     db.collection("conference").aggregate([
       {
         $vectorSearch: {
@@ -236,7 +235,6 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
       },
       {
         $project: {
-          vector: 0,
           score: { $meta: "vectorSearchScore" },
           name: 1,
           acronym: 1,
@@ -249,7 +247,6 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
       },
     ]).toArray(),
 
-    // ================= JOURNALS =================
     db.collection("journal").aggregate([
       {
         $vectorSearch: {
@@ -263,7 +260,6 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
       },
       {
         $project: {
-          vector: 0,
           score: { $meta: "vectorSearchScore" },
           title: 1,
           publisher: 1,
@@ -278,6 +274,7 @@ export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
 
   return { conferences, journals };
 }
+
 
 
 
