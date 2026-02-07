@@ -1,3 +1,5 @@
+// search.js
+
 process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
 process.env.HF_HUB_CACHE = process.env.HF_HUB_CACHE || "/tmp/hf_hub_cache";
 process.env.HF_HOME = process.env.HF_HOME || "/tmp/hf_home";
@@ -215,68 +217,104 @@ export async function uploadedFilesVectorSearch(query, topk = 5) {
 }
 
 // =============================
-// SEARCH CONFERENCE + JOURNAL (VECTOR SEARCH)
+// SEARCH CONFERENCE + JOURNAL
+// (PRE-FILTER CONTINENT / YEAR)
 // =============================
-export async function searchConferenceJournalByVector({ vector, topk = 5 }) {
+export async function searchConferenceJournalByVector({
+  vector,
+  topk = 5,
+
+  // 🔥 NEW OPTIONAL FILTERS
+  continent = null,      // "Asia", "Europe", ...
+  country_code = null,   // "CN", "JP", ...
+  year = null            // "2025"
+}) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
+  /* =========================
+   * PRE-FILTER MATCH
+   * ========================= */
+  const preMatch = {};
+
+  if (country_code) {
+    preMatch.country_code = country_code;
+  } else if (continent) {
+    preMatch.continent = continent;
+  }
+
+  if (year) {
+    preMatch.start_date = { $regex: `^${year}` };
+  }
+
+  /* =========================
+   * PIPELINES
+   * ========================= */
+  const conferencePipeline = [
+    ...(Object.keys(preMatch).length
+      ? [{ $match: preMatch }]
+      : []),
+
+    {
+      $vectorSearch: {
+        index: "vector_index_conference",
+        path: "vector",
+        queryVector: vector,
+
+        // ⚡ đã pre-filter → giảm mạnh
+        numCandidates: Math.max(20, k * 5),
+        limit: k,
+        similarity: "cosine",
+      },
+    },
+    {
+      $project: {
+        score: { $meta: "vectorSearchScore" },
+        name: 1,
+        acronym: 1,
+        deadline: 1,
+        start_date: 1,
+
+        // LOCATION CHUẨN
+        location: 1,
+        city: 1,
+        country: 1,
+        country_code: 1,
+        continent: 1,
+
+        topics: 1,
+        url: 1,
+      },
+    },
+  ];
+
+  const journalPipeline = [
+    {
+      $vectorSearch: {
+        index: "vector_index_journal",
+        path: "vector",
+        queryVector: vector,
+        numCandidates: Math.max(50, k * 10),
+        limit: k,
+        similarity: "cosine",
+      },
+    },
+    {
+      $project: {
+        score: { $meta: "vectorSearchScore" },
+        title: 1,
+        publisher: 1,
+        areas: 1,
+        categories: 1,
+        issn: 1,
+        scimago_link: 1,
+      },
+    },
+  ];
+
   const [conferences, journals] = await Promise.all([
-    db.collection("conference").aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_conference",
-          path: "vector",
-          queryVector: vector,
-          numCandidates: Math.max(50, k * 10),
-          limit: k,
-          similarity: "cosine",
-        },
-      },
-      {
-        $project: {
-          score: { $meta: "vectorSearchScore" },
-          name: 1,
-          acronym: 1,
-          deadline: 1,
-          start_date: 1,
-
-          // 🔥 LOCATION CHUẨN HOÁ
-          location: 1,
-          city: 1,
-          country: 1,
-          country_code: 1,
-          continent: 1,
-          
-          topics: 1,
-          url: 1,
-        },
-      },
-    ]).toArray(),
-
-    db.collection("journal").aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index_journal",
-          path: "vector",
-          queryVector: vector,
-          numCandidates: Math.max(50, k * 10),
-          limit: k,
-          similarity: "cosine",
-        },
-      },
-      {
-        $project: {
-          score: { $meta: "vectorSearchScore" },
-          title: 1,
-          publisher: 1,
-          areas: 1,
-          categories: 1,
-          issn: 1,
-          scimago_link: 1,
-        },
-      },
-    ]).toArray(),
+    db.collection("conference").aggregate(conferencePipeline).toArray(),
+    db.collection("journal").aggregate(journalPipeline).toArray(),
   ]);
 
   return { conferences, journals };

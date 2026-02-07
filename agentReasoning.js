@@ -3,6 +3,18 @@
 // Academic Agent Reasoning (NEU multi-field)
 // =========================================
 
+
+
+const CONTINENT_MAP = [
+  { key: "Asia", match: ["châu á", "asia", "asian"] },
+  { key: "Europe", match: ["châu âu", "europe", "eu"] },
+  { key: "North America", match: ["bắc mỹ", "north america", "usa", "canada"] },
+  { key: "South America", match: ["nam mỹ", "south america"] },
+  { key: "Oceania", match: ["châu đại dương", "oceania", "australia"] },
+  { key: "Africa", match: ["châu phi", "africa"] }
+];
+
+
 /**
  * DOMAIN DETECTION
  */
@@ -30,6 +42,14 @@ export function detectDomain(question) {
  */
 export function analyzeQuestion(question) {
   const q = question.toLowerCase();
+
+  let wantsContinent = null;
+  for (const c of CONTINENT_MAP) {
+    if (c.match.some(m => q.includes(m))) {
+      wantsContinent = c.key;
+      break;
+    }
+  }
 
   return {
     wantsRanking:
@@ -62,6 +82,9 @@ export function analyzeQuestion(question) {
     wantsCompare:
       q.includes("so sánh") ||
       q.includes("compare"),
+      
+    // 🔥 NEW
+    wantsContinent,
 
     fieldHint: extractResearchField(question)
   };
