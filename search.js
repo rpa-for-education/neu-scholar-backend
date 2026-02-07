@@ -250,8 +250,12 @@ export async function searchConferenceJournalByVector({
 
   // 3️⃣ Year
   if (year) {
-    vectorFilter.start_date = { $regex: `^${year}` };
+    preMatch.start_date = {
+      $gte: `${year}-01-01`,
+      $lt: `${Number(year) + 1}-01-01`
+    };
   }
+
 
   /* =========================
    * VECTOR SEARCH STAGE
