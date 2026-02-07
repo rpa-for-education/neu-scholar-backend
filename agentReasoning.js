@@ -14,6 +14,40 @@ const CONTINENT_MAP = [
   { key: "Africa", match: ["châu phi", "africa"] }
 ];
 
+import { COUNTRY_NAME_TO_ISO } from "./scripts/country_iso_full.js";
+import { COUNTRY_VI_TO_ISO } from "./scripts/country_vi_alias.js";
+
+export function extractCountryIntent(question) {
+  if (!question) return null;
+
+  const q = question
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[.,()]/g, " ")
+    .replace(/\s+/g, " ");
+
+  // 1️⃣ Vietnamese aliases FIRST (ưu tiên)
+  for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
+    if (q.includes(` ${name} `) || q.startsWith(name + " ") || q.endsWith(" " + name)) {
+      return iso;
+    }
+  }
+
+  // 2️⃣ English / international aliases
+  const entries = Object.entries(COUNTRY_NAME_TO_ISO)
+    .sort((a, b) => b[0].length - a[0].length);
+
+  for (const [name, iso] of entries) {
+    if (q.includes(` ${name} `) || q.startsWith(name + " ") || q.endsWith(" " + name)) {
+      return iso;
+    }
+  }
+
+  return null;
+}
+
+
 
 /**
  * DOMAIN DETECTION
@@ -51,6 +85,9 @@ export function analyzeQuestion(question) {
     }
   }
 
+  const countryCode = extractCountryIntent(question);
+
+
   return {
     wantsRanking:
       q.includes("uy tín") ||
@@ -82,9 +119,11 @@ export function analyzeQuestion(question) {
     wantsCompare:
       q.includes("so sánh") ||
       q.includes("compare"),
-      
+
     // 🔥 NEW
     wantsContinent,
+    
+    wantsCountryCode: countryCode,
 
     fieldHint: extractResearchField(question)
   };

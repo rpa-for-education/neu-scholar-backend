@@ -490,6 +490,13 @@ app.post("/api/agent", async (req, res) => {
     // ❗ embed đúng 1 lần
     const queryVector = await embedText(semanticQuery);
 
+    console.log("🧠 INTENT DEBUG", {
+      domain,
+      continent: analysis.wantsContinent,
+      country: analysis.wantsCountryCode,
+      year: analysis.wantsRecent
+    });
+
     let { conferences, journals } =
       await searchConferenceJournalByVector({
         vector: queryVector,

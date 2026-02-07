@@ -224,44 +224,48 @@ export async function searchConferenceJournalByVector({
   vector,
   topk = 5,
 
-  // 🔥 NEW OPTIONAL FILTERS
-  continent = null,      // "Asia", "Europe", ...
-  country_code = null,   // "CN", "JP", ...
-  year = null            // "2025"
+  // 🔥 OPTIONAL FILTERS
+  continent = null,          // "Asia"
+  country_code = null,       // "JP" | ["JP","KR"]
+  year = null                // "2026"
 }) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   /* =========================
-   * PRE-FILTER MATCH
+   * VECTOR SEARCH FILTER
    * ========================= */
-  const preMatch = {};
+  const vectorFilter = {};
 
-  if (country_code) {
-    preMatch.country_code = country_code;
-  } else if (continent) {
-    preMatch.continent = continent;
+  // 1️⃣ COUNTRY (ưu tiên cao nhất)
+  if (Array.isArray(country_code) && country_code.length > 0) {
+    vectorFilter.country_code = { $in: country_code };
+  } else if (typeof country_code === "string") {
+    vectorFilter.country_code = country_code;
   }
 
+  // 2️⃣ CONTINENT (fallback)
+  else if (continent) {
+    vectorFilter.continent = continent;
+  }
+
+  // 3️⃣ YEAR
   if (year) {
-    preMatch.start_date = { $regex: `^${year}` };
+    vectorFilter.start_date = { $regex: `^${year}` };
   }
 
   /* =========================
    * PIPELINES
    * ========================= */
-  const conferencePipeline = [
-    ...(Object.keys(preMatch).length
-      ? [{ $match: preMatch }]
-      : []),
 
+  const conferencePipeline = [
     {
       $vectorSearch: {
         index: "vector_index_conference",
         path: "vector",
         queryVector: vector,
+        filter: Object.keys(vectorFilter).length ? vectorFilter : undefined,
 
-        // ⚡ đã pre-filter → giảm mạnh
         numCandidates: Math.max(20, k * 5),
         limit: k,
         similarity: "cosine",
@@ -275,7 +279,7 @@ export async function searchConferenceJournalByVector({
         deadline: 1,
         start_date: 1,
 
-        // LOCATION CHUẨN
+        // LOCATION
         location: 1,
         city: 1,
         country: 1,
@@ -319,6 +323,7 @@ export async function searchConferenceJournalByVector({
 
   return { conferences, journals };
 }
+
 
 
 
