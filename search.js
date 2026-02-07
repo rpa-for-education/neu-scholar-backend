@@ -232,27 +232,15 @@ export async function searchConferenceJournalByVector({
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   /* =========================
-   * BUILD VECTOR FILTER (ATLAS)
+   * 1️⃣ PRE-MATCH (NON-VECTOR)
    * ========================= */
-  const vectorFilter = {};
+  const preMatch = {};
 
-  // 1️⃣ Country (ưu tiên cao nhất)
-  if (Array.isArray(country_code) && country_code.length > 0) {
-    vectorFilter.country_code = { $in: country_code };
-  } else if (typeof country_code === "string" && country_code) {
-    vectorFilter.country_code = country_code;
-  }
-
-  // 2️⃣ Continent (fallback nếu KHÔNG có country)
-  else if (continent) {
-    vectorFilter.continent = continent;
-  }
-
-  // 3️⃣ Year → DATE RANGE (BẮT BUỘC, không regex)
+  // Year → xử lý ở $match (KHÔNG vector filter)
   if (year) {
     const y = Number(year);
     if (!Number.isNaN(y)) {
-      vectorFilter.start_date = {
+      preMatch.start_date = {
         $gte: `${y}-01-01`,
         $lt: `${y + 1}-01-01`
       };
@@ -260,29 +248,45 @@ export async function searchConferenceJournalByVector({
   }
 
   /* =========================
-   * VECTOR SEARCH STAGE
+   * 2️⃣ VECTOR FILTER (INDEXED ONLY)
    * ========================= */
-  const conferenceVectorStage = {
-    $vectorSearch: {
-      index: "vector_index_conference",
-      path: "vector",
-      queryVector: vector,
-      numCandidates: Math.max(20, k * 5),
-      limit: k,
-      similarity: "cosine",
-    },
-  };
+  const vectorFilter = {};
 
-  // 🔥 Chỉ add filter khi CÓ điều kiện
-  if (Object.keys(vectorFilter).length > 0) {
-    conferenceVectorStage.$vectorSearch.filter = vectorFilter;
+  // Country (ưu tiên cao nhất)
+  if (Array.isArray(country_code) && country_code.length > 0) {
+    vectorFilter.country_code = { $in: country_code };
+  } else if (typeof country_code === "string" && country_code) {
+    vectorFilter.country_code = country_code;
+  }
+
+  // Continent (fallback)
+  else if (continent) {
+    vectorFilter.continent = continent;
   }
 
   /* =========================
-   * PIPELINES
+   * 3️⃣ PIPELINE
    * ========================= */
   const conferencePipeline = [
-    conferenceVectorStage,
+    // 🔥 YEAR FILTER TRƯỚC
+    ...(Object.keys(preMatch).length ? [{ $match: preMatch }] : []),
+
+    {
+      $vectorSearch: {
+        index: "vector_index_conference",
+        path: "vector",
+        queryVector: vector,
+        numCandidates: Math.max(20, k * 5),
+        limit: k,
+        similarity: "cosine",
+
+        // 🔥 CHỈ filter field đã index
+        ...(Object.keys(vectorFilter).length
+          ? { filter: vectorFilter }
+          : {})
+      }
+    },
+
     {
       $project: {
         score: { $meta: "vectorSearchScore" },
@@ -296,9 +300,9 @@ export async function searchConferenceJournalByVector({
         country_code: 1,
         continent: 1,
         topics: 1,
-        url: 1,
-      },
-    },
+        url: 1
+      }
+    }
   ];
 
   const journalPipeline = [
@@ -309,8 +313,8 @@ export async function searchConferenceJournalByVector({
         queryVector: vector,
         numCandidates: Math.max(50, k * 10),
         limit: k,
-        similarity: "cosine",
-      },
+        similarity: "cosine"
+      }
     },
     {
       $project: {
@@ -320,23 +324,18 @@ export async function searchConferenceJournalByVector({
         areas: 1,
         categories: 1,
         issn: 1,
-        scimago_link: 1,
-      },
-    },
+        scimago_link: 1
+      }
+    }
   ];
 
   const [conferences, journals] = await Promise.all([
     db.collection("conference").aggregate(conferencePipeline).toArray(),
-    db.collection("journal").aggregate(journalPipeline).toArray(),
+    db.collection("journal").aggregate(journalPipeline).toArray()
   ]);
 
   return { conferences, journals };
 }
-
-
-
-
-
 
 export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
   const db = await getDb();
