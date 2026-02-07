@@ -224,35 +224,19 @@ export async function searchConferenceJournalByVector({
   vector,
   topk = 5,
 
-  continent = null,      // "Asia"
-  country_code = null,   // "JP" | ["JP","KR"]
-  year = null            // "2026"
+  continent = null,
+  country_code = null,
+  year = null
 }) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   /* =========================
-   * 1️⃣ PRE-MATCH (NON-VECTOR)
-   * ========================= */
-  const preMatch = {};
-
-  // Year → xử lý ở $match (KHÔNG vector filter)
-  if (year) {
-    const y = Number(year);
-    if (!Number.isNaN(y)) {
-      preMatch.start_date = {
-        $gte: `${y}-01-01`,
-        $lt: `${y + 1}-01-01`
-      };
-    }
-  }
-
-  /* =========================
-   * 2️⃣ VECTOR FILTER (INDEXED ONLY)
+   * 1️⃣ VECTOR FILTER (INDEXED ONLY)
    * ========================= */
   const vectorFilter = {};
 
-  // Country (ưu tiên cao nhất)
+  // Country (ưu tiên)
   if (Array.isArray(country_code) && country_code.length > 0) {
     vectorFilter.country_code = { $in: country_code };
   } else if (typeof country_code === "string" && country_code) {
@@ -265,27 +249,37 @@ export async function searchConferenceJournalByVector({
   }
 
   /* =========================
-   * 3️⃣ PIPELINE
+   * 2️⃣ VECTOR SEARCH (PHẢI FIRST)
    * ========================= */
   const conferencePipeline = [
-    // 🔥 YEAR FILTER TRƯỚC
-    ...(Object.keys(preMatch).length ? [{ $match: preMatch }] : []),
-
     {
       $vectorSearch: {
         index: "vector_index_conference",
         path: "vector",
         queryVector: vector,
-        numCandidates: Math.max(20, k * 5),
+        numCandidates: Math.max(50, k * 10),
         limit: k,
         similarity: "cosine",
 
-        // 🔥 CHỈ filter field đã index
         ...(Object.keys(vectorFilter).length
           ? { filter: vectorFilter }
           : {})
       }
     },
+
+    /* =========================
+     * 3️⃣ YEAR FILTER (POST)
+     * ========================= */
+    ...(year
+      ? [{
+          $match: {
+            start_date: {
+              $gte: `${year}-01-01`,
+              $lt: `${Number(year) + 1}-01-01`
+            }
+          }
+        }]
+      : []),
 
     {
       $project: {
@@ -336,6 +330,7 @@ export async function searchConferenceJournalByVector({
 
   return { conferences, journals };
 }
+
 
 export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
   const db = await getDb();
