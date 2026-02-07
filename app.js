@@ -497,11 +497,19 @@ app.post("/api/agent", async (req, res) => {
       year: analysis.wantsRecent
     });
 
+    const year =
+      analysis.wantsRecent ? String(analysis.wantsRecent[0]) : null;
+
     let { conferences, journals } =
       await searchConferenceJournalByVector({
         vector: queryVector,
-        topk: 50
+        topk: 50,
+
+        continent: analysis.wantsContinent,
+        country_code: analysis.wantsCountryCode,
+        year
       });
+
 
     // =========================
     // 🔧 NORMALIZE DATA (BẮT BUỘC)
