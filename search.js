@@ -224,43 +224,45 @@ export async function searchConferenceJournalByVector({
   vector,
   topk = 5,
 
-  continent = null,
-  country_code = null,
-  year = null
+  continent = null,      // "Asia"
+  country_code = null,   // "JP" | ["JP","KR"]
+  year = null            // "2026"
 }) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   /* =========================
-   * BUILD FILTER
+   * BUILD VECTOR FILTER (ATLAS)
    * ========================= */
   const vectorFilter = {};
 
   // 1️⃣ Country (ưu tiên cao nhất)
   if (Array.isArray(country_code) && country_code.length > 0) {
     vectorFilter.country_code = { $in: country_code };
-  } else if (typeof country_code === "string") {
+  } else if (typeof country_code === "string" && country_code) {
     vectorFilter.country_code = country_code;
   }
 
-  // 2️⃣ Continent (fallback)
+  // 2️⃣ Continent (fallback nếu KHÔNG có country)
   else if (continent) {
     vectorFilter.continent = continent;
   }
 
-  // 3️⃣ Year
+  // 3️⃣ Year → DATE RANGE (BẮT BUỘC, không regex)
   if (year) {
-    preMatch.start_date = {
-      $gte: `${year}-01-01`,
-      $lt: `${Number(year) + 1}-01-01`
-    };
+    const y = Number(year);
+    if (!Number.isNaN(y)) {
+      vectorFilter.start_date = {
+        $gte: `${y}-01-01`,
+        $lt: `${y + 1}-01-01`
+      };
+    }
   }
-
 
   /* =========================
    * VECTOR SEARCH STAGE
    * ========================= */
-  const vectorStage = {
+  const conferenceVectorStage = {
     $vectorSearch: {
       index: "vector_index_conference",
       path: "vector",
@@ -271,16 +273,16 @@ export async function searchConferenceJournalByVector({
     },
   };
 
-  // 🔥 CHỈ add filter khi CÓ điều kiện
+  // 🔥 Chỉ add filter khi CÓ điều kiện
   if (Object.keys(vectorFilter).length > 0) {
-    vectorStage.$vectorSearch.filter = vectorFilter;
+    conferenceVectorStage.$vectorSearch.filter = vectorFilter;
   }
 
   /* =========================
-   * PIPELINE
+   * PIPELINES
    * ========================= */
   const conferencePipeline = [
-    vectorStage,
+    conferenceVectorStage,
     {
       $project: {
         score: { $meta: "vectorSearchScore" },
@@ -330,6 +332,7 @@ export async function searchConferenceJournalByVector({
 
   return { conferences, journals };
 }
+
 
 
 
