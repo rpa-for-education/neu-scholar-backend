@@ -31,11 +31,12 @@ export function extractCountryIntent(question) {
   if (!question) return null;
 
   const q = normalizeText(question);
+  const words = ` ${q} `; // padding để bắt biên từ
 
-  // 1️⃣ Vietnamese aliases FIRST (ưu tiên tuyệt đối)
+  // 1️⃣ Vietnamese aliases (ưu tiên tuyệt đối)
   for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
-    const n = normalizeText(name);
-    if (q.includes(n)) {
+    const n = ` ${normalizeText(name)} `;
+    if (words.includes(n)) {
       return iso;
     }
   }
@@ -45,8 +46,8 @@ export function extractCountryIntent(question) {
     .sort((a, b) => b[0].length - a[0].length);
 
   for (const [name, iso] of entries) {
-    const n = normalizeText(name);
-    if (q.includes(n)) {
+    const n = ` ${normalizeText(name)} `;
+    if (words.includes(n)) {
       return iso;
     }
   }
