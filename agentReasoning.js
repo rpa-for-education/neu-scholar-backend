@@ -17,19 +17,25 @@ const CONTINENT_MAP = [
 import { COUNTRY_NAME_TO_ISO } from "./scripts/country_iso_full.js";
 import { COUNTRY_VI_TO_ISO } from "./scripts/country_vi_alias.js";
 
+function normalizeText(str) {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu tiếng Việt
+    .replace(/[.,()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function extractCountryIntent(question) {
   if (!question) return null;
 
-  const q = question
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove accents
-    .replace(/[.,()]/g, " ")
-    .replace(/\s+/g, " ");
+  const q = normalizeText(question);
 
-  // 1️⃣ Vietnamese aliases FIRST (ưu tiên)
+  // 1️⃣ Vietnamese aliases FIRST (ưu tiên tuyệt đối)
   for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
-    if (q.includes(` ${name} `) || q.startsWith(name + " ") || q.endsWith(" " + name)) {
+    const n = normalizeText(name);
+    if (q.includes(n)) {
       return iso;
     }
   }
@@ -39,14 +45,14 @@ export function extractCountryIntent(question) {
     .sort((a, b) => b[0].length - a[0].length);
 
   for (const [name, iso] of entries) {
-    if (q.includes(` ${name} `) || q.startsWith(name + " ") || q.endsWith(" " + name)) {
+    const n = normalizeText(name);
+    if (q.includes(n)) {
       return iso;
     }
   }
 
   return null;
 }
-
 
 
 /**
@@ -122,7 +128,7 @@ export function analyzeQuestion(question) {
 
     // 🔥 NEW
     wantsContinent,
-    
+
     wantsCountryCode: countryCode,
 
     fieldHint: extractResearchField(question)
