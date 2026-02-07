@@ -224,53 +224,59 @@ export async function searchConferenceJournalByVector({
   vector,
   topk = 5,
 
-  // 🔥 OPTIONAL FILTERS
-  continent = null,          // "Asia"
-  country_code = null,       // "JP" | ["JP","KR"]
-  year = null                // "2026"
+  continent = null,
+  country_code = null,
+  year = null
 }) {
   const db = await getDb();
   const k = Math.min(Number(topk) || 5, MAX_TOPK);
 
   /* =========================
-   * VECTOR SEARCH FILTER
+   * BUILD FILTER
    * ========================= */
   const vectorFilter = {};
 
-  // 1️⃣ COUNTRY (ưu tiên cao nhất)
+  // 1️⃣ Country (ưu tiên cao nhất)
   if (Array.isArray(country_code) && country_code.length > 0) {
     vectorFilter.country_code = { $in: country_code };
   } else if (typeof country_code === "string") {
     vectorFilter.country_code = country_code;
   }
 
-  // 2️⃣ CONTINENT (fallback)
+  // 2️⃣ Continent (fallback)
   else if (continent) {
     vectorFilter.continent = continent;
   }
 
-  // 3️⃣ YEAR
+  // 3️⃣ Year
   if (year) {
     vectorFilter.start_date = { $regex: `^${year}` };
   }
 
   /* =========================
-   * PIPELINES
+   * VECTOR SEARCH STAGE
    * ========================= */
-
-  const conferencePipeline = [
-    {
-      $vectorSearch: {
-        index: "vector_index_conference",
-        path: "vector",
-        queryVector: vector,
-        filter: Object.keys(vectorFilter).length ? vectorFilter : undefined,
-
-        numCandidates: Math.max(20, k * 5),
-        limit: k,
-        similarity: "cosine",
-      },
+  const vectorStage = {
+    $vectorSearch: {
+      index: "vector_index_conference",
+      path: "vector",
+      queryVector: vector,
+      numCandidates: Math.max(20, k * 5),
+      limit: k,
+      similarity: "cosine",
     },
+  };
+
+  // 🔥 CHỈ add filter khi CÓ điều kiện
+  if (Object.keys(vectorFilter).length > 0) {
+    vectorStage.$vectorSearch.filter = vectorFilter;
+  }
+
+  /* =========================
+   * PIPELINE
+   * ========================= */
+  const conferencePipeline = [
+    vectorStage,
     {
       $project: {
         score: { $meta: "vectorSearchScore" },
@@ -278,14 +284,11 @@ export async function searchConferenceJournalByVector({
         acronym: 1,
         deadline: 1,
         start_date: 1,
-
-        // LOCATION
         location: 1,
         city: 1,
         country: 1,
         country_code: 1,
         continent: 1,
-
         topics: 1,
         url: 1,
       },
