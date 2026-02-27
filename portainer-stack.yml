@@ -17,8 +17,9 @@ services:
       - "8014:8014"
     restart: unless-stopped
     environment:
-      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_URI: ${MONGODB_URI:-}
       MONGODB_DB: ${MONGODB_DB:-fitneu}
       PORT: ${PORT:-8014}
       SESSION_SECRET: ${SESSION_SECRET:-fitsecret}
+      MAX_TOPK: ${MAX_TOPK:-30}
       FILES_COLLECTION: ${FILES_COLLECTION:-uploaded_files}
