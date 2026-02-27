@@ -31,7 +31,7 @@ import { s3Client } from "./s3.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8014;
 const DEFAULT_MODEL_ID = "qwen-max";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
