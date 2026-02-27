@@ -2,7 +2,8 @@ version: "3.9"
 
 services:
   web:
-    image: chuvanhuy/nsa-backend:latest
+    build: .
+    image: neu-scholar-backend:latest
     container_name: nsa-agent
     ports:
       - "8014:8014"
