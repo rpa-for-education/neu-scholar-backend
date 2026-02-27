@@ -2,13 +2,15 @@ version: "3.9"
 
 services:
   web:
-    build: .
-    image: neu-scholar-backend:latest
+    image: chuvanhuy/nsa-backend:latest
     container_name: nsa-agent
     ports:
       - "8014:8014"
-    restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      PORT: ${PORT:-8014}
+      MONGODB_URI: "mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net"
+      MONGODB_DB: "fitneu"
+      MAX_TOPK: "30"
+      OPENAI_API_KEY: "sk-proj-0E3qadPmen9A4MAQzMVS4p_7DsCPscanfg9lkSlvHlhbVJ-n2DicNHaIRqcGLU1UWUtLRGXwYuT3BlbkFJ2wndckVygdfwjvZqZFdbNSKbDilgKsrt26hwibajqAQCkt6SCoKTPeVb6cKv-fcxjxANCpjxIAAb-yadf1xnfd-KafO3RNeCX2qY9mcCJcE6CAo1UuXjXrTtIE_3WUisi7jK9XPUdKK4wS4A"
+      GEMINI_API_KEY: "AIzaSyAo9f1F3-C7ItwQ4bSTla0fSuC8yVNthwk"
+      PORT: "8014"
+    restart: unless-stopped
