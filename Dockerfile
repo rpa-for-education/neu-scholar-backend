@@ -14,5 +14,5 @@ RUN npm ci
 
 COPY . .
 
-EXPOSE 4000
+EXPOSE 8014
 CMD ["node", "app.js"]
