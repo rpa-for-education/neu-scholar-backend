@@ -3,8 +3,9 @@
 # ===========================================
 # MongoDB: Dùng Atlas (mongodb+srv://...), không chạy local
 # Usage:
-#   Dev:  docker compose up
-#   Prod: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Dev (local): cp docker-compose.override.yml.example docker-compose.override.yml && docker compose up
+#   Portainer:   Stack → thêm Environment variables (MONGODB_URI, OPENAI_API_KEY, v.v.)
+#   Prod:        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   backend:
@@ -16,12 +17,16 @@ services:
     ports:
       - "8014:8014"
     # env_file: bỏ để deploy Portainer không lỗi (Portainer không có .env).
-    # Thêm biến môi trường trong Portainer Stack → Environment variables.
+    # Portainer: Stack → Environment variables → thêm MONGODB_URI, OPENAI_API_KEY, SESSION_SECRET, ...
     environment:
       - PORT=8014
-      # MongoDB Atlas — ưu tiên lấy từ .env; mặc định dùng connection string bạn đã chỉ định
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - USE_REMOTE_EMBEDDING=${USE_REMOTE_EMBEDDING:-false}
     volumes:
       # Hot reload: mount source code (dev only)
       - .:/app
