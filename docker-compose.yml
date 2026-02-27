@@ -15,8 +15,8 @@ services:
     container_name: neu-scholar-backend
     ports:
       - "8014:8014"
-    env_file:
-      - .env
+    # env_file: bỏ để deploy Portainer không lỗi (Portainer không có .env).
+    # Thêm biến môi trường trong Portainer Stack → Environment variables.
     environment:
       - PORT=8014
       # MongoDB Atlas — ưu tiên lấy từ .env; mặc định dùng connection string bạn đã chỉ định

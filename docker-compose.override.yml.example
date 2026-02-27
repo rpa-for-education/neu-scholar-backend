@@ -1,0 +1,10 @@
+# ===========================================
+# Local dev — copy thành docker-compose.override.yml để dùng .env
+# ===========================================
+# cp docker-compose.override.yml.example docker-compose.override.yml
+# (override được load tự động, thường thêm vào .gitignore)
+
+services:
+  backend:
+    env_file:
+      - .env
