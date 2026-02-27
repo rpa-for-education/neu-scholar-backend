@@ -1,13 +1,6 @@
-version: "3.9"
-
 services:
   web:
-    container_name: nsa-agent
-    image: chuvanhuy/nsa-backend:latest
-    # hoặc nếu muốn build local:
-    # build: .
-    env_file:
-      - .env
+    build: .
     ports:
       - "8014:8014"
     restart: unless-stopped
