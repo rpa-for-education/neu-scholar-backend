@@ -8,8 +8,6 @@ services:
     container_name: nsa-agent
     ports:
       - "8014:8014"
-    env_file:
-      - .env
     environment:
       MONGODB_URI: ${MONGODB_URI}
       MONGODB_DB: ${MONGODB_DB:-fitneu}
