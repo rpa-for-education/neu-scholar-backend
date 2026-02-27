@@ -21,9 +21,18 @@ const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
 
 let embedder = null;
 let usingRemoteEmbed = false;
+let usingOllamaEmbed = false;
+
+const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://host.docker.internal:8002").replace(/\/$/, "");
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text:v1.5";
 
 export async function initEmbedding() {
-  if (embedder || usingRemoteEmbed) return true;
+  if (embedder || usingRemoteEmbed || usingOllamaEmbed) return true;
+  if (process.env.OLLAMA_BASE_URL || String(process.env.USE_OLLAMA_EMBEDDING || "").toLowerCase() === "true") {
+    usingOllamaEmbed = true;
+    console.info(`ℹ️ Using Ollama embedding: ${OLLAMA_EMBED_MODEL}`);
+    return true;
+  }
   if (String(process.env.USE_REMOTE_EMBEDDING || "").toLowerCase() === "true") {
     usingRemoteEmbed = true;
     console.info("ℹ️ Using remote embedding (forced by USE_REMOTE_EMBEDDING=true)");
@@ -49,6 +58,25 @@ export async function initEmbedding() {
     usingRemoteEmbed = true;
     return true;
   }
+}
+
+async function ollamaEmbedding(text) {
+  const resp = await fetch(`${OLLAMA_BASE}/api/embed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_EMBED_MODEL,
+      input: typeof text === "string" ? text : Array.isArray(text) ? text : [String(text)],
+    }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Ollama embed failed: ${resp.status} ${txt}`);
+  }
+  const j = await resp.json();
+  const embeddings = j.embeddings;
+  if (!embeddings || !embeddings.length) throw new Error("Invalid embedding response from Ollama");
+  return Array.isArray(embeddings[0]) ? embeddings[0] : embeddings;
 }
 
 async function remoteEmbeddingOpenAI(text) {
@@ -77,23 +105,27 @@ async function remoteEmbeddingOpenAI(text) {
 }
 
 async function embed(text) {
-  if (!embedder && !usingRemoteEmbed) {
+  if (!embedder && !usingRemoteEmbed && !usingOllamaEmbed) {
     await initEmbedding();
+  }
+  if (usingOllamaEmbed) {
+    return await ollamaEmbedding(text);
   }
   if (embedder) {
     try {
       const out = await embedder(text, { pooling: "mean", normalize: true });
       return Array.from(out.data);
     } catch (e) {
-      console.warn("⚠️ Local embedder failed during embed(), switching to remote:", e?.message || e);
-      usingRemoteEmbed = true;
+      console.warn("⚠️ Local embedder failed during embed(), switching to Ollama/remote:", e?.message || e);
+      usingOllamaEmbed = true;
       embedder = null;
+      return await ollamaEmbedding(text).catch(() => remoteEmbeddingOpenAI(text));
     }
   }
   try {
     return await remoteEmbeddingOpenAI(text);
   } catch (e) {
-    console.error("❌ Remote embedding also failed:", e?.message || e);
+    console.error("❌ Remote embedding failed:", e?.message || e);
     throw e;
   }
 }

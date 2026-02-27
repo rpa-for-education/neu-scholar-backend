@@ -32,7 +32,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 
 const app = express();
 const PORT = process.env.PORT || 8014;
-const DEFAULT_MODEL_ID = "qwen-max";
+const DEFAULT_MODEL_ID = process.env.OLLAMA_MODEL_ID || "qwen3-8b";
 const DEFAULT_LIMIT_JOURNAL = 100;
 const DEFAULT_LIMIT_CONFERENCE = 100;
 const DEFAULT_SHORT_MEMORY = 10;
@@ -317,10 +317,15 @@ app.get("/api/health", (_req, res) => {
 
 // ============================= METADATA =============================
 const MODEL_META = {
-  "gpt-smart": { name: "GPT Smart", description: "Cân bằng chất lượng và chi phí, phù hợp tác vụ tổng hợp" },
-  "gpt-fast": { name: "GPT Fast", description: "Tốc độ nhanh, chi phí thấp, phù hợp tác vụ hàng ngày" },
-  "gemini-smart": { name: "Gemini Smart", description: "Hiệu suất ổn định, tốc độ cao, phù hợp chatbot và workflow" },
-  "gemini-fast": { name: "Gemini Fast", description: "Độ trễ thấp, chi phí tối ưu, phù hợp xử lý khối lượng lớn" },
+  "qwen3-8b": { name: "Qwen3 8B", description: "Mô hình mặc định, cân bằng chất lượng và tốc độ" },
+  "qwen3-1.7b": { name: "Qwen3 1.7B", description: "Nhẹ, nhanh, phù hợp tác vụ đơn giản" },
+  "qwen3-32b": { name: "Qwen3 32B", description: "Chất lượng cao, phù hợp tác vụ phức tạp" },
+  "mistral-7b": { name: "Mistral 7B", description: "Mô hình đa ngôn ngữ tốt" },
+  "llama3.2-3b": { name: "Llama 3.2 3B", description: "Nhẹ, tốc độ cao" },
+  "qwen2.5-coder-14b": { name: "Qwen2.5 Coder 14B", description: "Tối ưu cho code" },
+  "deepseek-coder-33b": { name: "DeepSeek Coder 33B", description: "Code chuyên sâu" },
+  "gemma3-27b": { name: "Gemma3 27B", description: "Chất lượng cao từ Google" },
+  "deepseek-r1-32b": { name: "DeepSeek R1 32B", description: "Lý luận mạnh" },
 };
 
 const METADATA_DATA = {
