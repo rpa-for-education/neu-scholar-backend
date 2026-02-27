@@ -1,0 +1,23 @@
+# Portainer Stack — deploy từ Git
+# Trong Portainer: Stacks → Add stack → Repository: https://github.com/rpa-for-education/neu-scholar-backend
+# Compose path: portainer-stack.yml
+#
+# BẮT BUỘC: Thêm Environment variables trong form Portainer:
+#   MONGODB_URI=mongodb://user:pass@host:27017
+#   MONGODB_DB=fitneu
+#
+# Tùy chọn: PORT, SESSION_SECRET, QWEN_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ...
+
+services:
+  web:
+    build: .
+    image: neu-scholar-backend:latest
+    ports:
+      - "8014:8014"
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_DB: ${MONGODB_DB:-fitneu}
+      PORT: ${PORT:-8014}
+      SESSION_SECRET: ${SESSION_SECRET:-fitsecret}
+      FILES_COLLECTION: ${FILES_COLLECTION:-uploaded_files}
