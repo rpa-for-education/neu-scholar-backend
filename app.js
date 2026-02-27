@@ -349,8 +349,7 @@ const METADATA_DATA = {
   status: "active",
 };
 
-function handleMetadata(req, res, path) {
-  const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+function handleMetadata(req, res) {
   const supported_models = Object.entries(modelMap).map(([model_id, { provider, model }]) => ({
     model_id,
     provider,
@@ -358,16 +357,12 @@ function handleMetadata(req, res, path) {
     name: (MODEL_META[model_id] || {}).name || model_id,
     description: (MODEL_META[model_id] || {}).description || "",
   }));
-  res.json({
-    ok: true,
-    status: 200,
-    url: `${baseUrl}${path}`,
-    data: { ...METADATA_DATA, supported_models },
-  });
+  // AI Portal chuẩn: metadata ở root, không wrap trong {ok, status, data}
+  res.json({ ...METADATA_DATA, supported_models });
 }
 
-app.get("/api/metadata", (req, res) => handleMetadata(req, res, "/api/metadata"));
-app.get("/v1/metadata", (req, res) => handleMetadata(req, res, "/v1/metadata"));
+app.get("/api/metadata", handleMetadata);
+app.get("/v1/metadata", handleMetadata);
 
 // The rest of your original journal, conference, and agent APIs remain unchanged
 
