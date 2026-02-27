@@ -1,8 +1,8 @@
 // llm.js
 import axios from "axios";
 
-// ==== Map model_id → provider + model ====
-const modelMap = {
+// ==== Map model_id → provider + model (exported for /metadata) ====
+export const modelMap = {
   // OpenAI
   "gpt-smart": { provider: "openai", model: "gpt-5-mini" },
   // "gpt-pro": { provider: "openai", model: "gpt-5" },

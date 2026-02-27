@@ -8,7 +8,7 @@ import mammoth from "mammoth";
 import fetch from "node-fetch";
 
 import axios from "axios";
-import { callLLM } from "./llm.js";
+import { callLLM, modelMap } from "./llm.js";
 import {
   initEmbedding,
   embedText,
@@ -315,6 +315,55 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// ============================= METADATA =============================
+const MODEL_META = {
+  "gpt-smart": { name: "GPT Smart", description: "Cân bằng chất lượng và chi phí, phù hợp tác vụ tổng hợp" },
+  "gpt-fast": { name: "GPT Fast", description: "Tốc độ nhanh, chi phí thấp, phù hợp tác vụ hàng ngày" },
+  "gemini-smart": { name: "Gemini Smart", description: "Hiệu suất ổn định, tốc độ cao, phù hợp chatbot và workflow" },
+  "gemini-fast": { name: "Gemini Fast", description: "Độ trễ thấp, chi phí tối ưu, phù hợp xử lý khối lượng lớn" },
+};
+
+const METADATA_DATA = {
+  name: "Hội thảo, Tạp chí",
+  description:
+    "Tìm kiếm, hỏi đáp, tổng hợp các cơ hội công bố các sản phẩm khoa học trên các Hội thảo, Tạp chí,... trong nước và quốc tế uy tín nhằm phục vụ hoạt động nghiên cứu khoa học của cán bộ, giảng viên, học viên,... của Đại học Kinh tế Quốc dân",
+  version: "1.2.0",
+  developer: "Nhóm thầy V Huy, V Minh, X Lâm",
+  capabilities: ["search", "explain", "summarize"],
+  sample_prompts: [
+    "Hội thảo liên quan tới các công nghệ mới nổi như AI, Big Data, BlockChain, v.v...",
+    "Các hội thảo quốc tế được tổ chức tại Trung Quốc trong năm 2026",
+    "Tạp chí phù hợp với lĩnh vực Hệ thống thông tin quản lý",
+    "Danh sách các tạp chí phù hợp với lĩnh vực Kinh tế bền vững?",
+  ],
+  provided_data_types: [
+    { type: "conferences", description: "Danh sách hội thảo trong nước và quốc tế mà NEU Research Agent đang lưu trữ" },
+    { type: "journals", description: "Danh sách tạp chí trong nước và quốc tế mà NEU Research Agent đang lưu trữ" },
+  ],
+  contact: "kcntt@neu.edu.vn",
+  status: "active",
+};
+
+function handleMetadata(req, res, path) {
+  const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+  const supported_models = Object.entries(modelMap).map(([model_id, { provider, model }]) => ({
+    model_id,
+    provider,
+    model,
+    name: (MODEL_META[model_id] || {}).name || model_id,
+    description: (MODEL_META[model_id] || {}).description || "",
+  }));
+  res.json({
+    ok: true,
+    status: 200,
+    url: `${baseUrl}${path}`,
+    data: { ...METADATA_DATA, supported_models },
+  });
+}
+
+app.get("/api/metadata", (req, res) => handleMetadata(req, res, "/api/metadata"));
+app.get("/v1/metadata", (req, res) => handleMetadata(req, res, "/v1/metadata"));
+
 // The rest of your original journal, conference, and agent APIs remain unchanged
 
 // Journals CRUD
@@ -462,6 +511,59 @@ app.delete("/api/conferences/:id", async (req, res) => {
   }
 });
 
+// ============================= SHARED: Agent query (vector + LLM) =============================
+async function runAgentQuery(question, model_id = DEFAULT_MODEL_ID, topk = 10) {
+  const start = Date.now();
+  const domain = detectDomain(question);
+  const analysis = analyzeQuestion(question);
+  const semanticQuery = buildSemanticQuery(analysis, domain);
+  const queryVector = await embedText(semanticQuery);
+
+  const year = analysis.wantsRecent ? String(analysis.wantsRecent[0]) : null;
+  let { conferences, journals } = await searchConferenceJournalByVector({
+    vector: queryVector,
+    topk: 50,
+    continent: analysis.wantsContinent,
+    country_code: analysis.wantsCountryCode,
+    year,
+  });
+
+  journals = journals.map((j) => ({ ...j, scimago_link: j.scimago_link ?? null }));
+  conferences = conferences.map((c) => ({ ...c, url: c.url ?? null }));
+
+  if (domain === "journal" || domain === "both") {
+    journals = finalizeResults(
+      rankResults(applyFilters(journals, analysis, "journal"), "journal"),
+      Number(topk)
+    );
+  } else {
+    journals = [];
+  }
+
+  if (domain === "conference" || domain === "both") {
+    conferences = finalizeResults(
+      rankResults(applyFilters(conferences, analysis, "conference"), "conference"),
+      Number(topk)
+    );
+  } else {
+    conferences = [];
+  }
+
+  const contextPrompt = buildPrompt(question, conferences, journals);
+  const llmResult = await callLLM(contextPrompt, model_id);
+  const answerText = typeof llmResult?.answer === "string" ? llmResult.answer : JSON.stringify(llmResult?.answer ?? llmResult);
+
+  return {
+    answerText,
+    conferences,
+    journals,
+    domain,
+    analysis,
+    semanticQuery,
+    responseTimeMs: Date.now() - start,
+  };
+}
+
 // AGENT API
 app.post("/api/agent", async (req, res) => {
   const start = Date.now();
@@ -479,147 +581,31 @@ app.post("/api/agent", async (req, res) => {
       return res.status(400).json({ error: "Missing question" });
     }
 
-    // =========================
-    // 🧠 AGENT REASONING
-    // =========================
-    const domain = detectDomain(question);
-    const analysis = analyzeQuestion(question);
+    const result = await runAgentQuery(question, model_id, topk);
 
-    const semanticQuery = buildSemanticQuery(analysis, domain);
-
-    // ❗ embed đúng 1 lần
-    const queryVector = await embedText(semanticQuery);
-
-    console.log("🧠 INTENT DEBUG", {
-      domain,
-      continent: analysis.wantsContinent,
-      country: analysis.wantsCountryCode,
-      year: analysis.wantsRecent
-    });
-
-    const year =
-      analysis.wantsRecent ? String(analysis.wantsRecent[0]) : null;
-
-    let { conferences, journals } =
-      await searchConferenceJournalByVector({
-        vector: queryVector,
-        topk: 50,
-
-        continent: analysis.wantsContinent,
-        country_code: analysis.wantsCountryCode,
-        year
-      });
-
-
-    // =========================
-    // 🔧 NORMALIZE DATA (BẮT BUỘC)
-    // =========================
-    journals = journals.map(j => ({
-      ...j,
-      scimago_link: j.scimago_link ?? null
-    }));
-
-    conferences = conferences.map(c => ({
-      ...c,
-      url: c.url ?? null
-    }));
-
-
-    // =========================
-    // 🎓 FILTER + RANK
-    // =========================
-    if (domain === "journal" || domain === "both") {
-      journals = finalizeResults(
-        rankResults(
-          applyFilters(journals, analysis, "journal"),
-          "journal"
-        ),
-        Number(topk)
-      );
-    } else {
-      journals = [];
-    }
-
-    if (domain === "conference" || domain === "both") {
-      conferences = finalizeResults(
-        rankResults(
-          applyFilters(conferences, analysis, "conference"),
-          "conference"
-        ),
-        Number(topk)
-      );
-    } else {
-      conferences = [];
-    }
-
-    // =========================
-    // 🧠 MEMORY (optional)
-    // =========================
-    /*
-    let memoryEntries = [];
-    if (Array.isArray(req.body.chat_history)) {
-      const recent = req.body.chat_history.slice(-MAX_SHORT_HISTORY * 2);
-      memoryEntries = recent
-        .map(m => ({
-          role: m.role,
-          text: m.content
-        }))
-        .filter(m => m.text?.trim());
-    }
-
-    const memoryText = memoryEntries
-      .map(m => `- [${m.role}] ${m.text}`)
-      .join("\n");
-    */
-
-    // =========================
-    // 🧾 PROMPT
-    // =========================
-    const contextPrompt = buildPrompt(question, conferences, journals);
-
-    /*
-    const finalPrompt = `
-${contextPrompt}
-
-${memoryText ? "Ngữ cảnh hội thoại:\n" + memoryText : ""}
-`;
-    */
-   const finalPrompt = contextPrompt;
-
-    // =========================
-    // 🤖 LLM
-    // =========================
-    const answer = await callLLM(finalPrompt, model_id);
-
-    // =========================
-    // 💾 LOG
-    // =========================
     const col = await getCollection("chatlogs");
     await col.insertOne({
       question,
-      answer,
-      domain,
-      analysis,
-      semanticQuery,
+      answer: result.answerText,
+      domain: result.domain,
+      analysis: result.analysis,
+      semanticQuery: result.semanticQuery,
       model_id,
       session_id,
       createdAt: new Date(),
-      responseTimeMs: Date.now() - start
+      responseTimeMs: result.responseTimeMs
     });
-
-    // await addMemory(session_id, "user", question);
-    // await addMemory(session_id, "assistant", answer);
 
     return res.json({
       model_id,
-      answer,
+      answer: result.answerText,
       retrieved: {
-        conferences,
-        journals
+        conferences: result.conferences,
+        journals: result.journals
       },
-      domain,
-      analysis,
-      responseTimeMs: Date.now() - start
+      domain: result.domain,
+      analysis: result.analysis,
+      responseTimeMs: result.responseTimeMs
     });
 
   } catch (err) {
@@ -627,6 +613,76 @@ ${memoryText ? "Ngữ cảnh hội thoại:\n" + memoryText : ""}
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// ============================= AI PORTAL /ask (Agent contract) =============================
+// Request: { session_id, model_id, user, prompt } — Response: { session_id, status: "success", content_markdown }
+async function handleAsk(req, res) {
+  let body;
+  try {
+    body = req.body;
+  } catch {
+    return res.status(400).json({
+      session_id: null,
+      status: "error",
+      error_code: "INVALID_JSON",
+      error_message: "Payload không phải JSON hợp lệ",
+    });
+  }
+
+  const { session_id, model_id, user, prompt } = body;
+  const question = prompt || body.question;
+
+  if (!question || !String(question).trim()) {
+    return res.status(400).json({
+      session_id: session_id ?? null,
+      status: "error",
+      error_code: "INVALID_REQUEST",
+      error_message: "Thiếu prompt hoặc question",
+    });
+  }
+
+  try {
+    const topk = Number(body.topk) || 10;
+    const m = model_id || DEFAULT_MODEL_ID;
+
+    const result = await runAgentQuery(question, m, topk);
+
+    const sources = [
+      ...result.journals.map((j) => ({
+        type: "journal",
+        title: j.title || j.name,
+        publisher: j.publisher,
+      })),
+      ...result.conferences.map((c) => ({
+        type: "conference",
+        title: c.name || c.title,
+        location: c.country || c.city,
+      })),
+    ].filter((s) => s.title);
+
+    return res.json({
+      session_id: session_id ?? null,
+      status: "success",
+      content_markdown: result.answerText,
+      answer: result.answerText,
+      sources,
+      meta: {
+        response_time_ms: result.responseTimeMs,
+        domain: result.domain,
+      },
+    });
+  } catch (err) {
+    console.error("❌ ASK ERROR:", err);
+    return res.status(500).json({
+      session_id: session_id ?? null,
+      status: "error",
+      error_message: err?.message || "Internal server error",
+    });
+  }
+}
+
+app.post("/ask", (req, res) => handleAsk(req, res));
+app.post("/v1/ask", (req, res) => handleAsk(req, res));
 
 
 async function fetchArticles() {
