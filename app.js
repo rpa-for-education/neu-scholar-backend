@@ -687,16 +687,6 @@ async function processFileUrl(fileUrl) {
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     console.log(`API listening on http://localhost:${PORT}`);
-
-    try {
-      // 🔴 INIT DB NGAY KHI START
-      db = await getDb();
-      console.log("✅ Database ready");
-    } catch (e) {
-      console.error("❌ Database init failed:", e);
-      process.exit(1); // fail fast
-    }
-
     try {
       await initEmbedding();
     } catch (e) {
