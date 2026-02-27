@@ -32,6 +32,8 @@ CMD ["npm", "run", "dev"]
 # Stage: production — npm ci, chạy tối ưu
 # ===========================================
 FROM base AS production
+# Tăng memory cho npm (tránh OOM trên máy chủ Portainer)
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 RUN npm ci --omit=dev
 COPY . .
 EXPOSE 8014
