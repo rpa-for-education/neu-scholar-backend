@@ -1,0 +1,13 @@
+# ===========================================
+# .dockerignore — Giảm build context
+# ===========================================
+node_modules
+.git
+.env
+.env.*
+*.log
+.DS_Store
+.vercel
+Dockerfile*
+docker-compose*.yml
+.dockerignore

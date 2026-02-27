@@ -1,22 +1,29 @@
-version: "3.9"
+# ===========================================
+# neu-scholar-backend — Docker Compose
+# ===========================================
+# MongoDB: Dùng Atlas (mongodb+srv://...), không chạy local
+# Usage:
+#   Dev:  docker compose up
+#   Prod: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
-  web:
-    build: .
-    image: neu-scholar-backend:latest
-    container_name: nsa-agent
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: neu-scholar-backend
     ports:
       - "8014:8014"
+    env_file:
+      - .env
     environment:
-      MONGODB_URI: ${MONGODB_URI:-}
-      MONGODB_DB: ${MONGODB_DB:-fitneu}
-      PORT: ${PORT:-8014}
-      SESSION_SECRET: ${SESSION_SECRET:-fitsecret}
-      MAX_TOPK: ${MAX_TOPK:-30}
+      - PORT=8014
+      # MongoDB Atlas — ưu tiên lấy từ .env; mặc định dùng connection string bạn đã chỉ định
+      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
+      - MONGODB_DB=${MONGODB_DB:-fitneu}
+    volumes:
+      # Hot reload: mount source code (dev only)
+      - .:/app
+      - /app/node_modules  # Giữ node_modules trong container, tránh overwrite
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:8014/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 45s

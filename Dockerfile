@@ -1,18 +1,34 @@
-FROM node:20-bookworm-slim
+# ===========================================
+# neu-scholar-backend — Dockerfile
+# ===========================================
+# Multi-stage: production (slim) và development (full deps)
+# Sử dụng MongoDB Atlas, không có MongoDB local trong Docker
 
-# ⬇️ CÀI DEPENDENCY CHO SHARP
-RUN apt-get update && apt-get install -y \
-    libvips-dev \
-    build-essential \
-    python3 \
- && rm -rf /var/lib/apt/lists/*
+FROM node:20-alpine AS base
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# Dependencies cho native modules (nếu có)
+RUN apk add --no-cache python3 make g++
 
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# ===========================================
+# Stage: development — npm install đầy đủ
+# ===========================================
+FROM base AS development
+RUN npm install
 COPY . .
-
 EXPOSE 8014
-CMD ["node", "app.js"]
+CMD ["npm", "run", "dev"]
+
+# ===========================================
+# Stage: production — npm ci, chạy tối ưu
+# ===========================================
+FROM base AS production
+RUN npm ci --omit=dev
+COPY . .
+EXPOSE 8014
+ENV NODE_ENV=production
+CMD ["npm", "start"]
