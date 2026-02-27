@@ -12,12 +12,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
+      target: production
     container_name: neu-scholar-backend
     ports:
       - "8014:8014"
-    # env_file: bỏ để deploy Portainer không lỗi (Portainer không có .env).
-    # Portainer: Stack → Environment variables → thêm MONGODB_URI, OPENAI_API_KEY, SESSION_SECRET, ...
     environment:
       - PORT=8014
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
@@ -27,8 +25,4 @@ services:
       - QWEN_API_KEY=${QWEN_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - USE_REMOTE_EMBEDDING=${USE_REMOTE_EMBEDDING:-false}
-    volumes:
-      # Hot reload: mount source code (dev only)
-      - .:/app
-      - /app/node_modules  # Giữ node_modules trong container, tránh overwrite
     restart: unless-stopped
