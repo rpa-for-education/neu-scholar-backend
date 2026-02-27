@@ -3,13 +3,18 @@
 # ===========================================
 # Multi-stage: production (slim) và development (full deps)
 # Sử dụng MongoDB Atlas, không có MongoDB local trong Docker
+#
+# Lưu ý: Dùng Debian (không dùng Alpine) vì onnxruntime-node cần glibc,
+# Alpine dùng musl → lỗi ld-linux-aarch64.so.1
 
-FROM node:20-alpine AS base
+FROM node:20-bookworm-slim AS base
 
 WORKDIR /app
 
-# Dependencies cho native modules (nếu có)
-RUN apk add --no-cache python3 make g++
+# Dependencies cho native modules (onnxruntime-node, pdf-parse, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json package-lock.json* ./
