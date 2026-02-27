@@ -4,7 +4,6 @@ services:
   web:
     build: .
     image: neu-scholar-backend:latest
-    pull_policy: never
     container_name: nsa-agent
     ports:
       - "8014:8014"
