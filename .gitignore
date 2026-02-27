@@ -1,5 +1,6 @@
 node_modules
 .env
+env.txt
 docker-compose.override.yml
 npm-debug.log*
 yarn-error.log
