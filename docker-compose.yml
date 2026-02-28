@@ -26,3 +26,9 @@ services:
       - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text:v1.5}
       - USE_OLLAMA_EMBEDDING=${USE_OLLAMA_EMBEDDING:-true}
     restart: unless-stopped
+networks:
+  neu-scholar-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.240.0/24
