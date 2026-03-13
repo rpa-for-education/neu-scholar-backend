@@ -24,7 +24,7 @@ let usingRemoteEmbed = false;
 let usingOllamaEmbed = false;
 
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434").replace(/\/$/, "");
-const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text:v1.5";
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-8b";
 
 export async function initEmbedding() {
   if (embedder || usingRemoteEmbed || usingOllamaEmbed) return true;
