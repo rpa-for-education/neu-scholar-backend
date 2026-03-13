@@ -1,7 +1,8 @@
 // llm.js — Ollama LLM
 import axios from "axios";
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434";
+//const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434";
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://research.neu.edu.vn/ollama/api/generate";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
 // ==== Map model_id → model name (Ollama) ====
