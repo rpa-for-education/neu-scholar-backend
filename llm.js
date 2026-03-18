@@ -7,15 +7,15 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
 // ==== Map model_id → model name (Ollama) ====
 export const modelMap = {
-  "qwen3-8b": { provider: "ollama", model: "qwen3:8b" },
-  "qwen3-1.7b": { provider: "ollama", model: "qwen3:1.7b" },
-  "qwen3-32b": { provider: "ollama", model: "qwen3:32b" },
-  "mistral-7b": { provider: "ollama", model: "mistral:7b" },
-  "llama3.2-3b": { provider: "ollama", model: "llama3.2:3b" },
-  "qwen2.5-coder-14b": { provider: "ollama", model: "qwen2.5-coder:14b" },
-  "deepseek-coder-33b": { provider: "ollama", model: "deepseek-coder:33b" },
-  "gemma3-27b": { provider: "ollama", model: "gemma3:27b" },
-  "deepseek-r1-32b": { provider: "ollama", model: "deepseek-r1:32b" },
+  "qwen3-8b": { provider: "ollama", model: "qwen3:8b" }
+  // "qwen3-1.7b": { provider: "ollama", model: "qwen3:1.7b" },
+  // "qwen3-32b": { provider: "ollama", model: "qwen3:32b" },
+  // "mistral-7b": { provider: "ollama", model: "mistral:7b" },
+  // "llama3.2-3b": { provider: "ollama", model: "llama3.2:3b" },
+  // "qwen2.5-coder-14b": { provider: "ollama", model: "qwen2.5-coder:14b" },
+  // "deepseek-coder-33b": { provider: "ollama", model: "deepseek-coder:33b" },
+  // "gemma3-27b": { provider: "ollama", model: "gemma3:27b" },
+  // "deepseek-r1-32b": { provider: "ollama", model: "deepseek-r1:32b" },
 };
 
 const DEFAULT_MODEL_ID = "qwen3-8b";
