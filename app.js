@@ -318,14 +318,14 @@ app.get("/api/health", (_req, res) => {
 // ============================= METADATA =============================
 const MODEL_META = {
   "qwen3-8b": { name: "Qwen3 8B", description: "Mô hình mặc định, cân bằng chất lượng và tốc độ" },
-  "qwen3-1.7b": { name: "Qwen3 1.7B", description: "Nhẹ, nhanh, phù hợp tác vụ đơn giản" },
-  "qwen3-32b": { name: "Qwen3 32B", description: "Chất lượng cao, phù hợp tác vụ phức tạp" },
-  "mistral-7b": { name: "Mistral 7B", description: "Mô hình đa ngôn ngữ tốt" },
-  "llama3.2-3b": { name: "Llama 3.2 3B", description: "Nhẹ, tốc độ cao" },
-  "qwen2.5-coder-14b": { name: "Qwen2.5 Coder 14B", description: "Tối ưu cho code" },
-  "deepseek-coder-33b": { name: "DeepSeek Coder 33B", description: "Code chuyên sâu" },
-  "gemma3-27b": { name: "Gemma3 27B", description: "Chất lượng cao từ Google" },
-  "deepseek-r1-32b": { name: "DeepSeek R1 32B", description: "Lý luận mạnh" },
+  // "qwen3-1.7b": { name: "Qwen3 1.7B", description: "Nhẹ, nhanh, phù hợp tác vụ đơn giản" },
+  // "qwen3-32b": { name: "Qwen3 32B", description: "Chất lượng cao, phù hợp tác vụ phức tạp" },
+  // "mistral-7b": { name: "Mistral 7B", description: "Mô hình đa ngôn ngữ tốt" },
+  // "llama3.2-3b": { name: "Llama 3.2 3B", description: "Nhẹ, tốc độ cao" },
+  // "qwen2.5-coder-14b": { name: "Qwen2.5 Coder 14B", description: "Tối ưu cho code" },
+  // "deepseek-coder-33b": { name: "DeepSeek Coder 33B", description: "Code chuyên sâu" },
+  // "gemma3-27b": { name: "Gemma3 27B", description: "Chất lượng cao từ Google" },
+  // "deepseek-r1-32b": { name: "DeepSeek R1 32B", description: "Lý luận mạnh" },
 };
 
 const METADATA_DATA = {

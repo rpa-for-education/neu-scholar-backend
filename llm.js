@@ -7,7 +7,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
 // ==== Map model_id → model name (Ollama) ====
 export const modelMap = {
-  "qwen3-8b": { provider: "ollama", model: "qwen3:8b" }
+  "qwen3-8b": { provider: "ollama", model: "qwen3:8b" },
   // "qwen3-1.7b": { provider: "ollama", model: "qwen3:1.7b" },
   // "qwen3-32b": { provider: "ollama", model: "qwen3:32b" },
   // "mistral-7b": { provider: "ollama", model: "mistral:7b" },
