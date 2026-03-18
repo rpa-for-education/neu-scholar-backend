@@ -336,9 +336,9 @@ const METADATA_DATA = {
   developer: "Nhóm thầy V Huy, V Minh, X Lâm",
   capabilities: ["search", "explain", "summarize"],
   sample_prompts: [
-    "Hội thảo liên quan tới các công nghệ mới nổi như AI, Big Data, BlockChain, v.v...",
-    "Các hội thảo quốc tế được tổ chức tại Trung Quốc trong năm 2026",
-    "Tạp chí phù hợp với lĩnh vực Hệ thống thông tin quản lý",
+    "Hội thảo liên quan tới các công nghệ mới nổi như AI, Big Data, BlockChain, v.v...?",
+    "Các hội thảo quốc tế được tổ chức tại Trung Quốc trong năm 2026?",
+    "Tạp chí phù hợp với lĩnh vực Hệ thống thông tin quản lý?",
     "Danh sách các tạp chí phù hợp với lĩnh vực Kinh tế bền vững?",
   ],
   provided_data_types: [
