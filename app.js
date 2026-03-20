@@ -247,7 +247,7 @@ const METADATA_DATA = {
   default_model: "qwen3-8b",
 };
 
-app.get("/api/metadata", (req, res) => {
+app.get("/v1/metadata", (req, res) => {
   res.json({
     ...METADATA_DATA,
     supported_models: Object.keys(modelMap),
