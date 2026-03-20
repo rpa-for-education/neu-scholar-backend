@@ -63,6 +63,7 @@ export async function callLLM(prompt, model_id = DEFAULT_MODEL_ID) {
 
     return {
       provider: "ollama",
+      model_id: model_id || DEFAULT_MODEL_ID,
       model,
       answer: answer || "",
     };
