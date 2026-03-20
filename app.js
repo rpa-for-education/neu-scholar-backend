@@ -240,10 +240,10 @@ const MODEL_META = {
 };
 
 const METADATA_DATA = {
-  name: "NEU Research Agent",
-  description: "AI hỗ trợ tìm kiếm & tư vấn công bố khoa học",
+  name: "Hội thảo, Tạp chí",
+  description: "Tìm kiếm, hỏi đáp, tổng hợp các cơ hội công bố các sản phẩm khoa học trên các Hội thảo, Tạp chí,... trong nước và quốc tế uy tín nhằm phục vụ hoạt động nghiên cứu khoa học của cán bộ, giảng viên, học viên,... của Đại học Kinh tế Quốc dân",
   version: "2.0.0",
-  developer: "NEU FIT",
+  developer: "Nhóm thầy V Huy, V Minh, X Lâm",
   default_model: "qwen3-8b",
 };
 
