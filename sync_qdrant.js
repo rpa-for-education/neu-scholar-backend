@@ -45,7 +45,14 @@ async function embed(text) {
     input: text,
   });
 
-  return res.data?.embeddings?.[0];
+  const vec = res.data?.embeddings?.[0];
+
+  // 🔥 FIX: validate dimension
+  if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
+    throw new Error("Invalid embedding vector");
+  }
+
+  return vec;
 }
 
 // ================= TEXT =================
@@ -75,7 +82,6 @@ function buildPayload(item, type, text) {
   if (type === "journal") {
     return clean({
       type: "journal",
-
       key: item._key,
       title: item.title,
       text,
@@ -87,7 +93,6 @@ function buildPayload(item, type, text) {
       categories: item.categories,
 
       quartile: item.sjr_best_quartile || null,
-
       sjr: Number(item.sjr) || 0,
       h_index: Number(item.h_index) || 0,
 
@@ -97,7 +102,6 @@ function buildPayload(item, type, text) {
 
   return clean({
     type: "conference",
-
     key: item._key,
     name: item.name,
     title: item.title || item.name,
@@ -127,7 +131,7 @@ async function upsert(points) {
       points,
     });
   } catch (e) {
-    console.log("⚠️ Retry Qdrant...");
+    console.log("⚠️ Retry Qdrant...", e.message);
     await new Promise(r => setTimeout(r, 1000));
 
     await qdrant.upsert(COLLECTION, {
@@ -160,16 +164,21 @@ async function syncCollection(db, name) {
         if (!text) continue;
 
         const vector = await embed(text);
-
         const payload = buildPayload(item, name, text);
 
         points.push({
           id: qid(item._key),
-          vector,
+
+          // 🔥 FIX QUAN TRỌNG NHẤT
+          vector: {
+            default: vector
+          },
+
           payload,
         });
-      } catch {
-        console.log("❌ Skip:", item._key);
+
+      } catch (err) {
+        console.log("❌ Skip:", item._key, err.message);
       }
     }
 
