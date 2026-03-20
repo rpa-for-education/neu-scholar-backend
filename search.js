@@ -1,392 +1,222 @@
 // search.js
+import axios from "axios";
+import { QdrantClient } from "@qdrant/js-client-rest";
+import {
+  detectDomain,
+  analyzeQuestion,
+  finalizeResults
+} from "./agentReasoning.js";
 
-process.env.TRANSFORMERS_CACHE = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
-process.env.HF_HUB_CACHE = process.env.HF_HUB_CACHE || "/tmp/hf_hub_cache";
-process.env.HF_HOME = process.env.HF_HOME || "/tmp/hf_home";
-process.env.XDG_CACHE_HOME = process.env.XDG_CACHE_HOME || "/tmp";
-process.env.TMPDIR = process.env.TMPDIR || "/tmp";
-process.env.HOME = process.env.HOME || "/tmp";
+import "dotenv/config";
 
-import fs from "fs/promises";
-import fsSync from "fs";
-import path from "path";
-import fetch from "node-fetch";
-import * as docx from "docx-parser";
-import mammoth from "mammoth";
-import { getDb } from "./db.js";
+const QDRANT_URL = process.env.QDRANT_URL;
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
+const COLLECTION = "neu-scholar";
 
-const MAX_TOPK = parseInt(process.env.MAX_TOPK || "30", 10);
-const VECTOR_PATH = process.env.VECTOR_PATH || "vector";
-const MONGO_COLLECTION = process.env.MONGO_COLLECTION || "fund";
+const EMBEDDING_API = "https://research.neu.edu.vn/ollama/api/embed";
 
-let embedder = null;
-let usingRemoteEmbed = false;
-let usingOllamaEmbed = false;
+const qdrant = new QdrantClient({
+  url: QDRANT_URL,
+  apiKey: QDRANT_API_KEY,
+});
 
-const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434").replace(/\/$/, "");
-const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
-
-export async function initEmbedding() {
-  if (embedder || usingRemoteEmbed || usingOllamaEmbed) return true;
-  if (process.env.OLLAMA_BASE_URL || String(process.env.USE_OLLAMA_EMBEDDING || "").toLowerCase() === "true") {
-    usingOllamaEmbed = true;
-    console.info(`ℹ️ Using Ollama embedding: ${OLLAMA_EMBED_MODEL}`);
-    return true;
-  }
-  if (String(process.env.USE_REMOTE_EMBEDDING || "").toLowerCase() === "true") {
-    usingRemoteEmbed = true;
-    console.info("ℹ️ Using remote embedding (forced by USE_REMOTE_EMBEDDING=true)");
-    return true;
-  }
-  const model = process.env.EMBEDDING_MODEL || "Xenova/paraphrase-multilingual-mpnet-base-v2";
-  const modelName = model.startsWith("Xenova/") ? model : `Xenova/${model}`;
-  try {
-    console.log(`⏳ Attempting to load JS embedding model: ${modelName}`);
-    const transformers = await import("@xenova/transformers");
-    try {
-      if (transformers && transformers.env) {
-        transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || "/tmp/transformers_cache";
-        transformers.env.useFSCache = true;
-      }
-    } catch (ee) { }
-    const { pipeline } = transformers;
-    embedder = await pipeline("feature-extraction", modelName);
-    console.log("✅ Embedder ready (local Xenova)");
-    return true;
-  } catch (err) {
-    console.warn("⚠️ Failed to init local embedder, will fallback to remote embeddings if available.", err?.message || err);
-    usingRemoteEmbed = true;
-    return true;
-  }
-}
-
-async function ollamaEmbedding(text) {
-  const resp = await fetch(`${OLLAMA_BASE}/api/embed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_EMBED_MODEL,
-      input: typeof text === "string" ? text : Array.isArray(text) ? text : [String(text)],
-    }),
-  });
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`Ollama embed failed: ${resp.status} ${txt}`);
-  }
-  const j = await resp.json();
-  const embeddings = j.embeddings;
-  if (!embeddings || !embeddings.length) throw new Error("Invalid embedding response from Ollama");
-  return Array.isArray(embeddings[0]) ? embeddings[0] : embeddings;
-}
-
-async function remoteEmbeddingOpenAI(text) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("No OPENAI_API_KEY provided for remote embedding.");
-  const body = {
-    model: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
-    input: text,
-  };
-  const resp = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`OpenAI embed failed: ${resp.status} ${txt}`);
-  }
-  const j = await resp.json();
-  const vec = j.data && j.data[0] && j.data[0].embedding;
-  if (!vec) throw new Error("Invalid embedding response from OpenAI");
-  return vec;
-}
-
-async function embed(text) {
-  if (!embedder && !usingRemoteEmbed && !usingOllamaEmbed) {
-    await initEmbedding();
-  }
-  if (usingOllamaEmbed) {
-    return await ollamaEmbedding(text);
-  }
-  if (embedder) {
-    try {
-      const out = await embedder(text, { pooling: "mean", normalize: true });
-      return Array.from(out.data);
-    } catch (e) {
-      console.warn("⚠️ Local embedder failed during embed(), switching to Ollama/remote:", e?.message || e);
-      usingOllamaEmbed = true;
-      embedder = null;
-      return await ollamaEmbedding(text).catch(() => remoteEmbeddingOpenAI(text));
-    }
-  }
-  try {
-    return await remoteEmbeddingOpenAI(text);
-  } catch (e) {
-    console.error("❌ Remote embedding failed:", e?.message || e);
-    throw e;
-  }
-}
-
+// ================= EMBED =================
 export async function embedText(text) {
-  return embed(text);
-}
-
-export async function readFileContent(inputPathOrUrl) {
-  let tmpPath = null;
-  let buffer = null;
-  if (typeof inputPathOrUrl === "string" && (inputPathOrUrl.startsWith("http://") || inputPathOrUrl.startsWith("https://"))) {
-    const resp = await fetch(inputPathOrUrl);
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch ${inputPathOrUrl}: ${resp.status}`);
-    }
-    const ab = await resp.arrayBuffer();
-    buffer = Buffer.from(ab);
-    tmpPath = path.join("/tmp", `${Date.now()}_${path.basename(new URL(inputPathOrUrl).pathname)}`);
-    await fs.writeFile(tmpPath, buffer);
-  }
-  const filePath = tmpPath || inputPathOrUrl;
-  const ext = (path.extname(String(filePath)) || "").toLowerCase();
-  if (ext === ".pdf") {
-    const dataBuffer = buffer || await fs.readFile(filePath);
-    try {
-      const { default: pdfParse } = await import("pdf-parse");
-      const pdf = await pdfParse(dataBuffer);
-      return pdf.text || "";
-    } catch (e) {
-      console.error("❌ pdfParse error in readFileContent:", e);
-      throw e;
-    }
-  } else if (ext === ".docx") {
-    const dataBuffer = buffer || await fs.readFile(filePath);
-    const { value } = await mammoth.extractRawText({ buffer: dataBuffer });
-    return value || "";
-  } else {
-    const txt = await fs.readFile(filePath, "utf8");
-    return txt || "";
-  }
-}
-
-export async function readDocxFromUrl(url) {
   try {
-    console.log(`📄 Đang tải nội dung file từ: ${url}`);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`❌ Lỗi tải file: ${res.statusText}`);
-    const arrayBuffer = await res.arrayBuffer();
-    const tempPath = `/tmp/${Date.now()}_temp.docx`;
-    await fs.writeFile(tempPath, Buffer.from(arrayBuffer));
-    const text = await new Promise((resolve, reject) => {
-      docx.parseDocx(tempPath, (data) => {
-        if (!data) reject("❌ Không thể đọc nội dung file");
-        else resolve(data);
-      });
+    const res = await axios.post(EMBEDDING_API, {
+      model: "qwen3-embedding:8b",
+      input: text,
     });
-    console.log("✅ Đọc file thành công, độ dài:", text.length);
-    return text;
-  } catch (err) {
-    console.error("⚠️ Lỗi khi đọc file docx:", err);
-    return "";
+    return res.data?.embeddings?.[0] || null;
+  } catch {
+    return null;
   }
 }
 
-export async function uploadAndIndexFile(filePathOrUrl) {
-  const db = await getDb();
-  const col = db.collection(MONGO_COLLECTION);
-  const content = await readFileContent(filePathOrUrl);
-  if (!content || !content.trim()) {
-    throw new Error("❌ File rỗng hoặc không đọc được nội dung.");
+// ================= HYBRID SCORE =================
+function semanticScore(text, query, baseScore) {
+  if (!text) return baseScore;
+
+  const words = query.toLowerCase().split(/\s+/);
+  const t = text.toLowerCase();
+
+  let match = 0;
+  for (const w of words) {
+    if (t.includes(w)) match++;
   }
-  const vector = await embed(content);
-  const doc = {
-    text: content.slice(0, 20000),
-    [VECTOR_PATH]: vector,
-    source: filePathOrUrl,
-    uploadedAt: new Date(),
-  };
-  const result = await col.insertOne(doc);
-  console.log(`✅ File đã được index vào MongoDB với _id=${result.insertedId}`);
-  return result;
+
+  return baseScore * 0.7 + (match / words.length) * 0.3;
 }
 
-// Thêm hàm tìm kiếm vector file upload
-const FILES_COLLECTION = process.env.FILES_COLLECTION || "uploaded_files";
-const VECTOR_INDEX_UPLOADED_FILES = "vector_index_uploaded_files";
-export async function uploadedFilesVectorSearch(query, topk = 5) {
-  const db = await getDb();
-  const col = db.collection(FILES_COLLECTION);
-  const queryVector = await embedText(query);
-  const safeTopK = Math.min(Number(topk) || 5, MAX_TOPK);
+// ================= ACADEMIC BOOST =================
+function academicBoost(item, analysis) {
+  let score = item.score || 0;
 
-  const pipeline = [
-    {
-      $vectorSearch: {
-        index: VECTOR_INDEX_UPLOADED_FILES,
-        path: "vector",
-        queryVector,
-        numCandidates: safeTopK * 10,
-        limit: safeTopK,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        vector: 0,
-        name: 1,
-        text: 1,
-        url: 1,
-        uploadedAt: 1,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ];
-  const results = await col.aggregate(pipeline).toArray();
-  return results.map(d => ({
-    ...d,
-    _id: String(d._id)
-  }));
+  // 🔥 Q1 boost
+  if (item.quartile === "Q1") score += 0.3;
+  if (item.quartile === "Q2") score += 0.15;
+
+  // 🔥 Impact boost
+  if (item.h_index > 100) score += 0.2;
+  if (item.sjr > 2) score += 0.2;
+
+  // 🔥 Recommendation intent
+  if (analysis.wantsRecommendation) {
+    if (item.quartile === "Q1") score += 0.2;
+  }
+
+  return score;
 }
 
-// =============================
-// SEARCH CONFERENCE + JOURNAL
-// (PRE-FILTER CONTINENT / YEAR)
-// =============================
-export async function searchConferenceJournalByVector({
-  vector,
-  topk = 5,
-
-  continent = null,
-  country_code = null,
-  year = null
-}) {
-  const db = await getDb();
-  const k = Math.min(Number(topk) || 5, MAX_TOPK);
-
-  /* =========================
-   * 1️⃣ VECTOR FILTER (INDEXED ONLY)
-   * ========================= */
-  const vectorFilter = {};
-
-  // Country (ưu tiên)
-  if (Array.isArray(country_code) && country_code.length > 0) {
-    vectorFilter.country_code = { $in: country_code };
-  } else if (typeof country_code === "string" && country_code) {
-    vectorFilter.country_code = country_code;
+// ================= FILTER =================
+function applyAcademicFilter(conferences, journals, analysis) {
+  // ===== JOURNAL =====
+  if (analysis.wantsQuartile) {
+    journals = journals.filter(j =>
+      ["Q1", "Q2"].includes((j.quartile || "").toUpperCase())
+    );
   }
 
-  // Continent (fallback)
-  else if (continent) {
-    vectorFilter.continent = continent;
+  // ===== FIELD =====
+  if (analysis.fieldHint) {
+    const f = analysis.fieldHint.toLowerCase();
+
+    journals = journals.filter(j =>
+      (j.areas || "").toLowerCase().includes(f) ||
+      (j.categories || "").toLowerCase().includes(f)
+    );
+
+    conferences = conferences.filter(c =>
+      (c.topics || "").toLowerCase().includes(f)
+    );
   }
 
-  /* =========================
-   * 2️⃣ VECTOR SEARCH (PHẢI FIRST)
-   * ========================= */
-  const conferencePipeline = [
-    {
-      $vectorSearch: {
-        index: "vector_index_conference",
-        path: "vector",
-        queryVector: vector,
-        numCandidates: Math.max(50, k * 10),
-        limit: k,
-        similarity: "cosine",
+  // ===== YEAR =====
+  if (analysis.wantsRecent) {
+    const year = Number(analysis.wantsRecent[0]);
 
-        ...(Object.keys(vectorFilter).length
-          ? { filter: vectorFilter }
-          : {})
-      }
-    },
+    conferences = conferences.filter(c =>
+      Number(c.year) === year
+    );
+  }
 
-    /* =========================
-     * 3️⃣ YEAR FILTER (POST)
-     * ========================= */
-    ...(year
-      ? [{
-          $match: {
-            start_date: {
-              $gte: `${year}-01-01`,
-              $lt: `${Number(year) + 1}-01-01`
-            }
-          }
-        }]
-      : []),
+  // ===== COUNTRY =====
+  if (analysis.wantsCountryCode) {
+    const code = analysis.wantsCountryCode.toLowerCase();
 
-    {
-      $project: {
-        score: { $meta: "vectorSearchScore" },
-        name: 1,
-        acronym: 1,
-        deadline: 1,
-        start_date: 1,
-        location: 1,
-        city: 1,
-        country: 1,
-        country_code: 1,
-        continent: 1,
-        topics: 1,
-        url: 1
-      }
-    }
-  ];
+    conferences = conferences.filter(c =>
+      (c.country || "").toLowerCase().includes(code)
+    );
 
-  const journalPipeline = [
-    {
-      $vectorSearch: {
-        index: "vector_index_journal",
-        path: "vector",
-        queryVector: vector,
-        numCandidates: Math.max(50, k * 10),
-        limit: k,
-        similarity: "cosine"
-      }
-    },
-    {
-      $project: {
-        score: { $meta: "vectorSearchScore" },
-        title: 1,
-        publisher: 1,
-        areas: 1,
-        categories: 1,
-        issn: 1,
-        scimago_link: 1
-      }
-    }
-  ];
+    journals = journals.filter(j =>
+      (j.country || "").toLowerCase().includes(code)
+    );
+  }
 
-  const [conferences, journals] = await Promise.all([
-    db.collection("conference").aggregate(conferencePipeline).toArray(),
-    db.collection("journal").aggregate(journalPipeline).toArray()
-  ]);
+  // ===== CONTINENT =====
+  if (analysis.wantsContinent) {
+    const cont = analysis.wantsContinent.toLowerCase();
+
+    conferences = conferences.filter(c =>
+      (c.continent || "").toLowerCase().includes(cont)
+    );
+  }
 
   return { conferences, journals };
 }
 
+// ================= SORT =================
+function rankAcademic(items, type = "journal") {
+  if (type === "journal") {
+    return items.sort((a, b) => {
+      return (
+        (b.score || 0) - (a.score || 0) ||
+        (b.h_index || 0) - (a.h_index || 0) ||
+        (b.sjr || 0) - (a.sjr || 0)
+      );
+    });
+  }
 
-export async function uploadedFilesVectorSearchByVector(queryVector, topk = 5) {
-  const db = await getDb();
-  const col = db.collection(FILES_COLLECTION);
-  const k = Math.min(Number(topk) || 5, MAX_TOPK);
+  // conference
+  return items.sort((a, b) => {
+    const dA = new Date(a.deadline || "2100");
+    const dB = new Date(b.deadline || "2100");
 
-  const pipeline = [
-    {
-      $vectorSearch: {
-        index: VECTOR_INDEX_UPLOADED_FILES,
-        path: "vector",
-        queryVector,
-        numCandidates: k * 10,
-        limit: k,
-        similarity: "cosine",
-      },
-    },
-    {
-      $project: {
-        vector: 0,
-        score: { $meta: "vectorSearchScore" },
-      },
-    },
-  ];
+    return dA - dB; // deadline gần trước
+  });
+}
 
-  return await col.aggregate(pipeline).toArray();
+// ================= MAIN =================
+export async function searchConferenceJournalByVector({
+  question,
+  topk = 10,
+}) {
+  try {
+    if (!question) {
+      return { conferences: [], journals: [], domain: "empty" };
+    }
+
+    const domain = detectDomain(question);
+    const analysis = analyzeQuestion(question);
+
+    const vector = await embedText(question);
+
+    const raw = await qdrant.search(COLLECTION, {
+      vector,
+      limit: topk * 5,
+      with_payload: true,
+    });
+
+    let conferences = [];
+    let journals = [];
+
+    for (const r of raw) {
+      const p = r.payload || {};
+
+      const base = {
+        ...p,
+        score: semanticScore(p.text, question, r.score),
+      };
+
+      // 🔥 detect type
+      if (p.type === "conference" || p.name) {
+        conferences.push(base);
+      } else if (p.type === "journal" || p.title) {
+        journals.push(base);
+      }
+    }
+
+    // ================= FILTER =================
+    ({ conferences, journals } = applyAcademicFilter(
+      conferences,
+      journals,
+      analysis
+    ));
+
+    // ================= BOOST =================
+    journals = journals.map(j => ({
+      ...j,
+      score: academicBoost(j, analysis),
+    }));
+
+    // ================= RANK =================
+    journals = rankAcademic(journals, "journal");
+    conferences = rankAcademic(conferences, "conference");
+
+    return {
+      domain,
+      analysis,
+      conferences: finalizeResults(conferences, topk),
+      journals: finalizeResults(journals, topk),
+    };
+
+  } catch (err) {
+    console.error("❌ Search error:", err);
+
+    return {
+      conferences: [],
+      journals: [],
+      domain: "error"
+    };
+  }
 }

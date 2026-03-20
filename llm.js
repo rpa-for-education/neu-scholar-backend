@@ -1,33 +1,29 @@
-// llm.js — Ollama LLM
+// llm.js
 import axios from "axios";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434";
-//const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://research.neu.edu.vn/ollama/api/generate";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
-// ==== Map model_id → model name (Ollama) ====
+// ===== MODEL MAP =====
 export const modelMap = {
   "qwen3-8b": { provider: "ollama", model: "qwen3:8b" },
-  // "qwen3-1.7b": { provider: "ollama", model: "qwen3:1.7b" },
-  // "qwen3-32b": { provider: "ollama", model: "qwen3:32b" },
-  // "mistral-7b": { provider: "ollama", model: "mistral:7b" },
-  // "llama3.2-3b": { provider: "ollama", model: "llama3.2:3b" },
-  // "qwen2.5-coder-14b": { provider: "ollama", model: "qwen2.5-coder:14b" },
-  // "deepseek-coder-33b": { provider: "ollama", model: "deepseek-coder:33b" },
-  // "gemma3-27b": { provider: "ollama", model: "gemma3:27b" },
-  // "deepseek-r1-32b": { provider: "ollama", model: "deepseek-r1:32b" },
 };
 
 const DEFAULT_MODEL_ID = "qwen3-8b";
 
-async function callOllama(prompt, model) {
+// ================= LOW LEVEL CALL =================
+async function callOllamaRaw(messages, model) {
   const base = OLLAMA_BASE.replace(/\/$/, "");
+
   const res = await axios.post(
     `${base}/api/chat`,
     {
-      model: model || OLLAMA_MODEL,
-      messages: [{ role: "user", content: prompt }],
+      model: model || DEFAULT_MODEL,
+      messages,
       stream: false,
+      options: {
+        temperature: 0.2,   // 🔥 ổn định reasoning
+      },
     },
     {
       headers: { "Content-Type": "application/json" },
@@ -35,34 +31,118 @@ async function callOllama(prompt, model) {
     }
   );
 
-  const msg = res.data?.message?.content;
-  return typeof msg === "string" ? msg : "";
+  return res.data?.message?.content || "";
 }
 
-// ===== Hàm gọi LLM chung =====
+// ================= SAFE JSON PARSE =================
+function safeJSONParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // 🔥 fallback: extract JSON block
+    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {}
+    }
+    return null;
+  }
+}
+
+// ================= GENERIC CALL =================
 export async function callLLM(prompt, model_id = DEFAULT_MODEL_ID) {
   const info = modelMap[model_id];
-  const model = info?.model || OLLAMA_MODEL;
-
-  console.log(`⚡ callLLM: ${model_id || "default"} → ollama/${model}`);
+  const model = info?.model || DEFAULT_MODEL;
 
   try {
-    const answer = await callOllama(prompt, model);
+    const answer = await callOllamaRaw(
+      [{ role: "user", content: prompt }],
+      model
+    );
 
     return {
       provider: "ollama",
-      model_id: model_id || DEFAULT_MODEL_ID,
       model,
       answer: answer || "",
     };
   } catch (err) {
-    console.error("❌ Ollama LLM error:", err.response?.data || err.message);
-
+    console.error("❌ LLM error:", err.message);
     return {
       provider: "ollama",
-      model_id: model_id || DEFAULT_MODEL_ID,
       model,
-      answer: `❌ Lỗi gọi Ollama: ${err.message}. Kiểm tra OLLAMA_BASE_URL và model.`,
+      answer: "",
+      error: err.message,
     };
+  }
+}
+
+// ================= JSON MODE (QUAN TRỌNG) =================
+export async function callLLMJson(prompt, model_id = DEFAULT_MODEL_ID) {
+  const strictPrompt = `
+You MUST return valid JSON only.
+No explanation.
+
+${prompt}
+`;
+
+  const res = await callLLM(strictPrompt, model_id);
+  const parsed = safeJSONParse(res.answer);
+
+  if (!parsed) {
+    throw new Error("LLM JSON parse failed");
+  }
+
+  return parsed;
+}
+
+// ================= QUERY REWRITE =================
+export async function rewriteQueryLLM(question) {
+  const prompt = `
+Rewrite the query into 3 optimized academic search queries.
+
+Question:
+"${question}"
+
+Return JSON:
+{
+  "queries": ["...", "...", "..."]
+}
+`;
+
+  try {
+    const data = await callLLMJson(prompt);
+    return data.queries || [question];
+  } catch {
+    return [question];
+  }
+}
+
+// ================= RERANK =================
+export async function rerankLLM(query, items) {
+  if (!items.length) return items;
+
+  const prompt = `
+You are an academic ranking system.
+
+Query:
+"${query}"
+
+Rank the items by relevance.
+
+Return JSON array of indices.
+
+Items:
+${items.map((it, i) =>
+  `[${i}] ${it.title} | ${it.topics || it.areas || ""}`
+).join("\n")}
+`;
+
+  try {
+    const order = await callLLMJson(prompt);
+
+    return order.map(i => items[i]).filter(Boolean);
+  } catch {
+    return items;
   }
 }
