@@ -27,8 +27,17 @@ export async function embedText(text) {
       model: "qwen3-embedding:8b",
       input: text,
     });
-    return res.data?.embeddings?.[0] || null;
-  } catch {
+
+    const vec = res.data?.embeddings?.[0];
+
+    // 🔥 FIX: validate
+    if (!vec || !Array.isArray(vec)) {
+      throw new Error("Invalid embedding");
+    }
+
+    return vec;
+  } catch (err) {
+    console.error("❌ Embedding error:", err.message);
     return null;
   }
 }
@@ -52,15 +61,12 @@ function semanticScore(text, query, baseScore) {
 function academicBoost(item, analysis) {
   let score = item.score || 0;
 
-  // 🔥 Q1 boost
   if (item.quartile === "Q1") score += 0.3;
   if (item.quartile === "Q2") score += 0.15;
 
-  // 🔥 Impact boost
   if (item.h_index > 100) score += 0.2;
   if (item.sjr > 2) score += 0.2;
 
-  // 🔥 Recommendation intent
   if (analysis.wantsRecommendation) {
     if (item.quartile === "Q1") score += 0.2;
   }
@@ -70,14 +76,12 @@ function academicBoost(item, analysis) {
 
 // ================= FILTER =================
 function applyAcademicFilter(conferences, journals, analysis) {
-  // ===== JOURNAL =====
   if (analysis.wantsQuartile) {
     journals = journals.filter(j =>
       ["Q1", "Q2"].includes((j.quartile || "").toUpperCase())
     );
   }
 
-  // ===== FIELD =====
   if (analysis.fieldHint) {
     const f = analysis.fieldHint.toLowerCase();
 
@@ -91,7 +95,6 @@ function applyAcademicFilter(conferences, journals, analysis) {
     );
   }
 
-  // ===== YEAR =====
   if (analysis.wantsRecent) {
     const year = Number(analysis.wantsRecent[0]);
 
@@ -100,7 +103,6 @@ function applyAcademicFilter(conferences, journals, analysis) {
     );
   }
 
-  // ===== COUNTRY =====
   if (analysis.wantsCountryCode) {
     const code = analysis.wantsCountryCode.toLowerCase();
 
@@ -113,7 +115,6 @@ function applyAcademicFilter(conferences, journals, analysis) {
     );
   }
 
-  // ===== CONTINENT =====
   if (analysis.wantsContinent) {
     const cont = analysis.wantsContinent.toLowerCase();
 
@@ -137,12 +138,11 @@ function rankAcademic(items, type = "journal") {
     });
   }
 
-  // conference
   return items.sort((a, b) => {
     const dA = new Date(a.deadline || "2100");
     const dB = new Date(b.deadline || "2100");
 
-    return dA - dB; // deadline gần trước
+    return dA - dB;
   });
 }
 
@@ -161,11 +161,25 @@ export async function searchConferenceJournalByVector({
 
     const vector = await embedText(question);
 
-    const raw = await qdrant.search(COLLECTION, {
-      vector,
-      limit: topk * 5,
-      with_payload: true,
-    });
+    // 🔥 FIX: chống crash + sai dimension
+    if (!vector || vector.length !== 4096) {
+      console.error("❌ Invalid vector:", vector?.length);
+      return { conferences: [], journals: [], domain: "error" };
+    }
+
+    let raw = [];
+
+    try {
+      raw = await qdrant.search(COLLECTION, {
+        // 🔥 FIX CHUẨN QDRANT CLOUD
+        vector: { default: vector },
+        limit: topk * 5,
+        with_payload: true,
+      });
+    } catch (err) {
+      console.error("❌ Qdrant error:", err.response?.data || err.message);
+      return { conferences: [], journals: [], domain: "error" };
+    }
 
     let conferences = [];
     let journals = [];
@@ -178,7 +192,6 @@ export async function searchConferenceJournalByVector({
         score: semanticScore(p.text, question, r.score),
       };
 
-      // 🔥 detect type
       if (p.type === "conference" || p.name) {
         conferences.push(base);
       } else if (p.type === "journal" || p.title) {
@@ -186,20 +199,20 @@ export async function searchConferenceJournalByVector({
       }
     }
 
-    // ================= FILTER =================
+    // ===== FILTER =====
     ({ conferences, journals } = applyAcademicFilter(
       conferences,
       journals,
       analysis
     ));
 
-    // ================= BOOST =================
+    // ===== BOOST =====
     journals = journals.map(j => ({
       ...j,
       score: academicBoost(j, analysis),
     }));
 
-    // ================= RANK =================
+    // ===== RANK =====
     journals = rankAcademic(journals, "journal");
     conferences = rankAcademic(conferences, "conference");
 
@@ -211,7 +224,7 @@ export async function searchConferenceJournalByVector({
     };
 
   } catch (err) {
-    console.error("❌ Search error:", err);
+    console.error("❌ Search fatal:", err);
 
     return {
       conferences: [],
