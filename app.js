@@ -214,7 +214,7 @@ app.post("/api/agent/stream", async (req, res) => {
 });
 
 // AI PORTAL
-app.post("/ask", async (req, res) => {
+app.post("/api/ask", async (req, res) => {
   try {
     const { prompt } = req.body;
 
