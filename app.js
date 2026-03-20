@@ -51,7 +51,6 @@ function buildPrompt(question, conferences = [], journals = [], history = []) {
   let context = `
 Bạn là AI tư vấn học thuật (conference + journal).
 Chỉ được dùng dữ liệu bên dưới. Không bịa.
-
 `;
 
   if (history.length) {
@@ -86,7 +85,6 @@ async function runAgentFull(req, question, model_id, topk) {
 
   const result = await runAgent(question, topk);
 
-  // 🔥 Anti hallucination
   if (!result.conferences.length && !result.journals.length) {
     return {
       answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
@@ -137,11 +135,10 @@ app.post("/api/agent", async (req, res) => {
   }
 });
 
-// STREAMING (SSE)
+// STREAMING (SSE) — FIXED
 app.post("/api/agent/stream", async (req, res) => {
   try {
     const { question, topk = 5 } = req.body;
-
     if (!question) return res.end();
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -149,7 +146,6 @@ app.post("/api/agent/stream", async (req, res) => {
     res.setHeader("Connection", "keep-alive");
 
     const history = getSessionHistory(req);
-
     const result = await runAgent(question, topk);
 
     if (!result.conferences.length && !result.journals.length) {
@@ -166,15 +162,20 @@ app.post("/api/agent/stream", async (req, res) => {
 
     const response = await fetch(`${OLLAMA_BASE}/api/chat`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "qwen3:8b",
         messages: [{ role: "user", content: prompt }],
         stream: true,
       }),
     });
+
+    // 🔥 CHECK RESPONSE
+    if (!response.ok || !response.body) {
+      console.error("❌ Ollama stream failed:", response.status);
+      res.write(`data: Lỗi kết nối Ollama\n\n`);
+      return res.end();
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -196,7 +197,6 @@ app.post("/api/agent/stream", async (req, res) => {
           const token = json.message?.content || "";
 
           finalText += token;
-
           res.write(`data: ${token}\n\n`);
         } catch {}
       }
@@ -232,7 +232,6 @@ app.post("/ask", async (req, res) => {
 });
 
 // ================= METADATA =================
-
 const MODEL_META = {
   "qwen3-8b": {
     name: "Qwen3 8B",
@@ -242,38 +241,19 @@ const MODEL_META = {
 
 const METADATA_DATA = {
   name: "NEU Research Agent",
-  description: "AI hỗ trợ tìm kiếm & tư vấn công bố khoa học (conference + journal)",
+  description: "AI hỗ trợ tìm kiếm & tư vấn công bố khoa học",
   version: "2.0.0",
   developer: "NEU FIT",
   default_model: "qwen3-8b",
-  capabilities: ["semantic_search", "rag", "recommendation"],
-  system: {
-    embedding: "qwen3-embedding:8b",
-    vector_db: "Qdrant",
-    llm: "qwen3:8b"
-  }
 };
 
-function handleMetadata(req, res) {
-  const supported_models = Object.entries(modelMap).map(
-    ([model_id, { provider, model }]) => ({
-      model_id,
-      provider,
-      model,
-      name: MODEL_META[model_id]?.name || model_id,
-      description: MODEL_META[model_id]?.description || "",
-    })
-  );
-
+app.get("/api/metadata", (req, res) => {
   res.json({
     ...METADATA_DATA,
-    supported_models,
+    supported_models: Object.keys(modelMap),
     timestamp: new Date().toISOString()
   });
-}
-
-app.get("/api/metadata", handleMetadata);
-app.get("/v1/metadata", handleMetadata);
+});
 
 // ================= HEALTH =================
 app.get("/api/health", (_req, res) => {

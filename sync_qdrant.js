@@ -14,12 +14,10 @@ const QDRANT_URL = process.env.QDRANT_URL;
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const COLLECTION = "neu-scholar";
 
-// 🔥 embedding API của bạn
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
+const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
 
-// 🔥 FIX CHUẨN
 const VECTOR_SIZE = 4096;
-
 const UUID_NAMESPACE = uuidv5.URL;
 const BATCH_SIZE = 8;
 
@@ -29,6 +27,7 @@ const mongo = new MongoClient(MONGODB_URI);
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
   apiKey: QDRANT_API_KEY,
+  checkCompatibility: false, // 🔥 tránh warning
 });
 
 // ================= UTILS =================
@@ -48,59 +47,64 @@ function clean(obj) {
 async function ensureCollection() {
   try {
     const info = await qdrant.getCollection(COLLECTION);
-
+    const count = info.points_count || 0;
     const size = info.config.params.vectors.size;
 
     if (size !== VECTOR_SIZE) {
-      console.log("⚠️ Wrong dimension. Recreating collection...");
+      console.log("⚠️ Wrong dimension → recreating collection");
 
       await qdrant.deleteCollection(COLLECTION);
 
       await qdrant.createCollection(COLLECTION, {
-        vectors: {
-          size: VECTOR_SIZE,
-          distance: "Cosine",
-        },
+        vectors: { size: VECTOR_SIZE, distance: "Cosine" },
       });
 
-      console.log("✅ Recreated collection with size =", VECTOR_SIZE);
-    } else {
-      console.log("✅ Collection OK:", COLLECTION);
+      return true;
     }
-  } catch (err) {
-    console.log("🚀 Creating new collection...");
+
+    if (count > 0) {
+      console.log("✅ Collection already has data → skip sync");
+      return false;
+    }
+
+    return true;
+  } catch {
+    console.log("🚀 Creating collection...");
 
     await qdrant.createCollection(COLLECTION, {
-      vectors: {
-        size: VECTOR_SIZE,
-        distance: "Cosine",
-      },
+      vectors: { size: VECTOR_SIZE, distance: "Cosine" },
     });
 
-    console.log("✅ Collection created");
+    return true;
   }
 }
 
 // ================= EMBED =================
-async function embed(text) {
+async function embed(text, retry = 2) {
   try {
     const res = await axios.post(
       `${OLLAMA_BASE}/api/embed`,
       {
-        model: "qwen3-embedding:8b",
+        model: EMBED_MODEL,
         input: text,
       },
-      { timeout: 120000 }
+      { timeout: 60000 }
     );
 
     const vec = res.data?.embeddings?.[0];
 
-    if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
-      throw new Error("Invalid embedding vector");
+    if (!vec || !Array.isArray(vec) || vec.length !== VECTOR_SIZE) {
+      throw new Error(`Invalid vector length: ${vec?.length}`);
     }
 
     return vec;
   } catch (err) {
+    if (retry > 0) {
+      console.log("⚠️ Retry embedding...");
+      await new Promise((r) => setTimeout(r, 1000));
+      return embed(text, retry - 1);
+    }
+
     console.error("❌ Embedding error:", err.message);
     throw err;
   }
@@ -140,17 +144,13 @@ function buildPayload(item, type, text) {
       key: item._key,
       title: item.title,
       text,
-
       publisher: item.publisher,
       country: item.country,
-
       areas: item.areas,
       categories: item.categories,
-
       quartile: item.sjr_best_quartile || null,
       sjr: Number(item.sjr) || 0,
       h_index: Number(item.h_index) || 0,
-
       source: "neu-research",
     });
   }
@@ -161,19 +161,13 @@ function buildPayload(item, type, text) {
     name: item.name,
     title: item.title || item.name,
     text,
-
-    year: item.start_date
-      ? Number(item.start_date.slice(0, 4))
-      : null,
-
+    year: item.start_date ? Number(item.start_date.slice(0, 4)) : null,
     country: item.country,
     city: item.city || item.location,
     continent: item.continent,
-
     deadline: item.deadline,
     topics: item.topics,
     url: item.url,
-
     source: "neu-research",
   });
 }
@@ -226,11 +220,11 @@ async function syncCollection(db, name) {
 
         points.push({
           id: qid(item._key),
-          vector: vector, // ✅ simple vector
+          vector,
           payload,
         });
       } catch (err) {
-        console.log("❌ Skip:", item._key, err.message);
+        console.log("❌ Skip:", item._key);
       }
     }
 
@@ -251,11 +245,14 @@ async function syncCollection(db, name) {
 
     console.log("✅ Mongo connected");
 
-    // 🔥 AUTO CREATE COLLECTION
-    await ensureCollection();
+    const shouldSync = await ensureCollection();
 
-    await syncCollection(db, "conference");
-    await syncCollection(db, "journal");
+    if (shouldSync) {
+      await syncCollection(db, "conference");
+      await syncCollection(db, "journal");
+    } else {
+      console.log("⏭️ Skip sync");
+    }
 
     console.log("🎯 SYNC DONE");
   } catch (e) {

@@ -14,18 +14,20 @@ const QDRANT_URL = process.env.QDRANT_URL;
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const COLLECTION = "neu-scholar";
 
-// 🔥 FIX QUAN TRỌNG
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434").replace(/\/$/, "");
 const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
+
+const VECTOR_SIZE = 4096;
 
 // ================= INIT =================
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
   apiKey: QDRANT_API_KEY,
+  checkCompatibility: false,
 });
 
 // ================= EMBED =================
-export async function embedText(text) {
+export async function embedText(text, retry = 2) {
   try {
     const res = await axios.post(
       `${OLLAMA_BASE}/api/embed`,
@@ -38,13 +40,19 @@ export async function embedText(text) {
 
     const vec = res.data?.embeddings?.[0];
 
-    if (!vec || !Array.isArray(vec)) {
-      throw new Error("Invalid embedding");
+    if (!vec || !Array.isArray(vec) || vec.length !== VECTOR_SIZE) {
+      throw new Error(`Invalid embedding: ${vec?.length}`);
     }
 
     return vec;
 
   } catch (err) {
+    if (retry > 0) {
+      console.log("⚠️ Retry embedding...");
+      await new Promise(r => setTimeout(r, 800));
+      return embedText(text, retry - 1);
+    }
+
     console.error("❌ Embedding error:", err.message);
     console.error("👉 OLLAMA_BASE:", OLLAMA_BASE);
     return null;
@@ -170,8 +178,7 @@ export async function searchConferenceJournalByVector({
 
     const vector = await embedText(question);
 
-    if (!vector || vector.length !== 4096) {
-      console.error("❌ Invalid vector:", vector?.length);
+    if (!vector) {
       return { conferences: [], journals: [], domain: "error" };
     }
 
@@ -179,7 +186,6 @@ export async function searchConferenceJournalByVector({
 
     try {
       raw = await qdrant.search(COLLECTION, {
-        // 🔥 FIX CHUẨN QDRANT CLOUD
         vector: vector,
         limit: topk * 5,
         with_payload: true,
