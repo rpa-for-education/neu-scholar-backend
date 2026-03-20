@@ -9,12 +9,16 @@ import {
 
 import "dotenv/config";
 
+// ================= CONFIG =================
 const QDRANT_URL = process.env.QDRANT_URL;
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const COLLECTION = "neu-scholar";
 
-const EMBEDDING_API = "https://research.neu.edu.vn/ollama/api/embed";
+// 🔥 FIX QUAN TRỌNG
+const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
 
+// ================= INIT =================
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
   apiKey: QDRANT_API_KEY,
@@ -23,21 +27,26 @@ const qdrant = new QdrantClient({
 // ================= EMBED =================
 export async function embedText(text) {
   try {
-    const res = await axios.post(EMBEDDING_API, {
-      model: "qwen3-embedding:8b",
-      input: text,
-    });
+    const res = await axios.post(
+      `${OLLAMA_BASE}/api/embed`,
+      {
+        model: OLLAMA_EMBED_MODEL,
+        input: text,
+      },
+      { timeout: 60000 }
+    );
 
     const vec = res.data?.embeddings?.[0];
 
-    // 🔥 FIX: validate
     if (!vec || !Array.isArray(vec)) {
       throw new Error("Invalid embedding");
     }
 
     return vec;
+
   } catch (err) {
     console.error("❌ Embedding error:", err.message);
+    console.error("👉 OLLAMA_BASE:", OLLAMA_BASE);
     return null;
   }
 }
@@ -161,7 +170,6 @@ export async function searchConferenceJournalByVector({
 
     const vector = await embedText(question);
 
-    // 🔥 FIX: chống crash + sai dimension
     if (!vector || vector.length !== 4096) {
       console.error("❌ Invalid vector:", vector?.length);
       return { conferences: [], journals: [], domain: "error" };
@@ -172,7 +180,7 @@ export async function searchConferenceJournalByVector({
     try {
       raw = await qdrant.search(COLLECTION, {
         // 🔥 FIX CHUẨN QDRANT CLOUD
-        vector: vector,
+        vector: { default: vector },
         limit: topk * 5,
         with_payload: true,
       });
@@ -199,20 +207,17 @@ export async function searchConferenceJournalByVector({
       }
     }
 
-    // ===== FILTER =====
     ({ conferences, journals } = applyAcademicFilter(
       conferences,
       journals,
       analysis
     ));
 
-    // ===== BOOST =====
     journals = journals.map(j => ({
       ...j,
       score: academicBoost(j, analysis),
     }));
 
-    // ===== RANK =====
     journals = rankAcademic(journals, "journal");
     conferences = rankAcademic(conferences, "conference");
 
