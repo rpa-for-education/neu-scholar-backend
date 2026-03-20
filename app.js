@@ -254,42 +254,49 @@ app.post("/api/ask", async (req, res) => {
     return res.status(400).json({
       session_id: null,
       status: "error",
-      error_code: "INVALID_JSON",
-      error_message: "Payload không phải JSON hợp lệ",
+      error_message: "Invalid JSON",
     });
   }
 
-  const { session_id, model_id, user, prompt } = body;
+  const {
+    session_id,
+    model_id = "qwen3-8b",          // ✅ FIX
+    assistant_base_url = "local",   // ✅ FIX
+    user,
+    prompt
+  } = body;
+
   const question = prompt || body.question;
 
-  if (!question || !String(question).trim()) {
+  if (!question || !question.trim()) {
     return res.status(400).json({
       session_id: session_id ?? null,
       status: "error",
-      error_code: "INVALID_REQUEST",
-      error_message: "Thiếu prompt hoặc question",
+      error_message: "Missing prompt",
     });
   }
 
   try {
-    const topk = Number(body.topk) || 5;
-    const m = model_id || "qwen3-8b";
+    const result = await runAgentFull(
+      req,
+      question,
+      model_id,
+      5,
+      session_id
+    );
 
-    const result = await runAgentFull(req, question, m, topk);
-
-    // ✅ build sources giống code cũ
     const sources = [
-      ...result.journals.map((j) => ({
+      ...result.journals.map(j => ({
         type: "journal",
         title: j.title || j.name,
         publisher: j.publisher,
       })),
-      ...result.conferences.map((c) => ({
+      ...result.conferences.map(c => ({
         type: "conference",
         title: c.name || c.title,
         location: c.country || c.city,
       })),
-    ].filter((s) => s.title);
+    ];
 
     return res.json({
       session_id: session_id ?? null,
@@ -298,85 +305,17 @@ app.post("/api/ask", async (req, res) => {
       answer: result.answer,
       sources,
       meta: {
-        response_time_ms: null,
         domain: result.domain,
       },
     });
 
   } catch (err) {
     console.error("❌ ASK ERROR:", err);
+
     return res.status(500).json({
       session_id: session_id ?? null,
       status: "error",
-      error_message: err?.message || "Internal server error",
-    });
-  }
-});
-
-app.post("/ask", async (req, res) => {
-  let body;
-
-  try {
-    body = req.body;
-  } catch {
-    return res.status(400).json({
-      session_id: null,
-      status: "error",
-      error_code: "INVALID_JSON",
-      error_message: "Payload không phải JSON hợp lệ",
-    });
-  }
-
-  const { session_id, model_id, user, prompt } = body;
-  const question = prompt || body.question;
-
-  if (!question || !String(question).trim()) {
-    return res.status(400).json({
-      session_id: session_id ?? null,
-      status: "error",
-      error_code: "INVALID_REQUEST",
-      error_message: "Thiếu prompt hoặc question",
-    });
-  }
-
-  try {
-    const topk = Number(body.topk) || 5;
-    const m = model_id || "qwen3-8b";
-
-    const result = await runAgentFull(req, question, m, topk);
-
-    // ✅ build sources giống code cũ
-    const sources = [
-      ...result.journals.map((j) => ({
-        type: "journal",
-        title: j.title || j.name,
-        publisher: j.publisher,
-      })),
-      ...result.conferences.map((c) => ({
-        type: "conference",
-        title: c.name || c.title,
-        location: c.country || c.city,
-      })),
-    ].filter((s) => s.title);
-
-    return res.json({
-      session_id: session_id ?? null,
-      status: "success",
-      content_markdown: result.answer,
-      answer: result.answer,
-      sources,
-      meta: {
-        response_time_ms: null,
-        domain: result.domain,
-      },
-    });
-
-  } catch (err) {
-    console.error("❌ ASK ERROR:", err);
-    return res.status(500).json({
-      session_id: session_id ?? null,
-      status: "error",
-      error_message: err?.message || "Internal server error",
+      error_message: err.message,
     });
   }
 });
