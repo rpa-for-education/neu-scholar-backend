@@ -8,13 +8,17 @@ import "dotenv/config";
 
 // ================= CONFIG =================
 const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB = process.env.MONGODB_DB || "rpa";
+const MONGODB_DB = process.env.MONGODB_DB || "fitneu";
 
 const QDRANT_URL = process.env.QDRANT_URL;
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const COLLECTION = "neu-scholar";
 
+// 🔥 embedding API của bạn
 const EMBEDDING_API = "https://research.neu.edu.vn/ollama/api/embed";
+
+// 🔥 FIX CHUẨN
+const VECTOR_SIZE = 4096;
 
 const UUID_NAMESPACE = uuidv5.URL;
 const BATCH_SIZE = 8;
@@ -34,8 +38,47 @@ function qid(key) {
 
 function clean(obj) {
   return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== null && v !== undefined && v !== "")
+    Object.entries(obj).filter(
+      ([_, v]) => v !== null && v !== undefined && v !== ""
+    )
   );
+}
+
+// ================= COLLECTION =================
+async function ensureCollection() {
+  try {
+    const info = await qdrant.getCollection(COLLECTION);
+
+    const size = info.config.params.vectors.size;
+
+    if (size !== VECTOR_SIZE) {
+      console.log("⚠️ Wrong dimension. Recreating collection...");
+
+      await qdrant.deleteCollection(COLLECTION);
+
+      await qdrant.createCollection(COLLECTION, {
+        vectors: {
+          size: VECTOR_SIZE,
+          distance: "Cosine",
+        },
+      });
+
+      console.log("✅ Recreated collection with size =", VECTOR_SIZE);
+    } else {
+      console.log("✅ Collection OK:", COLLECTION);
+    }
+  } catch (err) {
+    console.log("🚀 Creating new collection...");
+
+    await qdrant.createCollection(COLLECTION, {
+      vectors: {
+        size: VECTOR_SIZE,
+        distance: "Cosine",
+      },
+    });
+
+    console.log("✅ Collection created");
+  }
 }
 
 // ================= EMBED =================
@@ -53,7 +96,8 @@ async function embed(text) {
     const vec = res.data?.embeddings?.[0];
 
     // 🔥 VALIDATE
-    if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
+    if (!vec || !Array.isArray(vec) || vec.length !== VECTOR_SIZE) {
+      console.error("❌ Invalid vector length:", vec?.length);
       throw new Error("Invalid embedding vector");
     }
 
@@ -73,7 +117,9 @@ function buildText(item, type) {
       item.categories,
       item.publisher,
       item.country,
-    ].filter(Boolean).join(" ");
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   return [
@@ -83,7 +129,9 @@ function buildText(item, type) {
     item.description,
     item.country,
     item.city,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 // ================= PAYLOAD =================
@@ -146,7 +194,6 @@ async function upsert(points) {
 
     await new Promise((r) => setTimeout(r, 1500));
 
-    // retry 1 lần nữa
     await qdrant.upsert(COLLECTION, {
       wait: true,
       points,
@@ -181,10 +228,7 @@ async function syncCollection(db, name) {
 
         points.push({
           id: qid(item._key),
-
-          // ✅ FIX QUAN TRỌNG NHẤT (SIMPLE VECTOR)
-          vector: vector,
-
+          vector: vector, // ✅ simple vector
           payload,
         });
       } catch (err) {
@@ -208,6 +252,9 @@ async function syncCollection(db, name) {
     const db = mongo.db(MONGODB_DB);
 
     console.log("✅ Mongo connected");
+
+    // 🔥 AUTO CREATE COLLECTION
+    await ensureCollection();
 
     await syncCollection(db, "conference");
     await syncCollection(db, "journal");
