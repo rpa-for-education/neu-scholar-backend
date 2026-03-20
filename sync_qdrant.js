@@ -40,19 +40,28 @@ function clean(obj) {
 
 // ================= EMBED =================
 async function embed(text) {
-  const res = await axios.post(EMBEDDING_API, {
-    model: "qwen3-embedding:8b",
-    input: text,
-  });
+  try {
+    const res = await axios.post(
+      EMBEDDING_API,
+      {
+        model: "qwen3-embedding:8b",
+        input: text,
+      },
+      { timeout: 120000 }
+    );
 
-  const vec = res.data?.embeddings?.[0];
+    const vec = res.data?.embeddings?.[0];
 
-  // 🔥 FIX: validate dimension
-  if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
-    throw new Error("Invalid embedding vector");
+    // 🔥 VALIDATE
+    if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
+      throw new Error("Invalid embedding vector");
+    }
+
+    return vec;
+  } catch (err) {
+    console.error("❌ Embedding error:", err.message);
+    throw err;
   }
-
-  return vec;
 }
 
 // ================= TEXT =================
@@ -107,7 +116,9 @@ function buildPayload(item, type, text) {
     title: item.title || item.name,
     text,
 
-    year: item.start_date ? Number(item.start_date.slice(0, 4)) : null,
+    year: item.start_date
+      ? Number(item.start_date.slice(0, 4))
+      : null,
 
     country: item.country,
     city: item.city || item.location,
@@ -132,8 +143,10 @@ async function upsert(points) {
     });
   } catch (e) {
     console.log("⚠️ Retry Qdrant...", e.message);
-    await new Promise(r => setTimeout(r, 1000));
 
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // retry 1 lần nữa
     await qdrant.upsert(COLLECTION, {
       wait: true,
       points,
@@ -169,14 +182,11 @@ async function syncCollection(db, name) {
         points.push({
           id: qid(item._key),
 
-          // 🔥 FIX QUAN TRỌNG NHẤT
-          vector: {
-            default: vector
-          },
+          // ✅ FIX QUAN TRỌNG NHẤT (SIMPLE VECTOR)
+          vector: vector,
 
           payload,
         });
-
       } catch (err) {
         console.log("❌ Skip:", item._key, err.message);
       }
@@ -207,5 +217,6 @@ async function syncCollection(db, name) {
     console.error("❌ Sync error:", e.message);
   } finally {
     await mongo.close();
+    console.log("🔌 Mongo closed");
   }
 })();

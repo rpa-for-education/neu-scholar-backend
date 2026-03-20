@@ -172,7 +172,7 @@ export async function searchConferenceJournalByVector({
     try {
       raw = await qdrant.search(COLLECTION, {
         // 🔥 FIX CHUẨN QDRANT CLOUD
-        vector: { default: vector },
+        vector: vector,
         limit: topk * 5,
         with_payload: true,
       });
