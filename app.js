@@ -298,15 +298,31 @@ app.post("/api/ask", async (req, res) => {
       })),
     ];
 
+    // return res.json({
+    //   session_id: session_id ?? null,
+    //   status: "success",
+    //   content_markdown: result.answer,
+    //   answer: result.answer,
+    //   sources,
+    //   meta: {
+    //     domain: result.domain,
+    //   },
+    // });
     return res.json({
-      session_id: session_id ?? null,
-      status: "success",
-      content_markdown: result.answer,
-      answer: result.answer,
-      sources,
-      meta: {
-        domain: result.domain,
-      },
+      id: `msg_${Date.now()}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: model_id,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: result.answer
+          },
+          finish_reason: "stop"
+        }
+      ]
     });
 
   } catch (err) {
