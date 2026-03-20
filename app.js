@@ -321,7 +321,8 @@ app.post("/api/ask", async (req, res) => {
 });
 
 app.post("/ask", (req, res) => {
-  return app._router.handle(req, res, () => {});
+  req.url = "/api/ask";
+  app._router.handle(req, res);
 });
 
 // ================= METADATA =================
