@@ -116,18 +116,49 @@ async function runAgentFull(req, question, model_id, topk) {
 
 // ================= API =================
 
-// NORMAL
 app.post("/api/agent", async (req, res) => {
-  try {
-    const { question, model_id = "qwen3-8b", topk = 5 } = req.body;
+  const start = Date.now();
 
-    if (!question) {
+  try {
+    const {
+      question,
+      model_id = "qwen3-8b",
+      topk = 5,
+      session_id
+    } = req.body;
+
+    if (!question || !question.trim()) {
       return res.status(400).json({ error: "Missing question" });
     }
 
     const result = await runAgentFull(req, question, model_id, topk);
 
-    res.json(result);
+    // ✅ optional: log Mongo giống code cũ
+    try {
+      const col = await getCollection("chatlogs");
+      await col.insertOne({
+        question,
+        answer: result.answer,
+        domain: result.domain,
+        model_id,
+        session_id,
+        createdAt: new Date(),
+        responseTimeMs: Date.now() - start
+      });
+    } catch (e) {
+      console.warn("⚠️ Log DB fail:", e.message);
+    }
+
+    res.json({
+      model_id,
+      answer: result.answer,
+      retrieved: {
+        conferences: result.conferences,
+        journals: result.journals
+      },
+      domain: result.domain,
+      responseTimeMs: Date.now() - start
+    });
 
   } catch (err) {
     console.error("❌ /api/agent error:", err);
@@ -215,19 +246,70 @@ app.post("/api/agent/stream", async (req, res) => {
 
 // AI PORTAL
 app.post("/api/ask", async (req, res) => {
+  let body;
+
   try {
-    const { prompt } = req.body;
+    body = req.body;
+  } catch {
+    return res.status(400).json({
+      session_id: null,
+      status: "error",
+      error_code: "INVALID_JSON",
+      error_message: "Payload không phải JSON hợp lệ",
+    });
+  }
 
-    const result = await runAgentFull(req, prompt, "qwen3-8b", 5);
+  const { session_id, model_id, user, prompt } = body;
+  const question = prompt || body.question;
 
-    res.json({
+  if (!question || !String(question).trim()) {
+    return res.status(400).json({
+      session_id: session_id ?? null,
+      status: "error",
+      error_code: "INVALID_REQUEST",
+      error_message: "Thiếu prompt hoặc question",
+    });
+  }
+
+  try {
+    const topk = Number(body.topk) || 5;
+    const m = model_id || "qwen3-8b";
+
+    const result = await runAgentFull(req, question, m, topk);
+
+    // ✅ build sources giống code cũ
+    const sources = [
+      ...result.journals.map((j) => ({
+        type: "journal",
+        title: j.title || j.name,
+        publisher: j.publisher,
+      })),
+      ...result.conferences.map((c) => ({
+        type: "conference",
+        title: c.name || c.title,
+        location: c.country || c.city,
+      })),
+    ].filter((s) => s.title);
+
+    return res.json({
+      session_id: session_id ?? null,
       status: "success",
       content_markdown: result.answer,
-      sources: [...result.journals, ...result.conferences]
+      answer: result.answer,
+      sources,
+      meta: {
+        response_time_ms: null,
+        domain: result.domain,
+      },
     });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ ASK ERROR:", err);
+    return res.status(500).json({
+      session_id: session_id ?? null,
+      status: "error",
+      error_message: err?.message || "Internal server error",
+    });
   }
 });
 
