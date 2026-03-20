@@ -320,6 +320,10 @@ app.post("/api/ask", async (req, res) => {
   }
 });
 
+app.post("/ask", (req, res) => {
+  return app._router.handle(req, res, () => {});
+});
+
 // ================= METADATA =================
 const MODEL_META = {
   "qwen3-8b": {
