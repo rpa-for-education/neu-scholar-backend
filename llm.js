@@ -71,6 +71,7 @@ export async function callLLM(prompt, model_id = DEFAULT_MODEL_ID) {
     console.error("❌ LLM error:", err.message);
     return {
       provider: "ollama",
+      model_id: model_id || DEFAULT_MODEL_ID,
       model,
       answer: "",
       error: err.message,
