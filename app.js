@@ -241,13 +241,26 @@ const MODEL_META = {
 
 const METADATA_DATA = {
   name: "Hội thảo, Tạp chí",
-  description: "Tìm kiếm, hỏi đáp, tổng hợp các cơ hội công bố các sản phẩm khoa học trên các Hội thảo, Tạp chí,... trong nước và quốc tế uy tín nhằm phục vụ hoạt động nghiên cứu khoa học của cán bộ, giảng viên, học viên,... của Đại học Kinh tế Quốc dân",
-  version: "2.0.0",
+  description:
+    "Tìm kiếm, hỏi đáp, tổng hợp các cơ hội công bố các sản phẩm khoa học trên các Hội thảo, Tạp chí,... trong nước và quốc tế uy tín nhằm phục vụ hoạt động nghiên cứu khoa học của cán bộ, giảng viên, học viên,... của Đại học Kinh tế Quốc dân",
+  version: "1.2.0",
   developer: "Nhóm thầy V Huy, V Minh, X Lâm",
-  default_model: "qwen3-8b",
+  capabilities: ["search", "explain", "summarize"],
+  sample_prompts: [
+    "Hội thảo liên quan tới các công nghệ mới nổi như AI, Big Data, BlockChain, v.v...?",
+    "Các hội thảo quốc tế được tổ chức tại Trung Quốc trong năm 2026?",
+    "Tạp chí phù hợp với lĩnh vực Hệ thống thông tin quản lý?",
+    "Danh sách các tạp chí phù hợp với lĩnh vực Kinh tế bền vững?",
+  ],
+  provided_data_types: [
+    { type: "conferences", description: "Danh sách hội thảo trong nước và quốc tế mà NEU Research Agent đang lưu trữ" },
+    { type: "journals", description: "Danh sách tạp chí trong nước và quốc tế mà NEU Research Agent đang lưu trữ" },
+  ],
+  contact: "kcntt@neu.edu.vn",
+  status: "active",
 };
 
-app.get("/v1/metadata", (req, res) => {
+app.get("/api/metadata", (req, res) => {
   res.json({
     ...METADATA_DATA,
     supported_models: Object.keys(modelMap),
