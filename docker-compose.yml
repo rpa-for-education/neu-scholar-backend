@@ -14,25 +14,25 @@ services:
       - "8014:8014"
     depends_on:
       - qdrant
+      - ollama
     environment:
       - PORT=8014
 
-      # ✅ Qdrant (internal docker network)
+      # Qdrant
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_API_KEY=
 
-      # ✅ MongoDB
-      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
+      # MongoDB
+      - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 
-      # ✅ Session
+      # Session
       - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
 
-      # 🔥 FIX OLLAMA (quan trọng)
-      # Mac + Docker → phải dùng host.docker.internal
-      - OLLAMA_BASE_URL=http://10.2.13.58:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
-      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:8b}
+      # 🔥 FIX OLLAMA → gọi nội bộ Docker
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen3:8b
+      - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - USE_OLLAMA_EMBEDDING=true
 
     restart: unless-stopped
@@ -40,12 +40,12 @@ services:
       - neu-scholar-net
 
   # ==========================
-  # 🔥 QDRANT (FIX VERSION)
+  # 🔥 QDRANT
   # ==========================
   qdrant:
-    image: qdrant/qdrant:latest   # ✅ FIX: dùng latest (>=1.8)
+    image: qdrant/qdrant:latest
     container_name: neu-qdrant
-    platform: linux/amd64         # ✅ Apple Silicon fix
+    platform: linux/amd64
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -55,11 +55,26 @@ services:
     networks:
       - neu-scholar-net
 
+  # ==========================
+  # 🔥 OLLAMA (QUAN TRỌNG NHẤT)
+  # ==========================
+  ollama:
+    image: ollama/ollama
+    container_name: neu-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - neu-scholar-net
+
 # ==========================
 # 💾 VOLUME
 # ==========================
 volumes:
   qdrant_data:
+  ollama_data:
 
 # ==========================
 # 🌐 NETWORK

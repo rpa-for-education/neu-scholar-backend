@@ -15,7 +15,7 @@ const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const COLLECTION = "neu-scholar";
 
 // 🔥 embedding API của bạn
-const EMBEDDING_API = "https://research.neu.edu.vn/ollama/api/embed";
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 
 // 🔥 FIX CHUẨN
 const VECTOR_SIZE = 4096;
@@ -85,7 +85,7 @@ async function ensureCollection() {
 async function embed(text) {
   try {
     const res = await axios.post(
-      EMBEDDING_API,
+      `${OLLAMA_BASE}/api/embed`,
       {
         model: "qwen3-embedding:8b",
         input: text,
@@ -95,9 +95,7 @@ async function embed(text) {
 
     const vec = res.data?.embeddings?.[0];
 
-    // 🔥 VALIDATE
-    if (!vec || !Array.isArray(vec) || vec.length !== VECTOR_SIZE) {
-      console.error("❌ Invalid vector length:", vec?.length);
+    if (!vec || !Array.isArray(vec) || vec.length !== 4096) {
       throw new Error("Invalid embedding vector");
     }
 
