@@ -2,7 +2,7 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import fs from "fs/promises";
-import { fileURLToPath } from "url";
+import { chromium } from "playwright";
 import { getDb } from "../db/mongo.js";
 
 /* ================= CONFIG ================= */
@@ -10,32 +10,16 @@ const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
-/* ================= COUNTRY MAP (EMBED) ================= */
+/* ================= COUNTRY MAP ================= */
 const COUNTRY_NAME_TO_ISO = {
-  "italy": "IT",
-  "france": "FR",
-  "china": "CN",
-  "vietnam": "VN",
-  "united states": "US",
-  "usa": "US",
-  "uk": "GB",
-  "united kingdom": "GB",
-  "germany": "DE",
-  "japan": "JP",
-  "spain": "ES",
-  "canada": "CA",
-  "peru": "PE",
-  "qatar": "QA",
-  "india": "IN",
-  "netherlands": "NL",
-  "switzerland": "CH",
-  "australia": "AU",
-  "singapore": "SG"
+  "italy": "IT","france": "FR","china": "CN","vietnam": "VN",
+  "united states": "US","usa": "US","uk": "GB","united kingdom": "GB",
+  "germany": "DE","japan": "JP","spain": "ES","canada": "CA",
+  "peru": "PE","qatar": "QA","india": "IN","netherlands": "NL",
+  "switzerland": "CH","australia": "AU","singapore": "SG"
 };
 
-/* ================= PATH (CHUẨN 100% DOCKER SAFE) ================= */
-
-// 👉 luôn resolve theo file hiện tại → không phụ thuộc WORKDIR
+/* ================= PATH ================= */
 const COUNTRY_FILE = new URL("./scripts/countryInfo.txt", import.meta.url);
 const CITY_FILE = new URL("./scripts/cities15000.txt", import.meta.url);
 
@@ -43,6 +27,7 @@ const CITY_FILE = new URL("./scripts/cities15000.txt", import.meta.url);
 let geoMap = new Map();
 let ISO_TO_COUNTRY = {};
 let ISO_TO_CONTINENT = {};
+let browser;
 
 /* ================= HELPER ================= */
 function clean(s = "") {
@@ -50,27 +35,22 @@ function clean(s = "") {
 }
 
 function titleCase(s = "") {
-  return s
-    .split(" ")
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return s.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
-/* ================= SAFE READ (ANTI CRASH) ================= */
 async function safeRead(fileUrl) {
   try {
     return await fs.readFile(fileUrl, "utf8");
-  } catch (err) {
+  } catch {
     console.error("❌ Missing file:", fileUrl.href);
     return "";
   }
 }
 
-/* ================= INIT GEO ================= */
+/* ================= GEO ================= */
 async function initGeo() {
   console.log("🌍 Loading Geo...");
 
-  // 👉 load country
   const countryText = await safeRead(COUNTRY_FILE);
 
   countryText.split("\n").forEach(line => {
@@ -86,21 +66,15 @@ async function initGeo() {
     ISO_TO_COUNTRY[iso] = name;
 
     ISO_TO_CONTINENT[iso] = {
-      AF: "Africa",
-      AS: "Asia",
-      EU: "Europe",
-      NA: "North America",
-      SA: "South America",
-      OC: "Oceania"
+      AF: "Africa", AS: "Asia", EU: "Europe",
+      NA: "North America", SA: "South America", OC: "Oceania"
     }[continent] || null;
   });
 
-  // 👉 load city
   const geoText = await safeRead(CITY_FILE);
 
   geoText.split("\n").forEach(line => {
     const cols = line.split("\t");
-
     if (!cols || cols.length < 9) return;
 
     const city = clean(cols[1]);
@@ -124,15 +98,10 @@ function extractFromLocation(location) {
   const parts = location.split(",").map(s => s.trim());
   const cityKey = clean(parts[0]);
 
-  // match city
-  if (geoMap.has(cityKey)) {
-    return geoMap.get(cityKey);
-  }
+  if (geoMap.has(cityKey)) return geoMap.get(cityKey);
 
-  // fallback country
   for (let i = parts.length - 1; i >= 1; i--) {
     const key = clean(parts[i]);
-
     if (COUNTRY_NAME_TO_ISO[key]) {
       return {
         city: titleCase(parts[0]),
@@ -158,16 +127,12 @@ function extractCFP($) {
   const parts = text.split(/(?<=\.)\s+/);
 
   const good = parts.filter(p =>
-    p.length > 80 &&
-    !/login|easychair/i.test(p)
+    p.length > 80 && !/login|easychair/i.test(p)
   );
 
   let cfp = good.join("\n");
 
-  if (cfp.length > MAX_CFP_LENGTH) {
-    cfp = cfp.slice(0, MAX_CFP_LENGTH);
-  }
-
+  if (cfp.length > MAX_CFP_LENGTH) cfp = cfp.slice(0, MAX_CFP_LENGTH);
   if (cfp.length < 200) return null;
 
   return cfp.trim();
@@ -184,7 +149,6 @@ function extractDeadline(text) {
 /* ================= PARSER ================= */
 async function parseEasyChair(doc, html) {
   const $ = cheerio.load(html);
-
   const bodyText = $("body").text();
 
   return {
@@ -194,9 +158,67 @@ async function parseEasyChair(doc, html) {
   };
 }
 
+/* ================= AXIOS ================= */
+async function fetchAxios(url) {
+  try {
+    const res = await axios.get(url, {
+      timeout: TIMEOUT,
+      headers: {
+        "User-Agent": "Mozilla/5.0 Chrome/120",
+        "Accept": "text/html",
+      },
+      validateStatus: () => true
+    });
+
+    if (!res.data || res.status >= 400 || res.data.length < 1000) {
+      throw new Error("Bad HTML");
+    }
+
+    return res.data;
+  } catch {
+    return null;
+  }
+}
+
+/* ================= PLAYWRIGHT ================= */
+async function getBrowser() {
+  if (!browser) {
+    browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  }
+  return browser;
+}
+
+async function fetchPlaywright(url) {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+
+  try {
+    await page.goto(url, { timeout: 30000 });
+    const html = await page.content();
+    await page.close();
+    return html;
+  } catch {
+    await page.close();
+    return null;
+  }
+}
+
+/* ================= SMART FETCH ================= */
+async function smartFetch(url) {
+  let html = await fetchAxios(url);
+  if (html) return { html, source: "axios" };
+
+  console.log("⚠️ Fallback Playwright:", url);
+
+  html = await fetchPlaywright(url);
+  if (html) return { html, source: "playwright" };
+
+  return { html: null, source: "fail" };
+}
+
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH FINAL (DOCKER SAFE)");
+  console.log("🚀 ENRICH SMART CRAWLER");
 
   await initGeo();
 
@@ -212,15 +234,21 @@ async function run() {
   for (const doc of docs) {
     queue.add(async () => {
       try {
-        const res = await axios.get(doc.url, { timeout: TIMEOUT });
+        const { html, source } = await smartFetch(doc.url);
 
-        const data = await parseEasyChair(doc, res.data);
+        if (!html) {
+          console.log("❌ FAIL:", doc.url);
+          return;
+        }
+
+        const data = await parseEasyChair(doc, html);
 
         await col.updateOne(
           { _id: doc._id },
           {
             $set: {
               ...data,
+              crawl_source: source,
               status: "done",
               updated_time: new Date().toISOString()
             }
@@ -228,9 +256,9 @@ async function run() {
         );
 
         done++;
-        console.log(`✅ ${done}`);
-      } catch (err) {
-        console.log("❌", doc.url);
+        console.log(`✅ ${done} (${source})`);
+      } catch {
+        console.log("❌ ERROR:", doc.url);
       }
     });
   }
