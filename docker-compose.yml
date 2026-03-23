@@ -48,7 +48,7 @@ services:
       - SESSION_SECRET=neu-secret
 
       # ⚠️ bạn đang dùng proxy → OK
-      - OLLAMA_BASE_URL=https://research.neu.edu.vn/ollama
+      - OLLAMA_BASE_URL=http://10.2.13.58:11434
       - OLLAMA_MODEL=qwen3:8b
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - EMBEDDING_MODE=proxy
