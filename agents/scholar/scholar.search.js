@@ -1,11 +1,14 @@
-// search.js
 import axios from "axios";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import {
   detectDomain,
   analyzeQuestion,
-  finalizeResults
+  finalizeResults,
+  applyFilters
 } from "./agentReasoning.js";
+
+import { getDb } from "../../db/mongo.js";
+import { expandQuery } from "./scholar.queryExpansion.js";
 
 import "dotenv/config";
 
@@ -29,138 +32,74 @@ const qdrant = new QdrantClient({
 // ================= EMBED =================
 export async function embedText(text, retry = 2) {
   try {
-    const res = await axios.post(
-      `${OLLAMA_BASE}/api/embed`,
-      {
-        model: OLLAMA_EMBED_MODEL,
-        input: text,
-      },
-      { timeout: 60000 }
-    );
+    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
+      model: OLLAMA_EMBED_MODEL,
+      input: text,
+    });
 
     const vec = res.data?.embeddings?.[0];
 
-    if (!vec || !Array.isArray(vec) || vec.length !== VECTOR_SIZE) {
-      throw new Error(`Invalid embedding: ${vec?.length}`);
+    if (!vec || vec.length !== VECTOR_SIZE) {
+      throw new Error("Invalid embedding");
     }
 
     return vec;
 
   } catch (err) {
     if (retry > 0) {
-      console.log("⚠️ Retry embedding...");
       await new Promise(r => setTimeout(r, 800));
       return embedText(text, retry - 1);
     }
 
     console.error("❌ Embedding error:", err.message);
-    console.error("👉 OLLAMA_BASE:", OLLAMA_BASE);
     return null;
   }
 }
 
-// ================= HYBRID SCORE =================
-function semanticScore(text, query, baseScore) {
-  if (!text) return baseScore;
+// ================= KEYWORD SCORE =================
+function keywordMatchScore(text, query) {
+  if (!text) return 0;
 
   const words = query.toLowerCase().split(/\s+/);
   const t = text.toLowerCase();
 
-  let match = 0;
+  let score = 0;
   for (const w of words) {
-    if (t.includes(w)) match++;
+    if (t.includes(w)) score++;
   }
 
-  return baseScore * 0.7 + (match / words.length) * 0.3;
+  return score / words.length;
 }
 
-// ================= ACADEMIC BOOST =================
-function academicBoost(item, analysis) {
-  let score = item.score || 0;
+// ================= INTENT BOOST =================
+function intentBoost(item, analysis) {
+  let boost = 0;
 
-  if (item.quartile === "Q1") score += 0.3;
-  if (item.quartile === "Q2") score += 0.15;
-
-  if (item.h_index > 100) score += 0.2;
-  if (item.sjr > 2) score += 0.2;
-
-  if (analysis.wantsRecommendation) {
-    if (item.quartile === "Q1") score += 0.2;
+  if (analysis.wantsRanking && item.sjr_best_quartile === "Q1") {
+    boost += 0.3;
   }
 
-  return score;
-}
-
-// ================= FILTER =================
-function applyAcademicFilter(conferences, journals, analysis) {
-  if (analysis.wantsQuartile) {
-    journals = journals.filter(j =>
-      ["Q1", "Q2"].includes((j.quartile || "").toUpperCase())
-    );
+  if (analysis.wantsDeadline && item.deadline) {
+    boost += 0.2;
   }
 
   if (analysis.fieldHint) {
     const f = analysis.fieldHint.toLowerCase();
+    const text = (
+      item.topics ||
+      item.categories ||
+      item.areas ||
+      ""
+    ).toLowerCase();
 
-    journals = journals.filter(j =>
-      (j.areas || "").toLowerCase().includes(f) ||
-      (j.categories || "").toLowerCase().includes(f)
-    );
-
-    conferences = conferences.filter(c =>
-      (c.topics || "").toLowerCase().includes(f)
-    );
+    if (text.includes(f)) boost += 0.4;
   }
 
-  if (analysis.wantsRecent) {
-    const year = Number(analysis.wantsRecent[0]);
-
-    conferences = conferences.filter(c =>
-      Number(c.year) === year
-    );
+  if (analysis.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
+    boost += 0.4;
   }
 
-  if (analysis.wantsCountryCode) {
-    const code = analysis.wantsCountryCode.toLowerCase();
-
-    conferences = conferences.filter(c =>
-      (c.country || "").toLowerCase().includes(code)
-    );
-
-    journals = journals.filter(j =>
-      (j.country || "").toLowerCase().includes(code)
-    );
-  }
-
-  if (analysis.wantsContinent) {
-    const cont = analysis.wantsContinent.toLowerCase();
-
-    conferences = conferences.filter(c =>
-      (c.continent || "").toLowerCase().includes(cont)
-    );
-  }
-
-  return { conferences, journals };
-}
-
-// ================= SORT =================
-function rankAcademic(items, type = "journal") {
-  if (type === "journal") {
-    return items.sort((a, b) => {
-      return (
-        (b.score || 0) - (a.score || 0) ||
-        (b.h_index || 0) - (a.h_index || 0) ||
-        (b.sjr || 0) - (a.sjr || 0)
-      );
-    });
-  }
-
-  return items.sort((a, b) => {
-    const dA = new Date(a.deadline || "2100");
-    const dB = new Date(b.deadline || "2100");
-
-    return dA - dB;
-  });
+  return boost;
 }
 
 // ================= MAIN =================
@@ -169,69 +108,98 @@ export async function searchConferenceJournalByVector({
   topk = 10,
 }) {
   try {
-    if (!question) {
-      return { conferences: [], journals: [], domain: "empty" };
-    }
-
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
 
-    const vector = await embedText(question);
+    // ================= MULTI QUERY =================
+    const queries = await expandQuery(question);
 
-    if (!vector) {
-      return { conferences: [], journals: [], domain: "error" };
-    }
+    let allResults = [];
 
-    let raw = [];
+    for (const q of queries) {
+      const vector = await embedText(q);
+      if (!vector) continue;
 
-    try {
-      raw = await qdrant.search(COLLECTION, {
-        vector: vector,
-        limit: topk * 5,
-        with_payload: true,
-      });
-    } catch (err) {
-      console.error("❌ Qdrant error:", err.response?.data || err.message);
-      return { conferences: [], journals: [], domain: "error" };
+      try {
+        const raw = await qdrant.search(COLLECTION, {
+          vector,
+          limit: topk * 3,
+          with_payload: true,
+        });
+
+        allResults.push(...raw);
+      } catch (err) {
+        console.error("❌ Qdrant error:", err.message);
+      }
     }
 
     let conferences = [];
     let journals = [];
 
-    for (const r of raw) {
+    // ================= VECTOR =================
+    for (const r of allResults) {
       const p = r.payload || {};
 
-      const base = {
+      const item = {
         ...p,
-        score: semanticScore(p.text, question, r.score),
+        score: (r.score || 0) + intentBoost(p, analysis),
       };
 
       if (p.type === "conference" || p.name) {
-        conferences.push(base);
+        conferences.push(item);
       } else if (p.type === "journal" || p.title) {
-        journals.push(base);
+        journals.push(item);
       }
     }
 
-    ({ conferences, journals } = applyAcademicFilter(
-      conferences,
-      journals,
-      analysis
-    ));
+    // ================= HYBRID (Mongo) =================
+    try {
+      const db = await getDb();
+      const regex = new RegExp(question, "i");
 
-    journals = journals.map(j => ({
-      ...j,
-      score: academicBoost(j, analysis),
-    }));
+      const mongoConfs = await db.collection("conference")
+        .find({ name: regex })
+        .limit(10)
+        .toArray();
 
-    journals = rankAcademic(journals, "journal");
-    conferences = rankAcademic(conferences, "conference");
+      const mongoJournals = await db.collection("journal")
+        .find({ title: regex })
+        .limit(10)
+        .toArray();
+
+      conferences = [
+        ...conferences,
+        ...mongoConfs.map(c => ({
+          ...c,
+          score:
+            keywordMatchScore(c.name + " " + (c.topics || ""), question) +
+            intentBoost(c, analysis),
+        }))
+      ];
+
+      journals = [
+        ...journals,
+        ...mongoJournals.map(j => ({
+          ...j,
+          score:
+            keywordMatchScore(j.title + " " + (j.categories || ""), question) +
+            intentBoost(j, analysis),
+        }))
+      ];
+
+    } catch (err) {
+      console.warn("⚠️ Mongo fallback failed:", err.message);
+    }
+
+    // ================= APPLY FILTERS (🔥 giữ logic của bạn) =================
+    conferences = applyFilters(conferences, analysis, "conference");
+    journals = applyFilters(journals, analysis, "journal");
 
     return {
       domain,
       analysis,
-      conferences: finalizeResults(conferences, topk),
-      journals: finalizeResults(journals, topk),
+      conferences: finalizeResults(conferences, topk * 2),
+      journals: finalizeResults(journals, topk * 2),
     };
 
   } catch (err) {
