@@ -25,7 +25,6 @@ services:
     depends_on:
       - qdrant
 
-    # ✅ FIX: wait Qdrant thật sự ready (không dùng sleep)
     command: >
       sh -c "
       echo '⏳ Waiting for Qdrant...' &&
@@ -42,14 +41,11 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
 
-      # ✅ Mongo giữ nguyên
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 
-      # ✅ FIX QUAN TRỌNG: dùng host.docker.internal
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
 
-      # (không cần nhưng giữ cũng ok)
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
@@ -73,7 +69,6 @@ services:
     depends_on:
       - qdrant
 
-    # ✅ giữ sleep cho backend (sync xong là đủ)
     command: >
       sh -c "
       echo '⏳ Waiting for data (sync)...' &&
@@ -92,7 +87,6 @@ services:
 
       - SESSION_SECRET=neu-secret
 
-      # ✅ FIX giống sync
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
 
       - OLLAMA_MODEL=qwen3:8b
@@ -100,6 +94,54 @@ services:
 
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
+    networks:
+      - neu-net
+
+  # ===========================================
+  # 🔥 NEW SERVICE: AI CRAWLER (KHÔNG ẢNH HƯỞNG GÌ KHÁC)
+  # ===========================================
+  crawler-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+
+    container_name: neu-crawler-ai
+
+    depends_on:
+      - qdrant
+
+    command: >
+      sh -c "
+      echo '🚀 AI Crawler started...';
+      while true; do
+
+        echo '🌐 Crawl EasyChair...';
+        node services/crawl_easychair_fast.js || echo '⚠️ Crawl fail';
+
+        echo '🤖 Enrich AI (Ollama)...';
+        node services/enrich_easychair_ai.js || echo '⚠️ Enrich fail';
+
+        echo '😴 Sleep 6 hours...';
+        sleep 21600;
+
+      done
+      "
+
+    environment:
+      - NODE_ENV=production
+
+      # dùng lại Mongo của bạn
+      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
+      - DB_NAME=${MONGODB_DB:-fitneu}
+
+      # dùng lại Ollama
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
