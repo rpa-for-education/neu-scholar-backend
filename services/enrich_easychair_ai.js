@@ -21,27 +21,61 @@ function cleanText(text) {
     .trim();
 }
 
+/* ================= DATE PARSER ================= */
+function parseDateToISO(text) {
+  if (!text) return null;
+
+  const months = {
+    january: "01", february: "02", march: "03", april: "04",
+    may: "05", june: "06", july: "07", august: "08",
+    september: "09", october: "10", november: "11", december: "12"
+  };
+
+  const match = text.match(
+    /([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/
+  );
+
+  if (!match) return null;
+
+  const month = months[match[1].toLowerCase()];
+  const day = match[2].padStart(2, "0");
+  const year = match[3];
+
+  if (!month) return null;
+
+  return `${year}-${month}-${day}`;
+}
+
+/* ================= DEADLINE ================= */
+function extractDeadline(text) {
+  const match = text.match(
+    /(deadline|due|submission).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+  );
+
+  if (!match) return null;
+
+  return parseDateToISO(match[2]);
+}
+
+/* ================= LINK ================= */
 function cleanLink(link) {
   if (!link) return null;
 
-  const match = link.match(/https?:\/\/[^\s]+/);
+  const match = link.match(/https?:\/\/[^\s"]+/);
   if (!match) return null;
 
   let clean = match[0];
 
-  // 🔥 fix lỗi dính chữ kiểu "...som2025Abstract"
-  clean = clean.replace(/(Abstract|Submission).*$/i, "");
+  const confMatch = clean.match(/conf=[a-zA-Z0-9_-]+/);
+
+  if (confMatch) {
+    return `https://easychair.org/conferences/?${confMatch[0]}`;
+  }
 
   return clean;
 }
 
-function extractDeadline(text) {
-  const match = text.match(
-    /(deadline|due).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
-  );
-  return match ? match[2] : null;
-}
-
+/* ================= TOPICS ================= */
 function extractTopics(text) {
   const topicMatch = text.match(/theme:(.*?)(\.|\n)/i);
 
@@ -70,14 +104,19 @@ function parseEasyChair(html) {
     }
   });
 
-  cfp_text = cleanText(cfp_text).slice(0, 5000);
+  cfp_text = cleanText(cfp_text);
+
+  // 🔥 tránh bị cắt quá sớm
+  if (cfp_text.length > 20000) {
+    cfp_text = cfp_text.slice(0, 20000);
+  }
 
   let submission_link = null;
 
   $("a").each((_, el) => {
     const href = $(el).attr("href");
 
-    if (href && href.includes("easychair.org/conferences")) {
+    if (!submission_link && href && href.includes("conf=")) {
       submission_link = cleanLink(href);
     }
   });
@@ -101,15 +140,15 @@ async function callOllama(text) {
       {
         model: MODEL,
         prompt: `
-Extract:
-- cfp_text
-- deadline
-- topics (array)
-
-Return JSON only.
+Extract JSON:
+{
+  cfp_text,
+  deadline (YYYY-MM-DD),
+  topics (array)
+}
 
 Text:
-${text.slice(0, 6000)}
+${text.slice(0, 8000)}
         `,
         stream: false,
       },
@@ -130,7 +169,7 @@ ${text.slice(0, 6000)}
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FULL (Rule + AI fallback)...");
+  console.log("🚀 AI Enrich FULL (ISO deadline + parser)...");
 
   const db = await getDb();
   const col = db.collection("conference");
@@ -160,7 +199,6 @@ async function run() {
 
         const html = res.data;
 
-        /* ================= RULE PARSER ================= */
         let data = parseEasyChair(html);
 
         if (data.cfp_text && data.cfp_text.length > 500) {
@@ -175,7 +213,6 @@ async function run() {
           }
         }
 
-        /* ================= FINAL CLEAN ================= */
         data.cfp_text = cleanText(data.cfp_text || "");
 
         await col.updateOne(
