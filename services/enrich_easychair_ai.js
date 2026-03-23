@@ -6,35 +6,67 @@ import { getDb } from "../db/mongo.js";
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
 const TIMEOUT = 20000;
+const MAX_CFP_LENGTH = 30000;
 
-const OLLAMA_URL =
-  process.env.OLLAMA_BASE_URL + "/api/generate";
-
-const MODEL = "qwen3:8b";
-
-/* ================= UTILS ================= */
+/* ================= CLEAN ================= */
 function cleanText(text) {
   return text
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .replace(/EasyChair.*?Log in/i, "")
     .replace(/User Guide.*?Watchlist/i, "")
     .trim();
 }
 
-/* ================= DATE PARSER ================= */
-function parseDateToISO(text) {
-  if (!text) return null;
+/* ================= TRIM CFP ================= */
+function trimCFP(text) {
+  const stopKeywords = [
+    "keynote speaker",
+    "committee",
+    "editor",
+    "journal",
+    "bank",
+    "registration fee",
+    "abstracting/indexing",
+  ];
 
+  let lower = text.toLowerCase();
+  let cutIndex = text.length;
+
+  for (const key of stopKeywords) {
+    const idx = lower.indexOf(key);
+    if (idx !== -1 && idx < cutIndex) {
+      cutIndex = idx;
+    }
+  }
+
+  return text.slice(0, cutIndex).trim();
+}
+
+/* ================= SAFE CUT ================= */
+function safeCut(text) {
+  if (text.length <= MAX_CFP_LENGTH) return text;
+
+  let cut = text.slice(0, MAX_CFP_LENGTH);
+
+  const lastDot = cut.lastIndexOf(".");
+  if (lastDot > 1000) {
+    cut = cut.slice(0, lastDot + 1);
+  }
+
+  return cut;
+}
+
+/* ================= DATE ================= */
+function parseDateToISO(text) {
   const months = {
-    january: "01", february: "02", march: "03", april: "04",
-    may: "05", june: "06", july: "07", august: "08",
-    september: "09", october: "10", november: "11", december: "12"
+    january: "01", february: "02", march: "03",
+    april: "04", may: "05", june: "06",
+    july: "07", august: "08", september: "09",
+    october: "10", november: "11", december: "12"
   };
 
-  const match = text.match(
-    /([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/
-  );
-
+  const match = text.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
   if (!match) return null;
 
   const month = months[match[1].toLowerCase()];
@@ -46,48 +78,69 @@ function parseDateToISO(text) {
   return `${year}-${month}-${day}`;
 }
 
-/* ================= DEADLINE ================= */
 function extractDeadline(text) {
   const match = text.match(
     /(deadline|due|submission).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
   );
 
-  if (!match) return null;
+  return match ? parseDateToISO(match[2]) : null;
+}
 
-  return parseDateToISO(match[2]);
+/* ================= LOCATION ================= */
+function extractLocation(text) {
+  const match = text.match(
+    /in\s+([A-Za-z'’\- ]+),\s*([A-Za-z ]+)/
+  );
+
+  if (!match) return { city: null, country: null };
+
+  return {
+    city: match[1].trim(),
+    country: match[2].trim(),
+  };
 }
 
 /* ================= LINK ================= */
 function cleanLink(link) {
-  if (!link) return null;
-
-  const match = link.match(/https?:\/\/[^\s"]+/);
+  const match = link?.match(/https?:\/\/[^\s"]+/);
   if (!match) return null;
 
-  let clean = match[0];
+  const confMatch = match[0].match(/conf=[a-zA-Z0-9_-]+/);
 
-  const confMatch = clean.match(/conf=[a-zA-Z0-9_-]+/);
-
-  if (confMatch) {
-    return `https://easychair.org/conferences/?${confMatch[0]}`;
-  }
-
-  return clean;
+  return confMatch
+    ? `https://easychair.org/conferences/?${confMatch[0]}`
+    : match[0];
 }
 
 /* ================= TOPICS ================= */
 function extractTopics(text) {
-  const topicMatch = text.match(/theme:(.*?)(\.|\n)/i);
+  const match = text.match(/theme:(.*?)(\.|\n)/i);
 
-  if (!topicMatch) return [];
+  if (!match) return [];
 
-  return topicMatch[1]
+  return match[1]
     .split(/,|—|-/)
     .map((t) => t.trim())
     .filter(Boolean);
 }
 
-/* ================= RULE PARSER ================= */
+/* ================= RANK ================= */
+function rankConference(text) {
+  let score = 0;
+
+  if (/ieee/i.test(text)) score += 3;
+  if (/springer/i.test(text)) score += 3;
+  if (/scopus/i.test(text)) score += 2;
+  if (/wos|web of science/i.test(text)) score += 2;
+  if (/indexed/i.test(text)) score += 1;
+
+  if (score >= 7) return "A*";
+  if (score >= 5) return "A";
+  if (score >= 3) return "B";
+  return "C";
+}
+
+/* ================= PARSER ================= */
 function parseEasyChair(html) {
   const $ = cheerio.load(html);
 
@@ -99,77 +152,40 @@ function parseEasyChair(html) {
 
   $("p, h1, h2, h3").each((_, el) => {
     const t = $(el).text().trim();
-    if (t.length > 80) {
-      cfp_text += t + "\n";
-    }
+    if (t.length > 80) cfp_text += t + "\n";
   });
 
-  cfp_text = cleanText(cfp_text);
-
-  // 🔥 tránh bị cắt quá sớm
-  if (cfp_text.length > 20000) {
-    cfp_text = cfp_text.slice(0, 20000);
-  }
+  cfp_text = trimCFP(cleanText(cfp_text));
+  cfp_text = safeCut(cfp_text);
 
   let submission_link = null;
 
   $("a").each((_, el) => {
     const href = $(el).attr("href");
 
-    if (!submission_link && href && href.includes("conf=")) {
+    if (!submission_link && href?.includes("conf=")) {
       submission_link = cleanLink(href);
     }
   });
 
   const deadline = extractDeadline(bodyText);
   const topics = extractTopics(bodyText);
+  const location = extractLocation(bodyText);
+  const rank = rankConference(bodyText);
 
   return {
     cfp_text,
     submission_link,
     deadline,
     topics,
+    ...location,
+    rank,
   };
-}
-
-/* ================= OLLAMA ================= */
-async function callOllama(text) {
-  try {
-    const res = await axios.post(
-      OLLAMA_URL,
-      {
-        model: MODEL,
-        prompt: `
-Extract JSON:
-{
-  cfp_text,
-  deadline (YYYY-MM-DD),
-  topics (array)
-}
-
-Text:
-${text.slice(0, 8000)}
-        `,
-        stream: false,
-      },
-      { timeout: TIMEOUT }
-    );
-
-    const raw = res.data?.response;
-
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    return JSON.parse(jsonMatch[0]);
-  } catch (err) {
-    console.log("❌ OLLAMA error → fallback");
-    return null;
-  }
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FULL (ISO deadline + parser)...");
+  console.log("🚀 AI Enrich FINAL (30000 chars + ranking + location)...");
 
   const db = await getDb();
   const col = db.collection("conference");
@@ -199,21 +215,7 @@ async function run() {
 
         const html = res.data;
 
-        let data = parseEasyChair(html);
-
-        if (data.cfp_text && data.cfp_text.length > 500) {
-          console.log("⚡ Rule parser OK");
-        } else {
-          console.log("🤖 Using AI...");
-
-          const ai = await callOllama(html);
-
-          if (ai) {
-            data = { ...data, ...ai };
-          }
-        }
-
-        data.cfp_text = cleanText(data.cfp_text || "");
+        const data = parseEasyChair(html);
 
         await col.updateOne(
           { _id: doc._id },
