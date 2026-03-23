@@ -1,12 +1,42 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
+import fs from "fs/promises";
+import path from "path";
 import { getDb } from "../db/mongo.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
+
+/* ================= GEO DATA ================= */
+const CITY_FILE = path.resolve("scripts/cities15000.txt");
+const CONTINENT_FILE = path.resolve("scripts/country_continent.json");
+
+let geoMap = new Map();
+let continentMap = {};
+
+async function initGeo() {
+  const geoText = await fs.readFile(CITY_FILE, "utf8");
+  const lines = geoText.split("\n");
+
+  for (const line of lines) {
+    const cols = line.split("\t");
+    const city = cols[1];
+    const countryCode = cols[8];
+
+    if (city && countryCode) {
+      geoMap.set(city.toLowerCase(), countryCode);
+    }
+  }
+
+  continentMap = JSON.parse(
+    await fs.readFile(CONTINENT_FILE, "utf8")
+  );
+
+  console.log("🌍 Geo loaded:", geoMap.size);
+}
 
 /* ================= CLEAN ================= */
 function cleanText(text) {
@@ -18,14 +48,26 @@ function cleanText(text) {
     .trim();
 }
 
+/* ================= SAFE CUT ================= */
+function safeCut(text) {
+  if (text.length <= MAX_CFP_LENGTH) return text;
+
+  let cut = text.slice(0, MAX_CFP_LENGTH);
+  const lastDot = cut.lastIndexOf(".");
+
+  if (lastDot > 1000) {
+    cut = cut.slice(0, lastDot + 1);
+  }
+
+  return cut;
+}
+
 /* ================= TRIM CFP ================= */
 function trimCFP(text) {
   const stopKeywords = [
-    "keynote speaker",
     "committee",
     "editor",
     "journal",
-    "bank",
     "registration fee",
     "abstracting/indexing",
   ];
@@ -41,20 +83,6 @@ function trimCFP(text) {
   }
 
   return text.slice(0, cutIndex).trim();
-}
-
-/* ================= SAFE CUT ================= */
-function safeCut(text) {
-  if (text.length <= MAX_CFP_LENGTH) return text;
-
-  let cut = text.slice(0, MAX_CFP_LENGTH);
-
-  const lastDot = cut.lastIndexOf(".");
-  if (lastDot > 1000) {
-    cut = cut.slice(0, lastDot + 1);
-  }
-
-  return cut;
 }
 
 /* ================= DATE ================= */
@@ -73,9 +101,7 @@ function parseDateToISO(text) {
   const day = match[2].padStart(2, "0");
   const year = match[3];
 
-  if (!month) return null;
-
-  return `${year}-${month}-${day}`;
+  return month ? `${year}-${month}-${day}` : null;
 }
 
 function extractDeadline(text) {
@@ -86,17 +112,41 @@ function extractDeadline(text) {
   return match ? parseDateToISO(match[2]) : null;
 }
 
-/* ================= LOCATION ================= */
-function extractLocation(text) {
-  const match = text.match(
-    /in\s+([A-Za-z'’\- ]+),\s*([A-Za-z ]+)/
-  );
+/* ================= GEO ================= */
+function normalizeCity(s) {
+  return s
+    .replace(/\s+/g, " ")
+    .replace(/,\s*[^,]+$/, "")
+    .replace(/university|institute|college/gi, "")
+    .trim();
+}
 
-  if (!match) return { city: null, country: null };
+function extractCityCandidate(text) {
+  const patterns = [
+    /held at ([^,]+),/i,
+    /in ([A-Za-z'’\- ]+),\s*[A-Za-z ]+,\s*(?:from|on)/i,
+    /takes place in ([^,]+),/i,
+  ];
+
+  for (const regex of patterns) {
+    const match = text.match(regex);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
+function extractGeo(text) {
+  const rawCity = extractCityCandidate(text);
+  if (!rawCity) return {};
+
+  const city = normalizeCity(rawCity);
+  const code = geoMap.get(city.toLowerCase());
 
   return {
-    city: match[1].trim(),
-    country: match[2].trim(),
+    city,
+    country_code: code || null,
+    continent: code ? continentMap[code] : null,
   };
 }
 
@@ -132,7 +182,6 @@ function rankConference(text) {
   if (/springer/i.test(text)) score += 3;
   if (/scopus/i.test(text)) score += 2;
   if (/wos|web of science/i.test(text)) score += 2;
-  if (/indexed/i.test(text)) score += 1;
 
   if (score >= 7) return "A*";
   if (score >= 5) return "A";
@@ -155,14 +204,12 @@ function parseEasyChair(html) {
     if (t.length > 80) cfp_text += t + "\n";
   });
 
-  cfp_text = trimCFP(cleanText(cfp_text));
-  cfp_text = safeCut(cfp_text);
+  cfp_text = safeCut(trimCFP(cleanText(cfp_text)));
 
   let submission_link = null;
 
   $("a").each((_, el) => {
     const href = $(el).attr("href");
-
     if (!submission_link && href?.includes("conf=")) {
       submission_link = cleanLink(href);
     }
@@ -170,7 +217,7 @@ function parseEasyChair(html) {
 
   const deadline = extractDeadline(bodyText);
   const topics = extractTopics(bodyText);
-  const location = extractLocation(bodyText);
+  const geo = extractGeo(bodyText);
   const rank = rankConference(bodyText);
 
   return {
@@ -178,14 +225,16 @@ function parseEasyChair(html) {
     submission_link,
     deadline,
     topics,
-    ...location,
+    ...geo,
     rank,
   };
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FINAL (30000 chars + ranking + location)...");
+  console.log("🚀 AI Enrich FINAL (ALL-IN-ONE)...");
+
+  await initGeo();
 
   const db = await getDb();
   const col = db.collection("conference");
