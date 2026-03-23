@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getDb } from "../db/mongo.js";
+import { COUNTRY_NAME_TO_ISO } from "../scripts/country_map.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
@@ -17,341 +18,250 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
 
 const CITY_FILE = path.join(ROOT, "scripts/cities15000.txt");
-const CONTINENT_FILE = path.join(ROOT, "scripts/country_continent.json");
+const COUNTRY_FILE = path.join(ROOT, "scripts/countryInfo.txt");
 
-/* ================= GEO CACHE ================= */
-let geoMap = null;
-let continentMap = null;
-let geoLoaded = false;
+/* ================= GLOBAL ================= */
+let geoMap = new Map();
+let ISO_TO_COUNTRY = {};
+let ISO_TO_CONTINENT = {};
 
-/* ================= GEO LOADER ================= */
-async function initGeo() {
-  if (geoLoaded) return;
-
-  try {
-    console.log("🌍 Loading geo...");
-
-    const geoText = await fs.readFile(CITY_FILE, "utf8");
-    const lines = geoText.split("\n");
-
-    geoMap = new Map();
-
-    for (const line of lines) {
-      const cols = line.split("\t");
-
-      const city = cols[1];
-      const countryCode = cols[8];
-      const lat = parseFloat(cols[4]);
-      const lng = parseFloat(cols[5]);
-      const feature = cols[7];
-      const population = parseInt(cols[14] || "0");
-
-      if (!city || !countryCode) continue;
-
-      const key = city.toLowerCase();
-
-      const obj = {
-        country_code: countryCode,
-        lat,
-        lng,
-        population,
-        isCapital: feature === "PPLC",
-      };
-
-      if (!geoMap.has(key)) geoMap.set(key, []);
-      geoMap.get(key).push(obj);
-    }
-
-    continentMap = JSON.parse(
-      await fs.readFile(CONTINENT_FILE, "utf8")
-    );
-
-    geoLoaded = true;
-
-    console.log(`✅ Geo loaded: ${geoMap.size} cities`);
-  } catch (err) {
-    console.error("❌ Geo load failed:", err.message);
-    geoMap = new Map();
-    continentMap = {};
-    geoLoaded = true;
-  }
+/* ================= INIT GEO ================= */
+function clean(s = "") {
+  return s.toLowerCase().replace(/[()]/g, "").trim();
 }
 
-/* ================= GEO ================= */
-function normalizeCity(s) {
+function titleCase(s = "") {
   return s
-    .replace(/university|institute|college/gi, "")
-    .replace(/\(.*?\)/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+    .split(" ")
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
-function extractCityCandidate(text) {
-  const patterns = [
-    /held at .*? in ([A-Za-z'’\-\s]+?)(?:\(|,|\s[A-Z][a-z]+)/i,
-    /in ([A-Za-z'’\-\s]+?),\s*[A-Za-z ]+,\s*(?:from|on)/i,
-    /in ([A-Za-z'’\-\s]+?)\s+\([^)]+\)\s+[A-Za-z]+/i,
-  ];
+async function initGeo() {
+  console.log("🌍 Loading Geo...");
 
-  for (const regex of patterns) {
-    const match = text.match(regex);
-    if (match) return match[1];
+  // country
+  const countryText = await fs.readFile(COUNTRY_FILE, "utf8");
+
+  countryText.split("\n").forEach(line => {
+    if (!line || line.startsWith("#")) return;
+
+    const cols = line.split("\t");
+    const iso = cols[0];
+    const name = cols[4];
+    const continent = cols[8];
+
+    ISO_TO_COUNTRY[iso] = name;
+
+    ISO_TO_CONTINENT[iso] = {
+      AF: "Africa",
+      AS: "Asia",
+      EU: "Europe",
+      NA: "North America",
+      SA: "South America",
+      OC: "Oceania"
+    }[continent] || null;
+  });
+
+  // cities
+  const geoText = await fs.readFile(CITY_FILE, "utf8");
+
+  geoText.split("\n").forEach(line => {
+    const cols = line.split("\t");
+    const city = clean(cols[1]);
+    const countryCode = cols[8];
+
+    if (city && countryCode) {
+      geoMap.set(city, {
+        city: cols[1],
+        country_code: countryCode
+      });
+    }
+  });
+
+  console.log(`✅ Geo loaded: ${geoMap.size}`);
+}
+
+/* ================= LOCATION ================= */
+function extractFromLocation(location) {
+  if (!location) return {};
+
+  const parts = location.split(",").map(s => s.trim());
+  const cityKey = clean(parts[0]);
+
+  // GeoNames match
+  if (geoMap.has(cityKey)) {
+    return geoMap.get(cityKey);
   }
 
-  return null;
+  // country fallback
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const key = clean(parts[i]);
+    if (COUNTRY_NAME_TO_ISO[key]) {
+      return {
+        city: titleCase(parts[0]),
+        country_code: COUNTRY_NAME_TO_ISO[key]
+      };
+    }
+  }
+
+  return {};
 }
 
-function pickBestCity(candidates) {
-  if (!candidates || candidates.length === 0) return null;
+/* ================= AI (FALLBACK ONLY) ================= */
+function isValidLocation(ai) {
+  if (!ai?.city || !ai?.country) return false;
 
-  const capital = candidates.find((c) => c.isCapital);
-  if (capital) return capital;
+  const bad = ["learning", "content", "security", "model", "data"];
 
-  candidates.sort((a, b) => b.population - a.population);
-  return candidates[0];
+  const city = ai.city.toLowerCase();
+
+  if (city.length > 50) return false;
+  if (bad.some(w => city.includes(w))) return false;
+
+  return true;
 }
-
-function extractGeo(text) {
-  if (!geoMap) return {};
-
-  const rawCity = extractCityCandidate(text);
-  if (!rawCity) return {};
-
-  const city = normalizeCity(rawCity);
-  const candidates = geoMap.get(city.toLowerCase());
-
-  if (!candidates) return { city };
-
-  const best = pickBestCity(candidates);
-  if (!best) return { city };
-
-  return {
-    city,
-    country_code: best.country_code,
-    continent: continentMap[best.country_code] || null,
-    lat: best.lat,
-    lng: best.lng,
-  };
-}
-
-/* ================= AI LOCATION ================= */
-const COUNTRY_TO_CODE = {
-  italy: "IT",
-  france: "FR",
-  china: "CN",
-  vietnam: "VN",
-  "united states": "US",
-  usa: "US",
-  uk: "GB",
-  germany: "DE",
-  japan: "JP",
-  spain: "ES",
-  canada: "CA",
-  peru: "PE",
-};
 
 async function extractLocationAI(text) {
   try {
-    const prompt = `
-Extract conference location from text.
-
-Return ONLY JSON:
-{
-  "city": "...",
-  "country": "..."
-}
-
-Text:
-${text.slice(0, 2000)}
-`;
-
     const res = await axios.post(
       process.env.OLLAMA_BASE_URL + "/api/generate",
       {
         model: process.env.OLLAMA_MODEL || "qwen3:8b",
-        prompt,
-        stream: false,
+        prompt: `Extract location JSON {city, country}:\n${text.slice(0, 1500)}`,
+        stream: false
       },
-      { timeout: 20000 }
+      { timeout: 15000 }
     );
 
-    const output = res.data.response;
-    const jsonMatch = output.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON");
+    const match = res.data.response.match(/\{[\s\S]*\}/);
+    if (!match) return null;
 
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    return {
-      city: parsed.city?.trim(),
-      country: parsed.country?.trim(),
-    };
+    return JSON.parse(match[0]);
   } catch {
-    console.log("❌ AI location fail");
     return null;
   }
 }
 
-async function extractGeoSmart(text) {
+/* ================= GEO SMART ================= */
+async function extractGeoSmart(doc, text) {
+  // 1. location field (BEST)
+  if (doc.location) {
+    const ex = extractFromLocation(doc.location);
+    if (ex.city) {
+      return {
+        city: ex.city,
+        country_code: ex.country_code,
+        country: ISO_TO_COUNTRY[ex.country_code],
+        continent: ISO_TO_CONTINENT[ex.country_code]
+      };
+    }
+  }
+
+  // 2. skip AI nếu text yếu
+  if (text.length < 200) return {};
+
+  // 3. AI fallback
   const ai = await extractLocationAI(text);
 
-  if (ai && ai.city && ai.country) {
-    const code = COUNTRY_TO_CODE[ai.country.toLowerCase()];
-
+  if (isValidLocation(ai)) {
+    const code = COUNTRY_NAME_TO_ISO[clean(ai.country)];
     if (code) {
       return {
         city: ai.city,
         country: ai.country,
         country_code: code,
-        continent: continentMap[code] || null,
+        continent: ISO_TO_CONTINENT[code]
       };
     }
   }
 
-  return extractGeo(text);
+  return {};
 }
 
-/* ================= TEXT ================= */
-function cleanText(text) {
-  return text
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
+/* ================= CFP (FIX CHUẨN) ================= */
+function extractCFP($) {
+  $("script, style, nav, footer, header").remove();
+
+  let text = $("body").text();
+
+  text = text
+    .replace(/EasyChair.*?Log in/gi, "")
     .replace(/\s+/g, " ")
-    .replace(/EasyChair.*?Log in/i, "")
     .trim();
-}
 
-function safeCut(text) {
-  if (text.length <= MAX_CFP_LENGTH) return text;
+  const parts = text.split(/(?<=\.)\s+/);
 
-  let cut = text.slice(0, MAX_CFP_LENGTH);
-  const lastDot = cut.lastIndexOf(".");
+  const good = parts.filter(p =>
+    p.length > 80 &&
+    !/login|easychair|copyright/i.test(p)
+  );
 
-  if (lastDot > 1000) {
-    cut = cut.slice(0, lastDot + 1);
+  let cfp = good.join("\n");
+
+  // cut noise tail
+  const stop = ["committee", "editor", "copyright"];
+  let lower = cfp.toLowerCase();
+  let cut = cfp.length;
+
+  for (const s of stop) {
+    const idx = lower.indexOf(s);
+    if (idx !== -1 && idx < cut) cut = idx;
   }
 
-  return cut;
-}
+  cfp = cfp.slice(0, cut);
 
-function trimCFP(text) {
-  const stopKeywords = ["committee", "editor", "journal"];
-
-  let lower = text.toLowerCase();
-  let cutIndex = text.length;
-
-  for (const key of stopKeywords) {
-    const idx = lower.indexOf(key);
-    if (idx !== -1 && idx < cutIndex) {
-      cutIndex = idx;
-    }
+  if (cfp.length > MAX_CFP_LENGTH) {
+    cfp = cfp.slice(0, MAX_CFP_LENGTH);
   }
 
-  return text.slice(0, cutIndex).trim();
+  if (cfp.length < 200) return null;
+
+  return cfp.trim();
 }
 
 /* ================= DATE ================= */
-function parseDateToISO(text) {
-  const months = {
-    january: "01", february: "02", march: "03",
-    april: "04", may: "05", june: "06",
-    july: "07", august: "08", september: "09",
-    october: "10", november: "11", december: "12"
-  };
-
-  const match = text.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+function extractDeadline(text) {
+  const match = text.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
   if (!match) return null;
 
-  return `${match[3]}-${months[match[1].toLowerCase()]}-${match[2].padStart(2, "0")}`;
-}
-
-function extractDeadline(text) {
-  const match = text.match(/(deadline|submission).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
-  return match ? parseDateToISO(match[2]) : null;
-}
-
-/* ================= LINK ================= */
-function cleanLink(link) {
-  const match = link?.match(/conf=[a-zA-Z0-9_-]+/);
-  return match
-    ? `https://easychair.org/conferences/?${match[0]}`
-    : null;
-}
-
-/* ================= RANK ================= */
-function rankConference(text) {
-  let score = 0;
-
-  if (/ieee/i.test(text)) score += 3;
-  if (/springer/i.test(text)) score += 3;
-  if (/scopus/i.test(text)) score += 2;
-
-  if (score >= 7) return "A*";
-  if (score >= 5) return "A";
-  if (score >= 3) return "B";
-  return "C";
+  return new Date(match[1]).toISOString().slice(0, 10);
 }
 
 /* ================= PARSER ================= */
-async function parseEasyChair(html) {
+async function parseEasyChair(doc, html) {
   const $ = cheerio.load(html);
-  $("script, style").remove();
 
-  const bodyText = cleanText($("body").text());
-
-  let cfp_text = "";
-
-  $("p, h1, h2, h3").each((_, el) => {
-    const t = $(el).text().trim();
-    if (t.length > 80) cfp_text += t + "\n";
-  });
-
-  cfp_text = safeCut(trimCFP(cfp_text));
-
-  let submission_link = null;
-
-  $("a").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!submission_link && href?.includes("conf=")) {
-      submission_link = cleanLink(href);
-    }
-  });
+  const bodyText = $("body").text();
 
   return {
-    cfp_text,
-    submission_link,
+    cfp_text: extractCFP($),
     deadline: extractDeadline(bodyText),
-    rank: rankConference(bodyText),
-    ...(await extractGeoSmart(bodyText)),
+    ...(await extractGeoSmart(doc, bodyText))
   };
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FINAL (AI + GEO)...");
+  console.log("🚀 ENRICH FINAL (STABLE + CLEAN CFP)");
 
   await initGeo();
 
   const db = await getDb();
   const col = db.collection("conference");
 
-  const docs = await col.find({
-    $or: [
-      { cfp_text: { $exists: false } },
-      { cfp_text: "" }
-    ]
-  }).limit(5000).toArray();
+  const docs = await col.find({}).limit(5000).toArray();
 
   const queue = new PQueue({ concurrency: CONCURRENCY });
 
-  let count = 0;
+  let done = 0;
 
   for (const doc of docs) {
     queue.add(async () => {
       try {
-        console.log("🌐", doc.url);
-
         const res = await axios.get(doc.url, { timeout: TIMEOUT });
 
-        const data = await parseEasyChair(res.data);
+        const data = await parseEasyChair(doc, res.data);
 
         await col.updateOne(
           { _id: doc._id },
@@ -364,8 +274,8 @@ async function run() {
           }
         );
 
-        count++;
-        console.log("✅", count);
+        done++;
+        console.log("✅", done);
       } catch {
         console.log("❌", doc.url);
       }
