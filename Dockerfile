@@ -30,6 +30,13 @@ FROM base AS production
 # 🔥 FIX QUAN TRỌNG: đảm bảo install đủ deps (có p-queue)
 RUN npm ci --omit=dev || npm install --omit=dev
 
+# ===========================================
+# 🔥 FIX PLAYWRIGHT (CHỈ THÊM ĐOẠN NÀY)
+# ===========================================
+RUN npx playwright install chromium
+
+# ===========================================
+
 COPY . .
 
 EXPOSE 8014
