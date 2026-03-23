@@ -1,244 +1,256 @@
+import axios from "axios";
 import { MongoClient } from "mongodb";
 import { QdrantClient } from "@qdrant/js-client-rest";
-import axios from "axios";
-import { v5 as uuidv5 } from "uuid";
 import cliProgress from "cli-progress";
+import { v5 as uuidv5 } from "uuid";
 import "dotenv/config";
 
 // ================= CONFIG =================
 const MONGODB_URI = process.env.MONGODB_URI;
-const DB_NAME = process.env.MONGODB_DB || "fitneu";
-
-const COLLECTION_NAME = "scholar"; // 👉 sửa nếu cần
-const QDRANT_COLLECTION = "scholar_vectors";
+const MONGODB_DB = process.env.MONGODB_DB || "fitneu";
 
 const QDRANT_URL = process.env.QDRANT_URL;
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
+
+// 🔥 FIX: dùng đúng collection đang query
+const COLLECTION = "scholar_vectors";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
-const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
+const EMBED_MODEL =
+  process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
 
 const VECTOR_SIZE = 4096;
 const UUID_NAMESPACE = uuidv5.URL;
-const RETRY = 3;
+const BATCH_SIZE = 8;
 
 // ================= INIT =================
 const mongo = new MongoClient(MONGODB_URI);
 
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
+  apiKey: QDRANT_API_KEY,
   checkCompatibility: false,
 });
-
-// ================= GLOBAL =================
-let processed = 0;
-let TOTAL = 0;
-let start = 0;
-let bar;
 
 // ================= UTILS =================
 function qid(key) {
   return uuidv5(String(key), UUID_NAMESPACE);
 }
 
-function buildHash(doc) {
-  return JSON.stringify({
-    title: doc.title,
-    abstract: doc.abstract,
-    year: doc.year,
-  });
+function clean(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(
+      ([_, v]) => v !== null && v !== undefined && v !== ""
+    )
+  );
 }
 
-function buildText(doc) {
-  return [
-    doc.title,
-    doc.abstract,
-    doc.authors,
-    doc.venue,
-    doc.keywords,
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-// ================= WAIT QDRANT =================
-async function waitForQdrant() {
-  console.log("⏳ Waiting for Qdrant...");
-
-  while (true) {
-    try {
-      await axios.get(`${QDRANT_URL}/collections`);
-      console.log("✅ Qdrant ready");
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-  }
-}
-
-// ================= ENSURE COLLECTION =================
+// ================= COLLECTION =================
 async function ensureCollection() {
-  await waitForQdrant();
-
   try {
-    await qdrant.getCollection(QDRANT_COLLECTION);
+    const info = await qdrant.getCollection(COLLECTION);
+    const size = info.config.params.vectors.size;
+
+    if (size !== VECTOR_SIZE) {
+      console.log("⚠️ Wrong dimension → recreate");
+
+      await qdrant.deleteCollection(COLLECTION);
+
+      await qdrant.createCollection(COLLECTION, {
+        vectors: { size: VECTOR_SIZE, distance: "Cosine" },
+      });
+    } else {
+      console.log("✅ Collection OK");
+    }
   } catch {
     console.log("🚀 Creating collection...");
 
-    await qdrant.createCollection(QDRANT_COLLECTION, {
-      vectors: {
-        size: VECTOR_SIZE,
-        distance: "Cosine",
-      },
+    await qdrant.createCollection(COLLECTION, {
+      vectors: { size: VECTOR_SIZE, distance: "Cosine" },
     });
 
     console.log("✅ Collection created");
   }
 }
 
-// ================= EMBEDDING =================
-async function embed(text, retry = RETRY) {
+// ================= EMBED =================
+async function embed(text, retry = 2) {
   try {
-    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-      model: EMBED_MODEL,
-      input: text,
-    });
+    const res = await axios.post(
+      `${OLLAMA_BASE}/api/embed`,
+      {
+        model: EMBED_MODEL,
+        input: text,
+      },
+      { timeout: 60000 }
+    );
 
-    const vec = res.data?.embeddings?.[0] || res.data?.embedding;
+    const vec = res.data?.embeddings?.[0];
 
     if (!vec || vec.length !== VECTOR_SIZE) {
-      throw new Error(`Invalid vector: ${vec?.length}`);
+      throw new Error(`Invalid vector length: ${vec?.length}`);
     }
 
     return vec;
   } catch (err) {
-    if (retry > 0) return embed(text, retry - 1);
+    if (retry > 0) {
+      console.log("⚠️ Retry embedding...");
+      await new Promise((r) => setTimeout(r, 1000));
+      return embed(text, retry - 1);
+    }
 
-    console.error("❌ Embedding failed");
-    return null;
+    console.error("❌ Embedding failed:", err.message);
+    return null; // 🔥 KHÔNG crash
   }
 }
 
-// ================= PROGRESS =================
-function updateBar() {
-  const elapsed = (Date.now() - start) / 1000 || 1;
-  const speed = (processed / elapsed).toFixed(2);
-  const eta = ((TOTAL - processed) / speed).toFixed(0);
+// ================= TEXT =================
+function buildText(item, type) {
+  if (type === "journal") {
+    return [
+      item.title,
+      item.areas,
+      item.categories,
+      item.publisher,
+      item.country,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
 
-  bar.update(processed, {
-    speed: `${speed} docs/s`,
-    eta,
+  return [
+    item.name,
+    item.acronym,
+    item.topics,
+    item.description,
+    item.country,
+    item.city,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+// ================= PAYLOAD =================
+function buildPayload(item, type, text) {
+  if (type === "journal") {
+    return clean({
+      type: "journal",
+      key: item._id || item._key,
+      title: item.title,
+      text,
+      publisher: item.publisher,
+      country: item.country,
+      areas: item.areas,
+      categories: item.categories,
+      quartile: item.sjr_best_quartile || null,
+      sjr: Number(item.sjr) || 0,
+      h_index: Number(item.h_index) || 0,
+      source: "neu-research",
+    });
+  }
+
+  return clean({
+    type: "conference",
+    key: item._id || item._key,
+    name: item.name,
+    title: item.title || item.name,
+    text,
+    year: item.start_date ? Number(item.start_date.slice(0, 4)) : null,
+    country: item.country,
+    city: item.city || item.location,
+    continent: item.continent,
+    deadline: item.deadline,
+    topics: item.topics,
+    url: item.url,
+    source: "neu-research",
   });
 }
 
-// ================= MAIN =================
-async function main() {
-  await mongo.connect();
-  const db = mongo.db(DB_NAME);
+// ================= UPSERT =================
+async function upsert(points) {
+  if (!points.length) return;
 
-  console.log("🚀 Sync SCHOLAR (with progress)...");
+  try {
+    await qdrant.upsert(COLLECTION, {
+      wait: true,
+      points,
+    });
+  } catch (e) {
+    console.log("⚠️ Retry Qdrant...", e.message);
 
-  // 🔥 đảm bảo Qdrant OK
-  await ensureCollection();
+    await new Promise((r) => setTimeout(r, 1500));
 
-  const docs = await db.collection(COLLECTION_NAME).find({}).toArray();
-  TOTAL = docs.length;
+    await qdrant.upsert(COLLECTION, {
+      wait: true,
+      points,
+    });
+  }
+}
 
-  console.log(`📊 Total docs: ${TOTAL}`);
+// ================= SYNC =================
+async function syncCollection(db, name) {
+  console.log(`🚀 Sync ${name}`);
 
-  let updated = 0;
-  let skipped = 0;
+  const docs = await db.collection(name).find({}).toArray();
 
-  start = Date.now();
-
-  bar = new cliProgress.SingleBar({
-    format:
-      "📊 {bar} {percentage}% | {value}/{total} | ⚡ {speed} | ETA {eta}s",
+  const bar = new cliProgress.SingleBar({
+    format: `${name} [{bar}] {percentage}% | {value}/{total}`,
   });
 
-  bar.start(TOTAL, 0, { speed: "0 docs/s", eta: 0 });
+  bar.start(docs.length, 0);
 
-  for (const doc of docs) {
-    try {
-      const id = qid(doc._id);
-      const hash = buildHash(doc);
+  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+    const batch = docs.slice(i, i + BATCH_SIZE);
 
-      let existing = [];
+    const points = [];
 
+    for (const item of batch) {
       try {
-        existing = await qdrant.retrieve(QDRANT_COLLECTION, {
-          ids: [id],
-          with_payload: true,
+        const text = buildText(item, name);
+        if (!text) continue;
+
+        const vector = await embed(text);
+        if (!vector) continue;
+
+        const payload = buildPayload(item, name, text);
+
+        points.push({
+          id: qid(item._id || item._key), // 🔥 FIX
+          vector,
+          payload,
         });
-      } catch {
-        existing = [];
+      } catch (err) {
+        console.log("❌ Skip:", item._id || item._key);
       }
-
-      if (existing.length > 0) {
-        const oldHash = existing[0].payload?.hash;
-
-        if (oldHash === hash) {
-          skipped++;
-          processed++;
-          updateBar();
-          continue;
-        }
-      }
-
-      const text = buildText(doc);
-
-      if (!text) {
-        processed++;
-        updateBar();
-        continue;
-      }
-
-      const vector = await embed(text);
-
-      if (!vector) {
-        processed++;
-        updateBar();
-        continue;
-      }
-
-      await qdrant.upsert(QDRANT_COLLECTION, {
-        points: [
-          {
-            id,
-            vector,
-            payload: {
-              type: "scholar",
-              title: doc.title,
-              abstract: doc.abstract,
-              authors: doc.authors,
-              venue: doc.venue,
-              year: doc.year,
-              citations: doc.citations,
-              url: doc.url,
-              keywords: doc.keywords,
-              text,
-              hash,
-            },
-          },
-        ],
-      });
-
-      updated++;
-      processed++;
-      updateBar();
-
-    } catch (err) {
-      console.error("❌ Skip doc:", doc._id);
-      processed++;
-      updateBar();
     }
+
+    await upsert(points);
+
+    bar.update(Math.min(i + batch.length, docs.length));
   }
 
   bar.stop();
-
-  console.log(`🎯 DONE → updated=${updated} | skipped=${skipped}`);
-
-  await mongo.close();
-  console.log("🔌 Mongo closed");
+  console.log(`✅ Done ${name}`);
 }
 
-main();
+// ================= MAIN =================
+(async () => {
+  try {
+    await mongo.connect();
+    const db = mongo.db(MONGODB_DB);
+
+    console.log("✅ Mongo connected");
+
+    await ensureCollection(); // 🔥 luôn sync (không skip)
+
+    await syncCollection(db, "conference");
+    await syncCollection(db, "journal");
+
+    console.log("🎯 SYNC DONE");
+  } catch (e) {
+    console.error("❌ Sync error:", e.message);
+  } finally {
+    await mongo.close();
+    console.log("🔌 Mongo closed");
+  }
+})();
