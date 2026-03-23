@@ -11,7 +11,7 @@ const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
 /* ================= GEO DATA ================= */
-const CITY_FILE = path.resolve("./scripts/cities15000.txt");
+const CITY_FILE = path.resolve("../services/scripts/cities15000.txt");
 const CONTINENT_FILE = path.resolve("./scripts/country_continent.json");
 
 let geoMap = new Map();
