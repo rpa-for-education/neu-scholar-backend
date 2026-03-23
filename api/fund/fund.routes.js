@@ -14,6 +14,7 @@ function safeTopk(topk) {
 async function handleAsk(req, res) {
   try {
     const {
+      session_id,
       question,
       prompt,
       query,
@@ -22,38 +23,57 @@ async function handleAsk(req, res) {
       topk
     } = req.body || {};
 
-    const finalQuestion = (
-      question ||
-      prompt ||
-      query ||
-      message ||
-      ""
-    ).trim();
+    const rawInput = question ?? prompt ?? query ?? message;
+
+    const finalQuestion = typeof rawInput === "string"
+      ? rawInput.trim()
+      : "";
 
     if (!finalQuestion) {
       return res.status(400).json({
+        status: "error",
         error: "Missing question"
       });
     }
-
-    const finalTopk = safeTopk(topk);
 
     const result = await runFundAgent(
       req,
       finalQuestion,
       model_id,
-      finalTopk
+      topk
     );
 
-    return res.json(result);
+    // ================= BUILD SOURCES =================
+    const sources = (result?.funds || []).map((f, i) => ({
+      id: `F${i + 1}`,
+      type: "fund",
+      title: f.title,
+      url: f.url,
+      metadata: {
+        agency: f.agency,
+        amount: f.amount,
+        deadline: f.deadline
+      }
+    }));
+
+    return res.json({
+      session_id: session_id ?? null,
+      status: "success",
+      content_markdown: result.answer,
+      answer: result.answer,
+      sources,
+      meta: {
+        response_time_ms: result.responseTimeMs,
+        domain: result.domain,
+      },
+    });
 
   } catch (err) {
     console.error("❌ Fund error:", err);
 
-    return res.status(200).json({
-      success: false,
-      error: err.message || "Internal error",
-      data: []
+    return res.status(500).json({
+      status: "error",
+      error: err.message || "Internal error"
     });
   }
 }
