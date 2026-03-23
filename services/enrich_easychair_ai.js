@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
 import { getDb } from "../db/mongo.js";
 
 /* ================= CONFIG ================= */
@@ -10,32 +11,56 @@ const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
-/* ================= GEO DATA ================= */
-const CITY_FILE = path.resolve("../services/scripts/cities15000.txt");
-const CONTINENT_FILE = path.resolve("./scripts/country_continent.json");
+/* ================= PATH FIX (DOCKER SAFE) ================= */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT = path.resolve(__dirname, "..");
 
-let geoMap = new Map();
-let continentMap = {};
+const CITY_FILE = path.join(ROOT, "scripts/cities15000.txt");
+const CONTINENT_FILE = path.join(ROOT, "scripts/country_continent.json");
 
+/* ================= GEO CACHE ================= */
+let geoMap = null;
+let continentMap = null;
+let geoLoaded = false;
+
+/* ================= GEO LOADER ================= */
 async function initGeo() {
-  const geoText = await fs.readFile(CITY_FILE, "utf8");
-  const lines = geoText.split("\n");
+  if (geoLoaded) return; // 🔥 load 1 lần duy nhất
 
-  for (const line of lines) {
-    const cols = line.split("\t");
-    const city = cols[1];
-    const countryCode = cols[8];
+  try {
+    console.log("🌍 Loading geo data...");
 
-    if (city && countryCode) {
-      geoMap.set(city.toLowerCase(), countryCode);
+    const geoText = await fs.readFile(CITY_FILE, "utf8");
+    const lines = geoText.split("\n");
+
+    geoMap = new Map();
+
+    for (const line of lines) {
+      const cols = line.split("\t");
+      const city = cols[1];
+      const countryCode = cols[8];
+
+      if (city && countryCode) {
+        geoMap.set(city.toLowerCase(), countryCode);
+      }
     }
+
+    continentMap = JSON.parse(
+      await fs.readFile(CONTINENT_FILE, "utf8")
+    );
+
+    geoLoaded = true;
+
+    console.log(`✅ Geo loaded: ${geoMap.size} cities`);
+  } catch (err) {
+    console.error("❌ Geo load failed:", err.message);
+
+    // 🔥 fallback để hệ thống không crash
+    geoMap = new Map();
+    continentMap = {};
+    geoLoaded = true;
   }
-
-  continentMap = JSON.parse(
-    await fs.readFile(CONTINENT_FILE, "utf8")
-  );
-
-  console.log("🌍 Geo loaded:", geoMap.size);
 }
 
 /* ================= CLEAN ================= */
@@ -137,6 +162,8 @@ function extractCityCandidate(text) {
 }
 
 function extractGeo(text) {
+  if (!geoMap) return {};
+
   const rawCity = extractCityCandidate(text);
   if (!rawCity) return {};
 
@@ -232,7 +259,7 @@ function parseEasyChair(html) {
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FINAL (ALL-IN-ONE)...");
+  console.log("🚀 AI Enrich FINAL (OPTIMIZED GEO)...");
 
   await initGeo();
 
