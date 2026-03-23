@@ -2,7 +2,7 @@ import { MongoClient } from "mongodb";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import axios from "axios";
 import { v5 as uuidv5 } from "uuid";
-import cliProgress from "cli-progress";
+import PQueue from "p-queue";
 import "dotenv/config";
 
 // ================= CONFIG =================
@@ -15,9 +15,11 @@ const QDRANT_URL = process.env.QDRANT_URL;
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
 
-const VECTOR_SIZE = 4096;
 const UUID_NAMESPACE = uuidv5.URL;
-const RETRY = 3;
+
+const BATCH_SIZE = 64;
+const CONCURRENCY = 5;
+const RETRY = 2;
 
 // ================= INIT =================
 const mongo = new MongoClient(MONGODB_URI);
@@ -27,11 +29,7 @@ const qdrant = new QdrantClient({
   checkCompatibility: false,
 });
 
-// ================= GLOBAL =================
-let processed = 0;
-let TOTAL = 0;
-let start = 0;
-let bar;
+const queue = new PQueue({ concurrency: CONCURRENCY });
 
 // ================= UTILS =================
 function qid(key) {
@@ -46,40 +44,16 @@ function buildHash(doc) {
   });
 }
 
-// ================= WAIT QDRANT READY =================
-async function waitForQdrant() {
-  console.log("⏳ Waiting for Qdrant API ready...");
-
-  while (true) {
-    try {
-      await axios.get(`${QDRANT_URL}/collections`);
-      console.log("✅ Qdrant ready");
-      return;
-    } catch (err) {
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-  }
-}
-
-// ================= ENSURE COLLECTION =================
-async function ensureCollection() {
-  await waitForQdrant();
-
-  try {
-    await qdrant.getCollection(COLLECTION);
-    console.log("✅ Collection fund_vectors exists");
-  } catch (err) {
-    console.log("🚀 Creating collection fund_vectors...");
-
-    await qdrant.createCollection(COLLECTION, {
-      vectors: {
-        size: VECTOR_SIZE,
-        distance: "Cosine",
-      },
-    });
-
-    console.log("✅ Collection created");
-  }
+function buildText(doc) {
+  return [
+    doc["OPPORTUNITY TITLE"],
+    doc["AGENCY NAME"],
+    doc["FUNDING DESCRIPTION"],
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .trim();
 }
 
 // ================= EMBEDDING =================
@@ -92,28 +66,35 @@ async function embed(text, retry = RETRY) {
 
     const vec = res.data?.embeddings?.[0];
 
-    if (!vec || vec.length !== VECTOR_SIZE) {
-      throw new Error("Invalid vector");
-    }
+    if (!vec) throw new Error("No embedding");
 
     return vec;
+
   } catch (err) {
     if (retry > 0) return embed(text, retry - 1);
-    console.error("❌ Embedding failed");
+
+    console.error("❌ Embed failed");
     return null;
   }
 }
 
-// ================= PROGRESS =================
-function updateBar() {
-  const elapsed = (Date.now() - start) / 1000 || 1;
-  const speed = (processed / elapsed).toFixed(2);
-  const eta = ((TOTAL - processed) / speed).toFixed(0);
+// ================= ENSURE COLLECTION =================
+async function ensureCollection(vectorSize) {
+  try {
+    await qdrant.getCollection(COLLECTION);
+    console.log("✅ Collection exists");
+  } catch {
+    console.log("🚀 Creating collection...");
 
-  bar.update(processed, {
-    speed: `${speed} docs/s`,
-    eta,
-  });
+    await qdrant.createCollection(COLLECTION, {
+      vectors: {
+        size: vectorSize,
+        distance: "Cosine",
+      },
+    });
+
+    console.log("✅ Created");
+  }
 }
 
 // ================= MAIN =================
@@ -121,97 +102,80 @@ async function main() {
   await mongo.connect();
   const db = mongo.db(DB_NAME);
 
-  console.log("🚀 Sync FUND (with progress)...");
+  console.log("🚀 PRODUCTION SYNC START");
 
-  await ensureCollection();
+  const cursor = db.collection("fund").find({});
+  const batch = [];
 
-  const docs = await db.collection("fund").find({}).toArray();
-  TOTAL = docs.length;
-
+  let processed = 0;
   let updated = 0;
   let skipped = 0;
 
-  start = Date.now();
+  // 👉 detect vector size 1 lần
+  const testVec = await embed("test");
+  const VECTOR_SIZE = testVec.length;
 
-  bar = new cliProgress.SingleBar({
-    format:
-      "📊 {bar} {percentage}% | {value}/{total} | ⚡ {speed} | ETA {eta}s",
-  });
+  await ensureCollection(VECTOR_SIZE);
 
-  bar.start(TOTAL, 0, { speed: "0 docs/s", eta: 0 });
+  while (await cursor.hasNext()) {
+    const doc = await cursor.next();
 
-  for (const doc of docs) {
-    try {
+    await queue.add(async () => {
       const id = qid(doc._id);
       const hash = buildHash(doc);
 
-      let existing = [];
+      // 🔥 skip nhanh (không retrieve từng cái nữa)
+      // nếu muốn strict thì dùng payload index sau
 
-      try {
-        existing = await qdrant.retrieve(COLLECTION, {
-          ids: [id],
-          with_payload: true,
-        });
-      } catch (err) {
-        existing = [];
-      }
-
-      if (existing.length > 0) {
-        const oldHash = existing[0].payload?.hash;
-
-        if (oldHash === hash) {
-          skipped++;
-          processed++;
-          updateBar();
-          continue;
-        }
-      }
-
-      const text = `
-${doc["OPPORTUNITY TITLE"]}
-${doc["AGENCY NAME"]}
-${doc["FUNDING DESCRIPTION"]}
-`;
-
+      const text = buildText(doc);
       const vector = await embed(text);
 
       if (!vector) {
         processed++;
-        updateBar();
-        continue;
+        return;
       }
 
-      await qdrant.upsert(COLLECTION, {
-        points: [
-          {
-            id,
-            vector,
-            payload: {
-              title: doc["OPPORTUNITY TITLE"],
-              agency: doc["AGENCY NAME"],
-              text: doc["FUNDING DESCRIPTION"],
-              deadline: doc["ESTIMATED APPLICATION DUE DATE"],
-              amount: doc["ESTIMATED TOTAL FUNDING"],
-              url: doc["OPPORTUNITY URL"],
-              hash,
-            },
-          },
-        ],
+      batch.push({
+        id,
+        vector,
+        payload: {
+          title: doc["OPPORTUNITY TITLE"],
+          agency: doc["AGENCY NAME"],
+          text: doc["FUNDING DESCRIPTION"],
+          deadline: doc["ESTIMATED APPLICATION DUE DATE"],
+          amount: doc["ESTIMATED TOTAL FUNDING"],
+          url: doc["OPPORTUNITY URL"],
+          hash,
+        },
       });
 
-      updated++;
+      if (batch.length >= BATCH_SIZE) {
+        await qdrant.upsert(COLLECTION, {
+          points: batch.splice(0),
+        });
+        updated += BATCH_SIZE;
+      }
+
       processed++;
-      updateBar();
-    } catch (err) {
-      console.error("❌ Skip doc:", doc._id);
-      processed++;
-      updateBar();
-    }
+
+      if (processed % 100 === 0) {
+        console.log(`⚡ processed=${processed} updated=${updated}`);
+      }
+    });
   }
 
-  bar.stop();
+  await queue.onIdle();
 
-  console.log(`🎯 DONE → updated=${updated} | skipped=${skipped}`);
+  if (batch.length) {
+    await qdrant.upsert(COLLECTION, { points: batch });
+    updated += batch.length;
+  }
+
+  console.log("🎯 DONE", {
+    processed,
+    updated,
+    skipped,
+  });
 
   await mongo.close();
 }
