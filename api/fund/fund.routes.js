@@ -1,100 +1,75 @@
-import express from "express";
-import { runFundAgent } from "../../agents/fund/fund.service.js";
-import { streamFund } from "../../agents/fund/fund.stream.js";
+import { runFundAgentCore } from "./fund.agent.js"; // 🔥 bạn đang có
+import { callLLM } from "../shared/llm.js";
+import { getSessionHistory, addToHistory } from "../../middlewares/session.js";
+import { buildFundPrompt } from "./fund.prompt.js";
 
-const router = express.Router();
+export async function runFundAgent(req, question, model_id, topk) {
+  const start = Date.now();
 
-// ================= UTILS =================
-function safeTopk(topk) {
-  const n = Number(topk);
-  return n && n > 0 ? Math.min(n, 5) : 5; // 🔥 limit topk
-}
-
-// ================= CORE HANDLER =================
-async function handleAsk(req, res) {
   try {
-    const {
-      question,
-      prompt,
-      query,
-      message,
-      model_id = "qwen3-4b", // 🔥 nhẹ hơn
-      topk
-    } = req.body || {};
+    const history = getSessionHistory(req) || [];
 
-    const finalQuestion = (
-      question ||
-      prompt ||
-      query ||
-      message ||
-      ""
-    ).trim();
+    // 🔍 SEARCH
+    const result = await runFundAgentCore(question, topk);
 
-    if (!finalQuestion) {
-      return res.status(400).json({
-        error: "Missing question"
-      });
+    const funds = result?.funds || [];
+
+    if (!funds.length) {
+      return {
+        model_id,
+        answer: "Không tìm thấy quỹ phù hợp.",
+        retrieved: {
+          funds: []
+        },
+        domain: "empty",
+        analysis: {},
+        responseTimeMs: Date.now() - start
+      };
     }
 
-    const finalTopk = safeTopk(topk);
+    // 🧠 PROMPT
+    const prompt = buildFundPrompt(question, funds, history);
 
-    const result = await runFundAgent(
-      req,
-      finalQuestion,
+    let answer = "";
+
+    try {
+      const llm = await callLLM(prompt, model_id);
+      answer = llm?.answer || "";
+    } catch (err) {
+      console.error("❌ Fund LLM error:", err.message);
+    }
+
+    if (!answer || answer.trim().length < 10) {
+      answer = "Dưới đây là các quỹ phù hợp bạn có thể tham khảo.";
+    }
+
+    try {
+      addToHistory(req, question, answer);
+    } catch {}
+
+    return {
       model_id,
-      finalTopk
-    );
-
-    return res.json(result);
+      answer,
+      retrieved: {
+        funds
+      },
+      domain: result?.domain || "fund",
+      analysis: result?.analysis || {},
+      responseTimeMs: Date.now() - start
+    };
 
   } catch (err) {
-    console.error("❌ Fund error:", err);
+    console.error("❌ Fund agent crash:", err);
 
-    return res.status(200).json({
-      success: false,
-      error: err.message || "Internal error",
-      data: []
-    });
+    return {
+      model_id,
+      answer: "Hệ thống đang gặp lỗi.",
+      retrieved: {
+        funds: []
+      },
+      domain: "error",
+      analysis: {},
+      responseTimeMs: Date.now() - start
+    };
   }
 }
-
-// ================= ROUTES =================
-router.post("/", handleAsk);
-router.post("/ask", handleAsk);
-
-// ================= STREAM =================
-router.post("/stream", async (req, res) => {
-  try {
-    const { question, prompt, query, message, topk } = req.body || {};
-
-    const finalQuestion = (
-      question ||
-      prompt ||
-      query ||
-      message ||
-      ""
-    ).trim();
-
-    if (!finalQuestion) {
-      res.write(`data: Missing question\n\n`);
-      return res.end();
-    }
-
-    const finalTopk = safeTopk(topk);
-
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
-    await streamFund(req, res, finalQuestion, finalTopk);
-
-  } catch (err) {
-    console.error("❌ Stream Fund error:", err);
-
-    res.write(`data: Error: ${err.message}\n\n`);
-    res.write(`data: [DONE]\n\n`);
-    res.end();
-  }
-});
-
-export default router;

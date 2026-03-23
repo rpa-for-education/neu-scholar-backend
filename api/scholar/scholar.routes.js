@@ -1,101 +1,88 @@
-import express from "express";
-import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
-import { streamScholar } from "../../agents/scholar/scholar.stream.js";
+import { runAgent } from "./scholar.agent.js";
+import { callLLM } from "../shared/llm.js";
+import { getSessionHistory, addToHistory } from "../../middlewares/session.js";
+import { buildScholarPrompt } from "./scholar.prompt.js";
 
-const router = express.Router();
+export async function runScholarAgent(req, question, model_id, topk) {
+  const start = Date.now();
 
-// ================= UTILS =================
-function safeTopk(topk) {
-  const n = Number(topk);
-  return n && n > 0 ? Math.min(n, 5) : 5;
-}
-
-// ================= CORE =================
-async function handleAsk(req, res) {
   try {
-    const {
-      question,
-      prompt,
-      query,
-      message,
-      model_id = "qwen3-8b",
-      topk
-    } = req.body || {};
+    const history = getSessionHistory(req) || [];
 
-    const finalQuestion = (
-      question ||
-      prompt ||
-      query ||
-      message ||
-      ""
-    ).trim();
+    // 🔍 SEARCH + reasoning
+    const result = await runAgent(question, topk);
 
-    if (!finalQuestion) {
-      return res.status(400).json({
-        error: "Missing question"
-      });
+    const conferences = result?.conferences || [];
+    const journals = result?.journals || [];
+
+    // 👉 empty
+    if (!conferences.length && !journals.length) {
+      return {
+        model_id,
+        answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
+        retrieved: {
+          conferences: [],
+          journals: []
+        },
+        domain: "empty",
+        analysis: {},
+        responseTimeMs: Date.now() - start
+      };
     }
 
-    const finalTopk = safeTopk(topk);
-
-    // 🔥 QUAN TRỌNG: dùng pipeline cũ (xịn)
-    const result = await runScholarAgent(
-      req,
-      finalQuestion,
-      model_id,
-      finalTopk
+    // 🧠 BUILD PROMPT
+    const prompt = buildScholarPrompt(
+      question,
+      conferences,
+      journals,
+      history
     );
 
-    return res.json(result);
+    let answer = "";
 
-  } catch (err) {
-    console.error("❌ Scholar error:", err);
-
-    return res.status(200).json({
-      success: false,
-      error: err.message || "Internal error",
-      data: []
-    });
-  }
-}
-
-// ================= ROUTES =================
-router.post("/", handleAsk);
-router.post("/ask", handleAsk);
-
-// ================= STREAM =================
-router.post("/stream", async (req, res) => {
-  try {
-    const { question, prompt, query, message, topk } = req.body || {};
-
-    const finalQuestion = (
-      question ||
-      prompt ||
-      query ||
-      message ||
-      ""
-    ).trim();
-
-    if (!finalQuestion) {
-      res.write(`data: Missing question\n\n`);
-      return res.end();
+    try {
+      const llm = await callLLM(prompt, model_id);
+      answer = llm?.answer || llm?.response || "";
+    } catch (err) {
+      console.error("❌ LLM error:", err.message);
     }
 
-    const finalTopk = safeTopk(topk);
+    // 🔥 fallback
+    if (!answer || answer.trim().length < 10) {
+      answer =
+        "Tôi đã tìm thấy một số hội thảo/tạp chí liên quan. Bạn có thể tham khảo danh sách bên dưới.";
+    }
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    // 💾 history
+    try {
+      addToHistory(req, question, answer);
+    } catch {}
 
-    await streamScholar(req, res, finalQuestion, finalTopk);
+    return {
+      model_id,
+      answer,
+      retrieved: {
+        conferences,
+        journals
+      },
+      domain: result?.domain || "general",
+      analysis: result?.analysis || {},
+      responseTimeMs: Date.now() - start
+    };
 
   } catch (err) {
-    console.error("❌ Stream Scholar error:", err);
+    console.error("❌ Scholar agent crash:", err);
 
-    res.write(`data: Error: ${err.message}\n\n`);
-    res.write(`data: [DONE]\n\n`);
-    res.end();
+    return {
+      model_id,
+      answer: "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
+      retrieved: {
+        conferences: [],
+        journals: []
+      },
+      domain: "error",
+      analysis: {},
+      responseTimeMs: Date.now() - start
+    };
   }
-});
-
-export default router;
+}
