@@ -29,7 +29,7 @@ async function initGeo() {
   if (geoLoaded) return;
 
   try {
-    console.log("🌍 Loading geo (population + lat/lng)...");
+    console.log("🌍 Loading geo...");
 
     const geoText = await fs.readFile(CITY_FILE, "utf8");
     const lines = geoText.split("\n");
@@ -71,26 +71,26 @@ async function initGeo() {
     console.log(`✅ Geo loaded: ${geoMap.size} cities`);
   } catch (err) {
     console.error("❌ Geo load failed:", err.message);
-
     geoMap = new Map();
     continentMap = {};
     geoLoaded = true;
   }
 }
 
-/* ================= GEO LOGIC ================= */
+/* ================= GEO ================= */
 function normalizeCity(s) {
   return s
     .replace(/university|institute|college/gi, "")
+    .replace(/\(.*?\)/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function extractCityCandidate(text) {
   const patterns = [
-    /held at ([^,]+),/i,
-    /in ([A-Za-z'’\- ]+),\s*[A-Za-z ]+,\s*(?:from|on)/i,
-    /takes place in ([^,]+),/i,
+    /held at .*? in ([A-Za-z'’\-\s]+?)(?:\(|,|\s[A-Z][a-z]+)/i,
+    /in ([A-Za-z'’\-\s]+?),\s*[A-Za-z ]+,\s*(?:from|on)/i,
+    /in ([A-Za-z'’\-\s]+?)\s+\([^)]+\)\s+[A-Za-z]+/i,
   ];
 
   for (const regex of patterns) {
@@ -101,14 +101,12 @@ function extractCityCandidate(text) {
   return null;
 }
 
-function pickBestCity(candidates, text) {
+function pickBestCity(candidates) {
   if (!candidates || candidates.length === 0) return null;
 
-  // ưu tiên capital
   const capital = candidates.find((c) => c.isCapital);
   if (capital) return capital;
 
-  // ưu tiên population
   candidates.sort((a, b) => b.population - a.population);
   return candidates[0];
 }
@@ -124,7 +122,7 @@ function extractGeo(text) {
 
   if (!candidates) return { city };
 
-  const best = pickBestCity(candidates, text);
+  const best = pickBestCity(candidates);
   if (!best) return { city };
 
   return {
@@ -134,6 +132,82 @@ function extractGeo(text) {
     lat: best.lat,
     lng: best.lng,
   };
+}
+
+/* ================= AI LOCATION ================= */
+const COUNTRY_TO_CODE = {
+  italy: "IT",
+  france: "FR",
+  china: "CN",
+  vietnam: "VN",
+  "united states": "US",
+  usa: "US",
+  uk: "GB",
+  germany: "DE",
+  japan: "JP",
+  spain: "ES",
+  canada: "CA",
+  peru: "PE",
+};
+
+async function extractLocationAI(text) {
+  try {
+    const prompt = `
+Extract conference location from text.
+
+Return ONLY JSON:
+{
+  "city": "...",
+  "country": "..."
+}
+
+Text:
+${text.slice(0, 2000)}
+`;
+
+    const res = await axios.post(
+      process.env.OLLAMA_BASE_URL + "/api/generate",
+      {
+        model: process.env.OLLAMA_MODEL || "qwen3:8b",
+        prompt,
+        stream: false,
+      },
+      { timeout: 20000 }
+    );
+
+    const output = res.data.response;
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON");
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    return {
+      city: parsed.city?.trim(),
+      country: parsed.country?.trim(),
+    };
+  } catch {
+    console.log("❌ AI location fail");
+    return null;
+  }
+}
+
+async function extractGeoSmart(text) {
+  const ai = await extractLocationAI(text);
+
+  if (ai && ai.city && ai.country) {
+    const code = COUNTRY_TO_CODE[ai.country.toLowerCase()];
+
+    if (code) {
+      return {
+        city: ai.city,
+        country: ai.country,
+        country_code: code,
+        continent: continentMap[code] || null,
+      };
+    }
+  }
+
+  return extractGeo(text);
 }
 
 /* ================= TEXT ================= */
@@ -217,7 +291,7 @@ function rankConference(text) {
 }
 
 /* ================= PARSER ================= */
-function parseEasyChair(html) {
+async function parseEasyChair(html) {
   const $ = cheerio.load(html);
   $("script, style").remove();
 
@@ -246,13 +320,13 @@ function parseEasyChair(html) {
     submission_link,
     deadline: extractDeadline(bodyText),
     rank: rankConference(bodyText),
-    ...extractGeo(bodyText),
+    ...(await extractGeoSmart(bodyText)),
   };
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FINAL (GEO PRO)...");
+  console.log("🚀 AI Enrich FINAL (AI + GEO)...");
 
   await initGeo();
 
@@ -277,7 +351,7 @@ async function run() {
 
         const res = await axios.get(doc.url, { timeout: TIMEOUT });
 
-        const data = parseEasyChair(res.data);
+        const data = await parseEasyChair(res.data);
 
         await col.updateOne(
           { _id: doc._id },
