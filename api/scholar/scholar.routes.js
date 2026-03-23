@@ -10,6 +10,15 @@ function safeTopk(topk) {
   return n && n > 0 ? Math.min(n, 5) : 5;
 }
 
+// 👉 FIX: normalize URL
+function getConferenceUrl(c) {
+  return c?.url || "";
+}
+
+function getJournalUrl(j) {
+  return j?.scimago_link || j?.url || "";
+}
+
 // ================= CORE =================
 async function handleAsk(req, res) {
   try {
@@ -46,12 +55,13 @@ async function handleAsk(req, res) {
     // ================= BUILD SOURCES =================
     const sources = [];
 
+    // ===== CONFERENCE =====
     (result?.conferences || []).forEach((c, i) => {
       sources.push({
         id: `C${i + 1}`,
         type: "conference",
         title: c.name,
-        url: c.url,
+        url: getConferenceUrl(c), // ✅ đúng
         metadata: {
           year: c.year,
           country: c.country,
@@ -60,25 +70,33 @@ async function handleAsk(req, res) {
       });
     });
 
+    // ===== JOURNAL (🔥 FIX QUAN TRỌNG) =====
     (result?.journals || []).forEach((j, i) => {
       sources.push({
         id: `J${i + 1}`,
         type: "journal",
         title: j.title,
-        url: j.url,
+        url: getJournalUrl(j), // 🔥 FIX Ở ĐÂY
         metadata: {
           publisher: j.publisher,
-          quartile: j.quartile
+          quartile: j.sjr_best_quartile
         }
       });
     });
 
+    // 🔥 DEBUG (có thể tắt)
+    console.log("📦 SOURCES:", sources);
+
     return res.json({
       session_id: session_id ?? null,
       status: "success",
+
+      // 🔥 LUÔN dùng output đã format
       content_markdown: result.answer,
       answer: result.answer,
+
       sources,
+
       meta: {
         response_time_ms: result.responseTimeMs,
         domain: result.domain,
