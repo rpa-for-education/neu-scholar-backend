@@ -1,5 +1,5 @@
 import { MongoClient } from "mongodb";
-import { QDRANTClient } from "@qdrant/js-client-rest";
+import { QdrantClient } from "@qdrant/js-client-rest";
 import axios from "axios";
 import { v5 as uuidv5 } from "uuid";
 import cliProgress from "cli-progress";
@@ -22,7 +22,7 @@ const RETRY = 3;
 // ================= INIT =================
 const mongo = new MongoClient(MONGODB_URI);
 
-const qdrant = new QDRANTClient({
+const qdrant = new QdrantClient({
   url: QDRANT_URL,
   checkCompatibility: false,
 });
