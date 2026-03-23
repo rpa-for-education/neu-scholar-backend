@@ -33,12 +33,11 @@ const COUNTRY_NAME_TO_ISO = {
   "singapore": "SG"
 };
 
-/* ================= PATH (FIX CHUẨN DOCKER) ================= */
-const __filename = fileURLToPath(import.meta.url);
+/* ================= PATH (CHUẨN 100% DOCKER SAFE) ================= */
 
-// 👉 dùng URL relative → KHÔNG lỗi path trong Docker
-const CITY_FILE = new URL("../scripts/cities15000.txt", import.meta.url);
-const COUNTRY_FILE = new URL("../scripts/countryInfo.txt", import.meta.url);
+// 👉 luôn resolve theo file hiện tại → không phụ thuộc WORKDIR
+const COUNTRY_FILE = new URL("./scripts/countryInfo.txt", import.meta.url);
+const CITY_FILE = new URL("./scripts/cities15000.txt", import.meta.url);
 
 /* ================= GLOBAL ================= */
 let geoMap = new Map();
@@ -57,12 +56,22 @@ function titleCase(s = "") {
     .join(" ");
 }
 
+/* ================= SAFE READ (ANTI CRASH) ================= */
+async function safeRead(fileUrl) {
+  try {
+    return await fs.readFile(fileUrl, "utf8");
+  } catch (err) {
+    console.error("❌ Missing file:", fileUrl.href);
+    return "";
+  }
+}
+
 /* ================= INIT GEO ================= */
 async function initGeo() {
   console.log("🌍 Loading Geo...");
 
   // 👉 load country
-  const countryText = await fs.readFile(COUNTRY_FILE, "utf8");
+  const countryText = await safeRead(COUNTRY_FILE);
 
   countryText.split("\n").forEach(line => {
     if (!line || line.startsWith("#")) return;
@@ -71,6 +80,8 @@ async function initGeo() {
     const iso = cols[0];
     const name = cols[4];
     const continent = cols[8];
+
+    if (!iso) return;
 
     ISO_TO_COUNTRY[iso] = name;
 
@@ -85,10 +96,13 @@ async function initGeo() {
   });
 
   // 👉 load city
-  const geoText = await fs.readFile(CITY_FILE, "utf8");
+  const geoText = await safeRead(CITY_FILE);
 
   geoText.split("\n").forEach(line => {
     const cols = line.split("\t");
+
+    if (!cols || cols.length < 9) return;
+
     const city = clean(cols[1]);
     const countryCode = cols[8];
 
@@ -182,7 +196,7 @@ async function parseEasyChair(doc, html) {
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH FINAL (FIXED PATH)");
+  console.log("🚀 ENRICH FINAL (DOCKER SAFE)");
 
   await initGeo();
 

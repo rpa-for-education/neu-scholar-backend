@@ -1,5 +1,5 @@
 # ===========================================
-# neu-scholar-backend — Dockerfile (FINAL)
+# neu-scholar-backend — Dockerfile (FINAL FIX)
 # ===========================================
 
 FROM node:20-bookworm-slim AS base
@@ -7,7 +7,7 @@ FROM node:20-bookworm-slim AS base
 WORKDIR /app
 
 # ===========================================
-# 🔥 FIX QUAN TRỌNG: thêm full libs cho Playwright
+# 🔥 INSTALL SYSTEM LIBS (PLAYWRIGHT)
 # ===========================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ curl \
@@ -48,21 +48,31 @@ CMD ["npm", "run", "dev"]
 # ===========================================
 FROM base AS production
 
-# 🔥 đảm bảo đủ deps
+# install deps production
 RUN npm ci --omit=dev || npm install --omit=dev
 
 # ===========================================
-# 🔥 INSTALL PLAYWRIGHT (CHỈ BROWSER)
+# 🔥 INSTALL PLAYWRIGHT BROWSER
 # ===========================================
 RUN npx playwright install chromium
 
 # ===========================================
-
+# 🔥 COPY SOURCE CODE
+# ===========================================
 COPY . .
 
-EXPOSE 8014
-ENV NODE_ENV=production
+# 🔥 QUAN TRỌNG: đảm bảo scripts tồn tại trong container
+COPY services/scripts ./services/scripts
 
+# ===========================================
+# ENV + PORT
+# ===========================================
+ENV NODE_ENV=production
+EXPOSE 8014
+
+# ===========================================
+# START APP
+# ===========================================
 CMD ["sh", "-c", "\
 echo '⏳ Waiting for services...'; \
 sleep 5; \
