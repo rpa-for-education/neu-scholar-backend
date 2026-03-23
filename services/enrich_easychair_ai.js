@@ -2,7 +2,6 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import fs from "fs/promises";
-import path from "path";
 import { fileURLToPath } from "url";
 import { getDb } from "../db/mongo.js";
 
@@ -34,20 +33,19 @@ const COUNTRY_NAME_TO_ISO = {
   "singapore": "SG"
 };
 
-/* ================= PATH ================= */
+/* ================= PATH (FIX CHUẨN DOCKER) ================= */
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, "..");
 
-const CITY_FILE = path.join(ROOT, "scripts/cities15000.txt");
-const COUNTRY_FILE = path.join(ROOT, "scripts/countryInfo.txt");
+// 👉 dùng URL relative → KHÔNG lỗi path trong Docker
+const CITY_FILE = new URL("../scripts/cities15000.txt", import.meta.url);
+const COUNTRY_FILE = new URL("../scripts/countryInfo.txt", import.meta.url);
 
 /* ================= GLOBAL ================= */
 let geoMap = new Map();
 let ISO_TO_COUNTRY = {};
 let ISO_TO_CONTINENT = {};
 
-/* ================= INIT GEO ================= */
+/* ================= HELPER ================= */
 function clean(s = "") {
   return s.toLowerCase().replace(/[()]/g, "").trim();
 }
@@ -59,9 +57,11 @@ function titleCase(s = "") {
     .join(" ");
 }
 
+/* ================= INIT GEO ================= */
 async function initGeo() {
   console.log("🌍 Loading Geo...");
 
+  // 👉 load country
   const countryText = await fs.readFile(COUNTRY_FILE, "utf8");
 
   countryText.split("\n").forEach(line => {
@@ -84,6 +84,7 @@ async function initGeo() {
     }[continent] || null;
   });
 
+  // 👉 load city
   const geoText = await fs.readFile(CITY_FILE, "utf8");
 
   geoText.split("\n").forEach(line => {
@@ -109,12 +110,15 @@ function extractFromLocation(location) {
   const parts = location.split(",").map(s => s.trim());
   const cityKey = clean(parts[0]);
 
+  // match city
   if (geoMap.has(cityKey)) {
     return geoMap.get(cityKey);
   }
 
+  // fallback country
   for (let i = parts.length - 1; i >= 1; i--) {
     const key = clean(parts[i]);
+
     if (COUNTRY_NAME_TO_ISO[key]) {
       return {
         city: titleCase(parts[0]),
@@ -178,7 +182,7 @@ async function parseEasyChair(doc, html) {
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH FINAL (NO FILE DEPENDENCY)");
+  console.log("🚀 ENRICH FINAL (FIXED PATH)");
 
   await initGeo();
 
@@ -210,8 +214,8 @@ async function run() {
         );
 
         done++;
-        console.log("✅", done);
-      } catch {
+        console.log(`✅ ${done}`);
+      } catch (err) {
         console.log("❌", doc.url);
       }
     });
