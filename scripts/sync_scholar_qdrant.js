@@ -2,21 +2,23 @@ import { MongoClient } from "mongodb";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import axios from "axios";
 import { v5 as uuidv5 } from "uuid";
-import fs from "fs";
+import PQueue from "p-queue";
 import "dotenv/config";
 
 // ================= CONFIG =================
-const MONGODB_URI = process.env.MONGODB_URI || "";
+const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB || "fitneu";
 
 const COLLECTION = "neu-scholar";
-const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
+const QDRANT_URL = process.env.QDRANT_URL;
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const MODEL = "qwen3-embedding:8b";
 
 const UUID_NAMESPACE = uuidv5.URL;
+
 const BATCH_SIZE = 64;
+const CONCURRENCY = 8; // 🔥 speed control
 const RETRY = 2;
 
 // ================= INIT =================
@@ -27,10 +29,16 @@ const qdrant = new QdrantClient({
   checkCompatibility: false,
 });
 
-// ================= LOG =================
-const errorLog = fs.createWriteStream("sync_errors.log", { flags: "a" });
+const queue = new PQueue({ concurrency: CONCURRENCY });
 
-// ================= SAFE =================
+// ================= STATS =================
+const stats = {
+  processed: 0,
+  updated: 0,
+  startTime: Date.now(),
+};
+
+// ================= UTILS =================
 function safe(val) {
   if (!val) return "";
   if (Array.isArray(val)) return val.join(" ");
@@ -40,6 +48,17 @@ function safe(val) {
 
 function qid(key) {
   return uuidv5(String(key), UUID_NAMESPACE);
+}
+
+function normalizeDeadline(doc) {
+  const d =
+    doc.deadline ||
+    doc.submission_deadline ||
+    doc.cfp_deadline ||
+    "";
+
+  if (/^[A-Z]{2,3}$/.test(d)) return "";
+  return safe(d);
 }
 
 // ================= TEXT =================
@@ -87,34 +106,28 @@ async function embed(text, retry = RETRY) {
   }
 }
 
-// ================= COLLECTION =================
-async function ensureCollection(vectorSize) {
-  try {
-    await qdrant.getCollection(COLLECTION);
-    console.log("✅ Collection exists");
-  } catch {
-    console.log("🚀 Creating collection...");
-    await qdrant.createCollection(COLLECTION, {
-      vectors: {
-        size: vectorSize,
-        distance: "Cosine",
-      },
-    });
-  }
+// ================= PROGRESS =================
+function logProgress() {
+  const elapsed = (Date.now() - stats.startTime) / 1000;
+  const speed = (stats.processed / elapsed).toFixed(1);
+
+  console.log(
+    `⚡ processed=${stats.processed} | updated=${stats.updated} | ${speed}/s`
+  );
 }
 
-// ================= CLEAN DEADLINE =================
-function normalizeDeadline(doc) {
-  const d =
-    doc.deadline ||
-    doc.submission_deadline ||
-    doc.cfp_deadline ||
-    "";
+// ================= UPSERT =================
+async function flush(batch) {
+  if (!batch.length) return;
 
-  // loại bỏ CA, NY, TX...
-  if (/^[A-Z]{2,3}$/.test(d)) return "";
+  const sending = batch.splice(0);
 
-  return safe(d);
+  try {
+    await qdrant.upsert(COLLECTION, { points: sending });
+    stats.updated += sending.length;
+  } catch (err) {
+    console.error("❌ Qdrant error:", err.message);
+  }
 }
 
 // ================= MAIN =================
@@ -122,26 +135,29 @@ async function main() {
   await mongo.connect();
   const db = mongo.db(DB_NAME);
 
-  console.log("🚀 SYNC SCHOLAR (FINAL FIX)");
+  console.log("🚀 SYNC SCHOLAR (MAX SPEED)");
 
   const confCursor = db.collection("conference").find({});
   const journalCursor = db.collection("journal").find({});
 
   const batch = [];
 
+  // detect vector size
   const testVec = await embed("test");
   const VECTOR_SIZE = testVec.length;
 
-  await ensureCollection(VECTOR_SIZE);
+  await qdrant.createCollection(COLLECTION, {
+    vectors: { size: VECTOR_SIZE, distance: "Cosine" },
+  }).catch(() => console.log("✅ Collection exists"));
 
   // ================= CONFERENCE =================
   while (await confCursor.hasNext()) {
     const doc = await confCursor.next();
 
-    try {
+    queue.add(async () => {
       const text = buildConferenceText(doc);
       const vector = await embed(text);
-      if (!vector) continue;
+      if (!vector) return;
 
       batch.push({
         id: qid(doc._id.toString()),
@@ -149,49 +165,37 @@ async function main() {
         payload: {
           type: "conference",
           name: safe(doc.name),
-          acronym: safe(doc.acronym),
-
-          // 🔥 FIX DEADLINE
           deadline: normalizeDeadline(doc),
-
           city: safe(doc.city),
-          state: safe(doc.state),
           country: safe(doc.country),
           topics: safe(doc.topics),
-
-          // 🔥 FIX LINK
           url: safe(doc.url),
-
           text,
         },
       });
 
-      if (batch.length >= BATCH_SIZE) {
-        await qdrant.upsert(COLLECTION, { points: batch.splice(0) });
-      }
+      stats.processed++;
 
-    } catch (err) {
-      errorLog.write(`[CONF] ${doc._id} ${err.message}\n`);
-    }
+      if (stats.processed % 50 === 0) logProgress();
+
+      if (batch.length >= BATCH_SIZE) {
+        await flush(batch);
+      }
+    });
   }
 
   // ================= JOURNAL =================
   while (await journalCursor.hasNext()) {
     const doc = await journalCursor.next();
 
-    try {
+    queue.add(async () => {
       const text = buildJournalText(doc);
       const vector = await embed(text);
-      if (!vector) continue;
+      if (!vector) return;
 
-      // 🔥 FIX LINK (QUAN TRỌNG NHẤT)
-      let scimagoLink = safe(doc.scimago_link);
-
-      // fallback nếu DB thiếu link
-      if (!scimagoLink && doc.title) {
-        scimagoLink =
-          "https://www.scimagojr.com/journalsearch.php?q=" +
-          encodeURIComponent(doc.title);
+      let link = safe(doc.scimago_link);
+      if (!link && doc.title) {
+        link = `https://www.scimagojr.com/journalsearch.php?q=${encodeURIComponent(doc.title)}`;
       }
 
       batch.push({
@@ -201,40 +205,33 @@ async function main() {
           type: "journal",
           title: safe(doc.title),
           publisher: safe(doc.publisher),
-
-          // 🔥 FIX QUARTILE
           sjr_best_quartile: safe(doc.sjr_best_quartile),
-
-          sjr: safe(doc.sjr),
           categories: safe(doc.categories),
           areas: safe(doc.areas),
-
-          // 🔥 FIX LINK
-          scimago_link: scimagoLink,
-          url: scimagoLink,
-
+          scimago_link: link,
+          url: link,
           text,
         },
       });
 
+      stats.processed++;
+
+      if (stats.processed % 50 === 0) logProgress();
+
       if (batch.length >= BATCH_SIZE) {
-        await qdrant.upsert(COLLECTION, { points: batch.splice(0) });
+        await flush(batch);
       }
-
-    } catch (err) {
-      errorLog.write(`[JOURNAL] ${doc._id} ${err.message}\n`);
-    }
+    });
   }
 
-  // flush
-  if (batch.length) {
-    await qdrant.upsert(COLLECTION, { points: batch });
-  }
+  await queue.onIdle();
+  await flush(batch);
 
-  console.log("🎯 SYNC DONE (FIXED)");
+  logProgress();
+
+  console.log("🎯 SYNC DONE");
 
   await mongo.close();
-  errorLog.end();
 }
 
 main();
