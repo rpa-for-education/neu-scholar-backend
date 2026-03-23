@@ -1,12 +1,12 @@
 # ===========================================
-# neu-scholar-backend — Dockerfile (FIXED)
+# neu-scholar-backend — Dockerfile (FINAL)
 # ===========================================
 
 FROM node:20-bookworm-slim AS base
 
 WORKDIR /app
 
-# Dependencies cho native modules
+# Native deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ curl \
     && rm -rf /var/lib/apt/lists/*
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json* ./
 
 # ===========================================
-# Stage: development
+# DEV
 # ===========================================
 FROM base AS development
 RUN npm install
@@ -23,23 +23,25 @@ EXPOSE 8014
 CMD ["npm", "run", "dev"]
 
 # ===========================================
-# Stage: production
+# PROD
 # ===========================================
 FROM base AS production
 
-RUN NODE_OPTIONS="--max-old-space-size=2048" npm ci --omit=dev
+# 🔥 FIX QUAN TRỌNG: đảm bảo install đủ deps (có p-queue)
+RUN npm ci --omit=dev || npm install --omit=dev
 
 COPY . .
 
 EXPOSE 8014
 ENV NODE_ENV=production
 
-# 🔥 WAIT + SYNC SAFE + START
 CMD ["sh", "-c", "\
 echo '⏳ Waiting for services...'; \
 sleep 5; \
-echo '🚀 Start sync (safe mode)...'; \
-node sync_qdrant.js || echo '⚠️ Sync failed, continue...'; \
+echo '🚀 Sync FUND...'; \
+node scripts/sync_fund_qdrant.js || echo '⚠️ FUND failed'; \
+echo '🚀 Sync SCHOLAR...'; \
+node scripts/sync_scholar_qdrant.js || echo '⚠️ SCHOLAR failed'; \
 echo '🚀 Starting server...'; \
 node app.js \
 "]
