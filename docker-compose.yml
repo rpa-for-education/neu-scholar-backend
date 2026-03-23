@@ -11,35 +11,26 @@ services:
       - qdrant_data:/qdrant/storage
 
     environment:
-      - QDRANT__SERVICE__WORKERS=4   # 🔥 giảm tải CPU
-
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:6333/collections || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 25s
+      - QDRANT__SERVICE__WORKERS=4
 
     restart: unless-stopped
     networks:
       - neu-net
 
-  # 👉 SYNC chạy trước backend
   sync:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: neu-scholar-sync
+    container_name: neu-sync   # 🔥 đổi tên ở đây
 
     depends_on:
-      qdrant:
-        condition: service_healthy
+      - qdrant
 
     command: >
       sh -c "
       echo '⏳ Waiting for Qdrant...' &&
-      sleep 10 &&
+      sleep 15 &&
       echo '🚀 Sync FUND...' &&
       node scripts/sync_fund_qdrant.js &&
       echo '🚀 Sync SCHOLAR...' &&
@@ -49,16 +40,14 @@ services:
 
     environment:
       - QDRANT_URL=http://qdrant:6333
-
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
-
       - OLLAMA_BASE_URL=http://10.2.13.58:11434
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
 
-    restart: "no"   # 👉 chạy xong là dừng (đúng logic batch job)
+    restart: "no"
     networks:
       - neu-net
 
@@ -72,22 +61,22 @@ services:
       - "8014:8014"
 
     depends_on:
-      qdrant:
-        condition: service_healthy
-      sync:
-        condition: service_completed_successfully   # 🔥 QUAN TRỌNG
+      - qdrant
+
+    command: >
+      sh -c "
+      echo '⏳ Waiting for data (sync)...' &&
+      sleep 20 &&
+      npm start
+      "
 
     environment:
       - PORT=8014
       - NODE_ENV=production
-
       - QDRANT_URL=http://qdrant:6333
-
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
-
       - SESSION_SECRET=neu-secret
-
       - OLLAMA_BASE_URL=http://10.2.13.58:11434
       - OLLAMA_MODEL=qwen3:8b
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
