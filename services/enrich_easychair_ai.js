@@ -280,6 +280,10 @@ async function run() {
 
         done++;
         console.log(`✅ ${done} (${source})`);
+        console.log(`   📌 ${doc.title || "No title"}`);
+        console.log(`   🔗 ${doc.url}`);
+        console.log(`   📅 ${data.deadline || "No deadline"}`);
+        console.log(`   🌍 ${data.city || ""} ${data.country_code || ""}`);
       } catch (err) {
         console.log("❌ ERROR:", doc.url);
         console.log("👉", err.message);
