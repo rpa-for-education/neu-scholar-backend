@@ -9,7 +9,7 @@ import "dotenv/config";
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB || "fitneu";
 
-const COLLECTION_NAME = "scholar"; // 👉 sửa nếu DB bạn khác
+const COLLECTION_NAME = "scholar"; // 👉 sửa nếu cần
 const QDRANT_COLLECTION = "scholar_vectors";
 
 const QDRANT_URL = process.env.QDRANT_URL;
@@ -81,7 +81,6 @@ async function ensureCollection() {
 
   try {
     await qdrant.getCollection(QDRANT_COLLECTION);
-    console.log("✅ Collection exists");
   } catch {
     console.log("🚀 Creating collection...");
 
@@ -138,7 +137,7 @@ async function main() {
 
   console.log("🚀 Sync SCHOLAR (with progress)...");
 
-  // 🔥 đảm bảo Qdrant sẵn sàng
+  // 🔥 đảm bảo Qdrant OK
   await ensureCollection();
 
   const docs = await db.collection(COLLECTION_NAME).find({}).toArray();
