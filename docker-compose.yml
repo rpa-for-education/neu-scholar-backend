@@ -10,57 +10,21 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-    # ✅ FIX HEALTHCHECK (QUAN TRỌNG)
+    environment:
+      - QDRANT__SERVICE__WORKERS=4   # 🔥 giảm tải CPU
+
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:6333/collections || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 25s   # 👉 tránh check quá sớm
+      start_period: 25s
 
     restart: unless-stopped
     networks:
       - neu-net
 
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    container_name: neu-scholar-backend
-    ports:
-      - "8014:8014"
-
-    depends_on:
-      qdrant:
-        condition: service_healthy
-
-    environment:
-      - PORT=8014
-      - NODE_ENV=production
-
-      # ✅ đúng network nội bộ docker
-      - QDRANT_URL=http://qdrant:6333
-
-      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
-      - MONGODB_DB=${MONGODB_DB:-fitneu}
-
-      - SESSION_SECRET=neu-secret
-
-      # ⚠️ bạn đang dùng proxy → OK
-      - OLLAMA_BASE_URL=http://10.2.13.58:11434
-      - OLLAMA_MODEL=qwen3:8b
-      - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
-      - EMBEDDING_MODE=proxy
-      - USE_OLLAMA_EMBEDDING=true
-
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-    restart: unless-stopped
-    networks:
-      - neu-net
-
+  # 👉 SYNC chạy trước backend
   sync:
     build:
       context: .
@@ -89,13 +53,51 @@ services:
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 
-      # ⚠️ internal IP → OK nếu server bạn mở
       - OLLAMA_BASE_URL=http://10.2.13.58:11434
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
 
-    restart: "no"
+    restart: "no"   # 👉 chạy xong là dừng (đúng logic batch job)
+    networks:
+      - neu-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: neu-scholar-backend
+    ports:
+      - "8014:8014"
+
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      sync:
+        condition: service_completed_successfully   # 🔥 QUAN TRỌNG
+
+    environment:
+      - PORT=8014
+      - NODE_ENV=production
+
+      - QDRANT_URL=http://qdrant:6333
+
+      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
+      - MONGODB_DB=${MONGODB_DB:-fitneu}
+
+      - SESSION_SECRET=neu-secret
+
+      - OLLAMA_BASE_URL=http://10.2.13.58:11434
+      - OLLAMA_MODEL=qwen3:8b
+      - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
+      - EMBEDDING_MODE=proxy
+      - USE_OLLAMA_EMBEDDING=true
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
     networks:
       - neu-net
 
