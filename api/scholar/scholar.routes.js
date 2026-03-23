@@ -1,49 +1,76 @@
-// scholar.routes.js
 import express from "express";
-import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
-import { streamScholar } from "../../agents/scholar/scholar.stream.js";
+import axios from "axios";
+import { QdrantClient } from "@qdrant/js-client-rest";
 
 const router = express.Router();
 
-router.post("/", async (req, res) => {
+// ================= CONFIG =================
+const QDRANT_URL = process.env.QDRANT_URL;
+const COLLECTION = "scholar_vectors";
+
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
+const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
+
+const qdrant = new QdrantClient({
+  url: QDRANT_URL,
+  checkCompatibility: false,
+});
+
+// ================= EMBED =================
+async function embed(text) {
+  const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
+    model: EMBED_MODEL,
+    input: text,
+  });
+
+  return res.data?.embeddings?.[0] || res.data?.embedding;
+}
+
+// ================= SEARCH =================
+async function searchScholar(query, topk = 5) {
+  const vector = await embed(query);
+
+  const result = await qdrant.search(COLLECTION, {
+    vector,
+    limit: topk,
+    with_payload: true,
+  });
+
+  return result.map((r) => ({
+    score: r.score,
+    ...r.payload,
+  }));
+}
+
+// ================= ROUTES =================
+
+// 🔥 POST /api/scholar/ask
+router.post("/ask", async (req, res) => {
   try {
-    const {
-      question,
-      prompt,
-      model_id = "qwen3-8b",
-      topk = 5
-    } = req.body;
+    const { question, topk = 5 } = req.body;
 
-    // ✅ hỗ trợ cả 2
-    const finalQuestion = question || prompt;
-
-    if (!finalQuestion || !finalQuestion.trim()) {
-      return res.status(400).json({
-        error: "Missing or invalid question"
-      });
+    if (!question) {
+      return res.status(400).json({ error: "Missing question" });
     }
 
-    const result = await runScholarAgent(
-      req,
-      finalQuestion,
-      model_id,
-      topk
-    );
+    const data = await searchScholar(question, topk);
 
-    res.json(result);
+    res.json({
+      type: "scholar",
+      total: data.length,
+      data,
+    });
 
   } catch (err) {
-    console.error("❌ Scholar error:", err);
-
-    res.status(500).json({
-      error: err.message
-    });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-router.post("/stream", async (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  await streamScholar(req, res, req.body.question);
+// (optional) giữ endpoint cũ
+router.post("/", async (req, res) => {
+  req.url = "/ask";
+  router.handle(req, res);
 });
 
 export default router;
