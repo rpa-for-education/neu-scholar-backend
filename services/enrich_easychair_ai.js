@@ -11,7 +11,7 @@ const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
-/* ================= PATH FIX (DOCKER SAFE) ================= */
+/* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
@@ -26,10 +26,10 @@ let geoLoaded = false;
 
 /* ================= GEO LOADER ================= */
 async function initGeo() {
-  if (geoLoaded) return; // 🔥 load 1 lần duy nhất
+  if (geoLoaded) return;
 
   try {
-    console.log("🌍 Loading geo data...");
+    console.log("🌍 Loading geo (population + lat/lng)...");
 
     const geoText = await fs.readFile(CITY_FILE, "utf8");
     const lines = geoText.split("\n");
@@ -38,12 +38,28 @@ async function initGeo() {
 
     for (const line of lines) {
       const cols = line.split("\t");
+
       const city = cols[1];
       const countryCode = cols[8];
+      const lat = parseFloat(cols[4]);
+      const lng = parseFloat(cols[5]);
+      const feature = cols[7];
+      const population = parseInt(cols[14] || "0");
 
-      if (city && countryCode) {
-        geoMap.set(city.toLowerCase(), countryCode);
-      }
+      if (!city || !countryCode) continue;
+
+      const key = city.toLowerCase();
+
+      const obj = {
+        country_code: countryCode,
+        lat,
+        lng,
+        population,
+        isCapital: feature === "PPLC",
+      };
+
+      if (!geoMap.has(key)) geoMap.set(key, []);
+      geoMap.get(key).push(obj);
     }
 
     continentMap = JSON.parse(
@@ -56,24 +72,79 @@ async function initGeo() {
   } catch (err) {
     console.error("❌ Geo load failed:", err.message);
 
-    // 🔥 fallback để hệ thống không crash
     geoMap = new Map();
     continentMap = {};
     geoLoaded = true;
   }
 }
 
-/* ================= CLEAN ================= */
+/* ================= GEO LOGIC ================= */
+function normalizeCity(s) {
+  return s
+    .replace(/university|institute|college/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractCityCandidate(text) {
+  const patterns = [
+    /held at ([^,]+),/i,
+    /in ([A-Za-z'’\- ]+),\s*[A-Za-z ]+,\s*(?:from|on)/i,
+    /takes place in ([^,]+),/i,
+  ];
+
+  for (const regex of patterns) {
+    const match = text.match(regex);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
+function pickBestCity(candidates, text) {
+  if (!candidates || candidates.length === 0) return null;
+
+  // ưu tiên capital
+  const capital = candidates.find((c) => c.isCapital);
+  if (capital) return capital;
+
+  // ưu tiên population
+  candidates.sort((a, b) => b.population - a.population);
+  return candidates[0];
+}
+
+function extractGeo(text) {
+  if (!geoMap) return {};
+
+  const rawCity = extractCityCandidate(text);
+  if (!rawCity) return {};
+
+  const city = normalizeCity(rawCity);
+  const candidates = geoMap.get(city.toLowerCase());
+
+  if (!candidates) return { city };
+
+  const best = pickBestCity(candidates, text);
+  if (!best) return { city };
+
+  return {
+    city,
+    country_code: best.country_code,
+    continent: continentMap[best.country_code] || null,
+    lat: best.lat,
+    lng: best.lng,
+  };
+}
+
+/* ================= TEXT ================= */
 function cleanText(text) {
   return text
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .replace(/EasyChair.*?Log in/i, "")
-    .replace(/User Guide.*?Watchlist/i, "")
     .trim();
 }
 
-/* ================= SAFE CUT ================= */
 function safeCut(text) {
   if (text.length <= MAX_CFP_LENGTH) return text;
 
@@ -87,15 +158,8 @@ function safeCut(text) {
   return cut;
 }
 
-/* ================= TRIM CFP ================= */
 function trimCFP(text) {
-  const stopKeywords = [
-    "committee",
-    "editor",
-    "journal",
-    "registration fee",
-    "abstracting/indexing",
-  ];
+  const stopKeywords = ["committee", "editor", "journal"];
 
   let lower = text.toLowerCase();
   let cutIndex = text.length;
@@ -122,83 +186,20 @@ function parseDateToISO(text) {
   const match = text.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
   if (!match) return null;
 
-  const month = months[match[1].toLowerCase()];
-  const day = match[2].padStart(2, "0");
-  const year = match[3];
-
-  return month ? `${year}-${month}-${day}` : null;
+  return `${match[3]}-${months[match[1].toLowerCase()]}-${match[2].padStart(2, "0")}`;
 }
 
 function extractDeadline(text) {
-  const match = text.match(
-    /(deadline|due|submission).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
-  );
-
+  const match = text.match(/(deadline|submission).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
   return match ? parseDateToISO(match[2]) : null;
-}
-
-/* ================= GEO ================= */
-function normalizeCity(s) {
-  return s
-    .replace(/\s+/g, " ")
-    .replace(/,\s*[^,]+$/, "")
-    .replace(/university|institute|college/gi, "")
-    .trim();
-}
-
-function extractCityCandidate(text) {
-  const patterns = [
-    /held at ([^,]+),/i,
-    /in ([A-Za-z'’\- ]+),\s*[A-Za-z ]+,\s*(?:from|on)/i,
-    /takes place in ([^,]+),/i,
-  ];
-
-  for (const regex of patterns) {
-    const match = text.match(regex);
-    if (match) return match[1];
-  }
-
-  return null;
-}
-
-function extractGeo(text) {
-  if (!geoMap) return {};
-
-  const rawCity = extractCityCandidate(text);
-  if (!rawCity) return {};
-
-  const city = normalizeCity(rawCity);
-  const code = geoMap.get(city.toLowerCase());
-
-  return {
-    city,
-    country_code: code || null,
-    continent: code ? continentMap[code] : null,
-  };
 }
 
 /* ================= LINK ================= */
 function cleanLink(link) {
-  const match = link?.match(/https?:\/\/[^\s"]+/);
-  if (!match) return null;
-
-  const confMatch = match[0].match(/conf=[a-zA-Z0-9_-]+/);
-
-  return confMatch
-    ? `https://easychair.org/conferences/?${confMatch[0]}`
-    : match[0];
-}
-
-/* ================= TOPICS ================= */
-function extractTopics(text) {
-  const match = text.match(/theme:(.*?)(\.|\n)/i);
-
-  if (!match) return [];
-
-  return match[1]
-    .split(/,|—|-/)
-    .map((t) => t.trim())
-    .filter(Boolean);
+  const match = link?.match(/conf=[a-zA-Z0-9_-]+/);
+  return match
+    ? `https://easychair.org/conferences/?${match[0]}`
+    : null;
 }
 
 /* ================= RANK ================= */
@@ -208,7 +209,6 @@ function rankConference(text) {
   if (/ieee/i.test(text)) score += 3;
   if (/springer/i.test(text)) score += 3;
   if (/scopus/i.test(text)) score += 2;
-  if (/wos|web of science/i.test(text)) score += 2;
 
   if (score >= 7) return "A*";
   if (score >= 5) return "A";
@@ -219,8 +219,7 @@ function rankConference(text) {
 /* ================= PARSER ================= */
 function parseEasyChair(html) {
   const $ = cheerio.load(html);
-
-  $("script, style, nav, footer, header").remove();
+  $("script, style").remove();
 
   const bodyText = cleanText($("body").text());
 
@@ -231,7 +230,7 @@ function parseEasyChair(html) {
     if (t.length > 80) cfp_text += t + "\n";
   });
 
-  cfp_text = safeCut(trimCFP(cleanText(cfp_text)));
+  cfp_text = safeCut(trimCFP(cfp_text));
 
   let submission_link = null;
 
@@ -242,39 +241,30 @@ function parseEasyChair(html) {
     }
   });
 
-  const deadline = extractDeadline(bodyText);
-  const topics = extractTopics(bodyText);
-  const geo = extractGeo(bodyText);
-  const rank = rankConference(bodyText);
-
   return {
     cfp_text,
     submission_link,
-    deadline,
-    topics,
-    ...geo,
-    rank,
+    deadline: extractDeadline(bodyText),
+    rank: rankConference(bodyText),
+    ...extractGeo(bodyText),
   };
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 AI Enrich FINAL (OPTIMIZED GEO)...");
+  console.log("🚀 AI Enrich FINAL (GEO PRO)...");
 
   await initGeo();
 
   const db = await getDb();
   const col = db.collection("conference");
 
-  const docs = await col
-    .find({
-      $or: [
-        { cfp_text: { $exists: false } },
-        { cfp_text: "" },
-      ],
-    })
-    .limit(5000)
-    .toArray();
+  const docs = await col.find({
+    $or: [
+      { cfp_text: { $exists: false } },
+      { cfp_text: "" }
+    ]
+  }).limit(5000).toArray();
 
   const queue = new PQueue({ concurrency: CONCURRENCY });
 
@@ -283,15 +273,11 @@ async function run() {
   for (const doc of docs) {
     queue.add(async () => {
       try {
-        console.log("🌐 Fetch:", doc.url);
+        console.log("🌐", doc.url);
 
-        const res = await axios.get(doc.url, {
-          timeout: TIMEOUT,
-        });
+        const res = await axios.get(doc.url, { timeout: TIMEOUT });
 
-        const html = res.data;
-
-        const data = parseEasyChair(html);
+        const data = parseEasyChair(res.data);
 
         await col.updateOne(
           { _id: doc._id },
@@ -299,22 +285,22 @@ async function run() {
             $set: {
               ...data,
               status: "done",
-              updated_time: new Date().toISOString(),
-            },
+              updated_time: new Date().toISOString()
+            }
           }
         );
 
         count++;
-        console.log(`✅ Done: ${count}`);
-      } catch (err) {
-        console.log("❌ Failed:", doc.url);
+        console.log("✅", count);
+      } catch {
+        console.log("❌", doc.url);
       }
     });
   }
 
   await queue.onIdle();
 
-  console.log("🎯 DONE CFP ENRICH");
+  console.log("🎯 DONE");
   process.exit(0);
 }
 
