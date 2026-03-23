@@ -9,10 +9,8 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-
     environment:
       - QDRANT__SERVICE__WORKERS=4
-
     restart: unless-stopped
     networks:
       - neu-net
@@ -27,10 +25,13 @@ services:
     depends_on:
       - qdrant
 
+    # ✅ FIX: wait Qdrant thật sự ready (không dùng sleep)
     command: >
       sh -c "
       echo '⏳ Waiting for Qdrant...' &&
-      sleep 15 &&
+      until curl -s http://qdrant:6333/collections > /dev/null; do
+        sleep 2;
+      done &&
       echo '🚀 Sync FUND...' &&
       node scripts/sync_fund_qdrant.js &&
       echo '🚀 Sync SCHOLAR...' &&
@@ -40,12 +41,21 @@ services:
 
     environment:
       - QDRANT_URL=http://qdrant:6333
+
+      # ✅ Mongo giữ nguyên
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
-      - OLLAMA_BASE_URL=http://10.2.13.58:11434
+
+      # ✅ FIX QUAN TRỌNG: dùng host.docker.internal
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+      # (không cần nhưng giữ cũng ok)
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     restart: "no"
     networks:
@@ -63,6 +73,7 @@ services:
     depends_on:
       - qdrant
 
+    # ✅ giữ sleep cho backend (sync xong là đủ)
     command: >
       sh -c "
       echo '⏳ Waiting for data (sync)...' &&
@@ -73,13 +84,20 @@ services:
     environment:
       - PORT=8014
       - NODE_ENV=production
+
       - QDRANT_URL=http://qdrant:6333
+
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
+
       - SESSION_SECRET=neu-secret
-      - OLLAMA_BASE_URL=http://10.2.13.58:11434
+
+      # ✅ FIX giống sync
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+
       - OLLAMA_MODEL=qwen3:8b
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
+
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
 
