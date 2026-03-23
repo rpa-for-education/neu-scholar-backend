@@ -1,88 +1,100 @@
-import { runAgent } from "./scholar.agent.js";
-import { callLLM } from "../shared/llm.js";
-import { getSessionHistory, addToHistory } from "../../middlewares/session.js";
-import { buildScholarPrompt } from "./scholar.prompt.js";
+import express from "express";
+import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
+import { streamScholar } from "../../agents/scholar/scholar.stream.js";
 
-export async function runScholarAgent(req, question, model_id, topk) {
-  const start = Date.now();
+const router = express.Router();
 
+// ================= UTILS =================
+function safeTopk(topk) {
+  const n = Number(topk);
+  return n && n > 0 ? Math.min(n, 5) : 5;
+}
+
+// ================= CORE =================
+async function handleAsk(req, res) {
   try {
-    const history = getSessionHistory(req) || [];
+    const {
+      question,
+      prompt,
+      query,
+      message,
+      model_id = "qwen3-4b",
+      topk
+    } = req.body || {};
 
-    // 🔍 SEARCH + reasoning
-    const result = await runAgent(question, topk);
+    const finalQuestion = (
+      question ||
+      prompt ||
+      query ||
+      message ||
+      ""
+    ).trim();
 
-    const conferences = result?.conferences || [];
-    const journals = result?.journals || [];
-
-    // 👉 empty
-    if (!conferences.length && !journals.length) {
-      return {
-        model_id,
-        answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
-        retrieved: {
-          conferences: [],
-          journals: []
-        },
-        domain: "empty",
-        analysis: {},
-        responseTimeMs: Date.now() - start
-      };
+    if (!finalQuestion) {
+      return res.status(400).json({
+        error: "Missing question"
+      });
     }
 
-    // 🧠 BUILD PROMPT
-    const prompt = buildScholarPrompt(
-      question,
-      conferences,
-      journals,
-      history
+    const finalTopk = safeTopk(topk);
+
+    const result = await runScholarAgent(
+      req,
+      finalQuestion,
+      model_id,
+      finalTopk
     );
 
-    let answer = "";
-
-    try {
-      const llm = await callLLM(prompt, model_id);
-      answer = llm?.answer || llm?.response || "";
-    } catch (err) {
-      console.error("❌ LLM error:", err.message);
-    }
-
-    // 🔥 fallback
-    if (!answer || answer.trim().length < 10) {
-      answer =
-        "Tôi đã tìm thấy một số hội thảo/tạp chí liên quan. Bạn có thể tham khảo danh sách bên dưới.";
-    }
-
-    // 💾 history
-    try {
-      addToHistory(req, question, answer);
-    } catch {}
-
-    return {
-      model_id,
-      answer,
-      retrieved: {
-        conferences,
-        journals
-      },
-      domain: result?.domain || "general",
-      analysis: result?.analysis || {},
-      responseTimeMs: Date.now() - start
-    };
+    return res.json(result);
 
   } catch (err) {
-    console.error("❌ Scholar agent crash:", err);
+    console.error("❌ Scholar error:", err);
 
-    return {
-      model_id,
-      answer: "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
-      retrieved: {
-        conferences: [],
-        journals: []
-      },
-      domain: "error",
-      analysis: {},
-      responseTimeMs: Date.now() - start
-    };
+    return res.status(200).json({
+      success: false,
+      error: err.message || "Internal error",
+      data: []
+    });
   }
 }
+
+// ================= ROUTES =================
+router.post("/", handleAsk);
+router.post("/ask", handleAsk);
+
+// ================= STREAM =================
+router.post("/stream", async (req, res) => {
+  try {
+    const { question, prompt, query, message, topk } = req.body || {};
+
+    const finalQuestion = (
+      question ||
+      prompt ||
+      query ||
+      message ||
+      ""
+    ).trim();
+
+    if (!finalQuestion) {
+      res.write(`data: Missing question\n\n`);
+      return res.end();
+    }
+
+    const finalTopk = safeTopk(topk);
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    await streamScholar(req, res, finalQuestion, finalTopk);
+
+  } catch (err) {
+    console.error("❌ Stream Scholar error:", err);
+
+    res.write(`data: Error: ${err.message}\n\n`);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  }
+});
+
+export default router;
