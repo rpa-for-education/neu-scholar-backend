@@ -10,17 +10,25 @@ function safeTopk(topk) {
   return n && n > 0 ? n : 5;
 }
 
-// ================= NORMAL API =================
-router.post("/", async (req, res) => {
+// ================= CORE HANDLER =================
+async function handleAsk(req, res) {
   try {
     const {
       question,
       prompt,
+      query,
+      message,
       model_id = "qwen3-8b",
       topk
     } = req.body;
 
-    const finalQuestion = (question || prompt || "").trim();
+    const finalQuestion = (
+      question ||
+      prompt ||
+      query ||
+      message ||
+      ""
+    ).trim();
 
     if (!finalQuestion) {
       return res.status(400).json({
@@ -37,23 +45,35 @@ router.post("/", async (req, res) => {
       finalTopk
     );
 
-    res.json(result);
+    return res.json(result);
 
   } catch (err) {
     console.error("❌ Fund error:", err);
 
-    res.status(500).json({
-      error: err.message || "Internal server error"
+    return res.status(200).json({
+      success: false,
+      error: err.message || "Internal error",
+      data: []
     });
   }
-});
+}
 
-// ================= STREAM API =================
+// ================= ROUTES =================
+router.post("/", handleAsk);
+router.post("/ask", handleAsk);
+
+// ================= STREAM =================
 router.post("/stream", async (req, res) => {
   try {
-    const { question, prompt, topk } = req.body;
+    const { question, prompt, query, message, topk } = req.body;
 
-    const finalQuestion = (question || prompt || "").trim();
+    const finalQuestion = (
+      question ||
+      prompt ||
+      query ||
+      message ||
+      ""
+    ).trim();
 
     if (!finalQuestion) {
       res.write(`data: Missing question\n\n`);
@@ -75,12 +95,6 @@ router.post("/stream", async (req, res) => {
     res.write(`data: [DONE]\n\n`);
     res.end();
   }
-});
-
-// ================= ASK API (ALIAS) =================
-router.post("/ask", async (req, res) => {
-  req.url = "/";
-  router.handle(req, res);
 });
 
 export default router;
