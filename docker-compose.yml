@@ -17,70 +17,36 @@ services:
     networks:
       - neu-net
 
-  sync:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    container_name: neu-sync   # 🔥 đổi tên ở đây
-
-    depends_on:
-      - qdrant
-
-    command: >
-      sh -c "
-      echo '⏳ Waiting for Qdrant...' &&
-      sleep 15 &&
-      echo '🚀 Sync FUND...' &&
-      node scripts/sync_fund_qdrant.js &&
-      echo '🚀 Sync SCHOLAR...' &&
-      node scripts/sync_scholar_qdrant.js &&
-      echo '✅ Sync DONE'
-      "
-
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-      - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
-      - MONGODB_DB=${MONGODB_DB:-fitneu}
-      - OLLAMA_BASE_URL=http://10.2.13.58:11434
-      - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
-      - EMBEDDING_MODE=proxy
-      - USE_OLLAMA_EMBEDDING=true
-
-    restart: "no"
-    networks:
-      - neu-net
-
   backend:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: neu-scholar-backend
+    container_name: neu-backend
     ports:
       - "8014:8014"
 
     depends_on:
       - qdrant
 
-    command: >
-      sh -c "
-      echo '⏳ Waiting for data (sync)...' &&
-      sleep 20 &&
-      npm start
-      "
-
     environment:
       - PORT=8014
       - NODE_ENV=production
+
+      # Qdrant
       - QDRANT_URL=http://qdrant:6333
+
+      # Mongo
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
+
+      # Session
       - SESSION_SECRET=neu-secret
+
+      # 🔥 Ollama (TỐI ƯU)
       - OLLAMA_BASE_URL=http://10.2.13.58:11434
-      - OLLAMA_MODEL=qwen3:8b
+      - OLLAMA_MODEL=qwen3:4b
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
-      - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
 
     extra_hosts:
@@ -89,6 +55,9 @@ services:
     restart: unless-stopped
     networks:
       - neu-net
+
+# ❌ KHÔNG chạy sync trong compose
+# 👉 chạy thủ công khi cần
 
 volumes:
   qdrant_data:
