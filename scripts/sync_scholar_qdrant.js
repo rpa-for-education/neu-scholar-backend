@@ -2,8 +2,10 @@ import { MongoClient } from "mongodb";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import axios from "axios";
 import { v5 as uuidv5 } from "uuid";
+import fs from "fs";
 import "dotenv/config";
 
+// ================= P-QUEUE =================
 let PQueue;
 try {
   PQueue = (await import("p-queue")).default;
@@ -19,14 +21,12 @@ const COLLECTION = "scholar_vectors";
 const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-
-// ❗ FIX CỨNG MODEL
 const MODEL = "qwen3-embedding:8b";
 
 const UUID_NAMESPACE = uuidv5.URL;
 
 const BATCH_SIZE = 64;
-const CONCURRENCY = 5;
+const CONCURRENCY = 8; // 🚀 tăng tốc
 const RETRY = 2;
 
 // ================= INIT =================
@@ -49,7 +49,20 @@ const queue = PQueue
       onIdle: async () => {},
     };
 
-// ================= UTILS =================
+// ================= LOG FILE =================
+const errorLog = fs.createWriteStream("journal_errors.log", { flags: "a" });
+
+// ================= SAFE UTILS =================
+function safe(val) {
+  if (!val) return "";
+
+  if (Array.isArray(val)) return val.join(" ");
+
+  if (typeof val === "object") return JSON.stringify(val);
+
+  return String(val);
+}
+
 function qid(key) {
   return uuidv5(String(key), UUID_NAMESPACE);
 }
@@ -57,26 +70,26 @@ function qid(key) {
 function buildHash(doc, type) {
   if (type === "conference") {
     return JSON.stringify({
-      name: doc.name,
-      deadline: doc.deadline,
+      name: safe(doc.name),
+      deadline: safe(doc.deadline),
     });
   }
 
   return JSON.stringify({
-    title: doc.title,
-    quartile: doc.sjr_best_quartile,
-    sjr: doc.sjr,
+    title: safe(doc.title),
+    quartile: safe(doc.sjr_best_quartile),
+    sjr: safe(doc.sjr),
   });
 }
 
 // ================= BUILD TEXT =================
 function buildConferenceText(doc) {
   return [
-    doc.name,
-    doc.acronym,
-    doc.topics,
-    doc.city,
-    doc.country,
+    safe(doc.name),
+    safe(doc.acronym),
+    safe(doc.topics),
+    safe(doc.city),
+    safe(doc.country),
   ]
     .filter(Boolean)
     .join(" ")
@@ -86,11 +99,11 @@ function buildConferenceText(doc) {
 
 function buildJournalText(doc) {
   return [
-    doc.title,
-    doc.categories,
-    doc.areas,
-    doc.publisher,
-    doc.sjr_best_quartile,
+    safe(doc.title),
+    safe(doc.categories),
+    safe(doc.areas),
+    safe(doc.publisher),
+    safe(doc.sjr_best_quartile),
   ]
     .filter(Boolean)
     .join(" ")
@@ -108,10 +121,7 @@ async function embed(text, retry = RETRY) {
 
     const vec = res.data?.embeddings?.[0];
 
-    if (!vec) {
-      console.error("❌ No embedding → check model:", MODEL);
-      throw new Error("No embedding");
-    }
+    if (!vec) throw new Error("No embedding");
 
     return vec;
 
@@ -142,24 +152,42 @@ async function ensureCollection(vectorSize) {
   }
 }
 
+// ================= UPSERT BATCH =================
+async function flushBatch(batch, stats) {
+  if (!batch.length) return;
+
+  try {
+    const sending = batch.splice(0);
+    await qdrant.upsert(COLLECTION, { points: sending });
+    stats.updated += sending.length;
+  } catch (err) {
+    console.error("❌ Qdrant upsert error:", err.message);
+  }
+}
+
 // ================= MAIN =================
 async function main() {
   await mongo.connect();
   const db = mongo.db(DB_NAME);
 
-  console.log("🚀 SYNC SCHOLAR (qwen3-embedding)");
+  console.log("🚀 SYNC SCHOLAR (OPTIMIZED)");
 
   const conferenceCursor = db.collection("conference").find({});
   const journalCursor = db.collection("journal").find({});
 
   const batch = [];
 
-  let processed = 0;
-  let updated = 0;
+  const stats = {
+    processed: 0,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+  };
 
+  // 👉 detect vector size
   const testVec = await embed("test scholar");
   if (!testVec) {
-    console.error("❌ Cannot get embedding → check qwen3 model");
+    console.error("❌ Cannot get embedding → check Ollama");
     process.exit(1);
   }
 
@@ -168,104 +196,118 @@ async function main() {
 
   await ensureCollection(VECTOR_SIZE);
 
-  // ===== CONFERENCE =====
+  // ================= CONFERENCE =================
   while (await conferenceCursor.hasNext()) {
     const doc = await conferenceCursor.next();
 
     await queue.add(async () => {
       try {
-        const id = qid(doc._id);
         const text = buildConferenceText(doc);
-        if (!text) return;
+        if (!text) {
+          stats.skipped++;
+          return;
+        }
 
         const vector = await embed(text);
-        if (!vector) return;
+        if (!vector) {
+          stats.skipped++;
+          return;
+        }
 
         batch.push({
-          id,
+          id: qid(doc._id.toString()),
           vector,
           payload: {
             type: "conference",
-            name: doc.name,
-            acronym: doc.acronym,
-            deadline: doc.deadline,
-            city: doc.city,
-            country: doc.country,
-            topics: doc.topics,
-            url: doc.url,
+            name: safe(doc.name),
+            acronym: safe(doc.acronym),
+            deadline: safe(doc.deadline),
+            city: safe(doc.city),
+            country: safe(doc.country),
+            topics: safe(doc.topics),
+            url: safe(doc.url),
             text,
             hash: buildHash(doc, "conference"),
           },
         });
 
         if (batch.length >= BATCH_SIZE) {
-          const sending = batch.splice(0);
-          await qdrant.upsert(COLLECTION, { points: sending });
-          updated += sending.length;
+          await flushBatch(batch, stats);
         }
 
-        processed++;
+        stats.processed++;
+
+        if (stats.processed % 100 === 0) {
+          console.log(`⚡ processed=${stats.processed} updated=${stats.updated}`);
+        }
 
       } catch (err) {
-        console.error("❌ Conference error:", doc._id);
+        stats.errors++;
+        errorLog.write(`[CONF] ${doc._id} ${err.message}\n`);
       }
     });
   }
 
-  // ===== JOURNAL =====
+  // ================= JOURNAL =================
   while (await journalCursor.hasNext()) {
     const doc = await journalCursor.next();
 
     await queue.add(async () => {
       try {
-        const id = qid(doc._id);
         const text = buildJournalText(doc);
-        if (!text) return;
+        if (!text) {
+          stats.skipped++;
+          return;
+        }
 
         const vector = await embed(text);
-        if (!vector) return;
+        if (!vector) {
+          stats.skipped++;
+          return;
+        }
 
         batch.push({
-          id,
+          id: qid(doc._id.toString()),
           vector,
           payload: {
             type: "journal",
-            title: doc.title,
-            publisher: doc.publisher,
-            quartile: doc.sjr_best_quartile,
-            sjr: doc.sjr,
-            categories: doc.categories,
-            areas: doc.areas,
-            url: doc.scimago_link,
+            title: safe(doc.title),
+            publisher: safe(doc.publisher),
+            quartile: safe(doc.sjr_best_quartile),
+            sjr: safe(doc.sjr),
+            categories: safe(doc.categories),
+            areas: safe(doc.areas),
+            url: safe(doc.scimago_link),
             text,
             hash: buildHash(doc, "journal"),
           },
         });
 
         if (batch.length >= BATCH_SIZE) {
-          const sending = batch.splice(0);
-          await qdrant.upsert(COLLECTION, { points: sending });
-          updated += sending.length;
+          await flushBatch(batch, stats);
         }
 
-        processed++;
+        stats.processed++;
+
+        if (stats.processed % 100 === 0) {
+          console.log(`⚡ processed=${stats.processed} updated=${stats.updated}`);
+        }
 
       } catch (err) {
-        console.error("❌ Journal error:", doc._id);
+        stats.errors++;
+        errorLog.write(`[JOURNAL] ${doc._id} ${err.message}\n`);
       }
     });
   }
 
   await queue.onIdle();
 
-  if (batch.length) {
-    await qdrant.upsert(COLLECTION, { points: batch });
-    updated += batch.length;
-  }
+  await flushBatch(batch, stats);
 
-  console.log("🎯 DONE", { processed, updated });
+  console.log("🎯 DONE", stats);
 
   await mongo.close();
+  errorLog.end();
 }
 
 main();
