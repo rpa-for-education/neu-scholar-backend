@@ -5,12 +5,19 @@ import { getDb } from "../../db/mongo.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
 // ================= CONFIG =================
-const MAX_CANDIDATES = 15; // 🔥 giảm từ 30 → 15
+const MAX_CANDIDATES = 15;
 const FINAL_TOPK = 5;
 
-// ================= SAFE STRING =================
+// ================= SAFE =================
+function safe(x) {
+  if (!x) return "";
+  if (Array.isArray(x)) return x.join(", ");
+  if (typeof x === "object") return JSON.stringify(x);
+  return String(x);
+}
+
 function safeLower(x) {
-  return (x || "").toString().toLowerCase();
+  return safe(x).toLowerCase();
 }
 
 // ================= DEDUPE =================
@@ -36,8 +43,8 @@ function escapeRegex(text) {
 async function keywordSearch(question) {
   const db = await getDb();
 
-  const safe = escapeRegex(question);
-  const regex = new RegExp(safe, "i");
+  const safeQ = escapeRegex(question);
+  const regex = new RegExp(safeQ, "i");
 
   const journals = await db.collection("journal")
     .find({ title: regex })
@@ -50,6 +57,65 @@ async function keywordSearch(question) {
     .toArray();
 
   return { journals, conferences };
+}
+
+// ================= FORMAT OUTPUT (🔥 NEW) =================
+function formatFinalAnswer(answer, conferences, journals) {
+  let content = answer || "";
+
+  // ===== CONFERENCE SECTION =====
+  if (conferences.length) {
+    content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
+
+    conferences.forEach((c, i) => {
+      const deadline = c.deadline || "N/A";
+      const country = c.country || "";
+      const city = c.city || "";
+
+      let badge = "";
+      if (c.deadline) {
+        const days =
+          (new Date(c.deadline) - new Date()) / (1000 * 60 * 60 * 24);
+
+        if (days < 30) badge = "🔥 Sắp hết hạn";
+        else if (days < 90) badge = "⏳ Còn hạn gần";
+      }
+
+      content += `### ${i + 1}. [C${i + 1}] ${safe(c.name)}  
+- 📍 ${city} ${country}  
+- 📅 ${deadline} ${badge}  
+`;
+    });
+
+    // ===== LINKS =====
+    content += `\n## 🔗 Link hội thảo\n\n`;
+
+    conferences.forEach((c, i) => {
+      content += `- [C${i + 1}] ${safe(c.name)}  
+  👉 ${safe(c.url) || "#"}\n\n`;
+    });
+  }
+
+  // ===== JOURNAL SECTION =====
+  if (journals.length) {
+    content += `\n## 📚 Tạp chí liên quan\n\n`;
+
+    journals.forEach((j, i) => {
+      content += `### ${i + 1}. [J${i + 1}] ${safe(j.title)}  
+- 🏢 ${safe(j.publisher)}  
+- 🏆 ${safe(j.sjr_best_quartile)}  
+`;
+    });
+
+    content += `\n## 🔗 Link tạp chí\n\n`;
+
+    journals.forEach((j, i) => {
+      content += `- [J${i + 1}] ${safe(j.title)}  
+  👉 ${safe(j.scimago_link) || "#"}\n\n`;
+    });
+  }
+
+  return content;
 }
 
 // ================= MAIN =================
@@ -99,9 +165,12 @@ export async function runAgent(question, topk = FINAL_TOPK) {
       };
     }
 
-    // ================= SORT (THAY RERANK LLM) =================
+    // ================= SORT =================
     conferences.sort((a, b) => (b.score || 0) - (a.score || 0));
     journals.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    const topConfs = conferences.slice(0, topk);
+    const topJournals = journals.slice(0, topk);
 
     // ================= BUILD PROMPT =================
     let context = `
@@ -110,17 +179,17 @@ Chỉ dùng dữ liệu dưới đây. Không bịa.
 
 `;
 
-    conferences.slice(0, FINAL_TOPK).forEach((c, i) => {
-      context += `[C${i + 1}] ${c.name} | ${c.city || ""} ${c.country || ""}\n`;
+    topConfs.forEach((c, i) => {
+      context += `[C${i + 1}] ${safe(c.name)} | ${safe(c.country)}\n`;
     });
 
-    journals.slice(0, FINAL_TOPK).forEach((j, i) => {
-      context += `[J${i + 1}] ${j.title} | ${j.publisher || ""}\n`;
+    topJournals.forEach((j, i) => {
+      context += `[J${i + 1}] ${safe(j.title)} | ${safe(j.publisher)}\n`;
     });
 
     context += `\nCâu hỏi: ${question}`;
 
-    // ================= FINAL LLM (CHỈ 1 LẦN) =================
+    // ================= LLM =================
     let answer = "";
 
     try {
@@ -130,15 +199,21 @@ Chỉ dùng dữ liệu dưới đây. Không bịa.
       console.error("❌ LLM error:", err.message);
     }
 
-    // 🔥 fallback nếu LLM fail
     if (!answer || answer.trim().length < 10) {
-      answer = `Tôi đã tìm thấy ${conferences.length + journals.length} kết quả liên quan. Xem danh sách bên dưới.`;
+      answer = `Tôi đã tìm thấy ${topConfs.length + topJournals.length} kết quả liên quan.`;
     }
 
-    return {
+    // ================= FORMAT FINAL (🔥 KEY) =================
+    const finalAnswer = formatFinalAnswer(
       answer,
-      conferences: conferences.slice(0, topk),
-      journals: journals.slice(0, topk),
+      topConfs,
+      topJournals
+    );
+
+    return {
+      answer: finalAnswer,
+      conferences: topConfs,
+      journals: topJournals,
       domain,
       analysis,
       responseTimeMs: Date.now() - start
