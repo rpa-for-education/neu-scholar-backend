@@ -1,11 +1,11 @@
-// agent/agent.js
+// scholar.agent.js
 import { searchConferenceJournalByVector } from "./scholar.search.js";
 import { callLLM } from "../shared/llm.js";
 import { getDb } from "../../db/mongo.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
 // ================= CONFIG =================
-const MAX_CANDIDATES = 30;
+const MAX_CANDIDATES = 15; // 🔥 giảm từ 30 → 15
 const FINAL_TOPK = 5;
 
 // ================= SAFE STRING =================
@@ -52,48 +52,6 @@ async function keywordSearch(question) {
   return { journals, conferences };
 }
 
-// ================= SAFE JSON =================
-function safeParseJSON(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-// ================= RERANK =================
-async function rerankWithLLM(question, items) {
-  if (!items.length) return [];
-
-  const prompt = `
-Bạn là AI chọn lọc dữ liệu.
-
-Câu hỏi:
-${question}
-
-Danh sách:
-${items.map((it, i) => `[${i}] ${it.title || it.name}`).join("\n")}
-
-Chọn TOP ${FINAL_TOPK}.
-
-Chỉ trả JSON:
-{"indexes":[0,1,2]}
-`;
-
-  try {
-    const res = await callLLM(prompt);
-
-    const json = safeParseJSON(res.answer);
-
-    if (!json?.indexes) return items.slice(0, FINAL_TOPK);
-
-    return json.indexes.map(i => items[i]).filter(Boolean);
-
-  } catch {
-    return items.slice(0, FINAL_TOPK);
-  }
-}
-
 // ================= MAIN =================
 export async function runAgent(question, topk = FINAL_TOPK) {
   const start = Date.now();
@@ -135,13 +93,15 @@ export async function runAgent(question, topk = FINAL_TOPK) {
         answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
         conferences: [],
         journals: [],
-        domain: "empty"
+        domain: "empty",
+        analysis,
+        responseTimeMs: Date.now() - start
       };
     }
 
-    // ================= RERANK =================
-    conferences = await rerankWithLLM(question, conferences);
-    journals = await rerankWithLLM(question, journals);
+    // ================= SORT (THAY RERANK LLM) =================
+    conferences.sort((a, b) => (b.score || 0) - (a.score || 0));
+    journals.sort((a, b) => (b.score || 0) - (a.score || 0));
 
     // ================= BUILD PROMPT =================
     let context = `
@@ -150,24 +110,37 @@ Chỉ dùng dữ liệu dưới đây. Không bịa.
 
 `;
 
-    conferences.forEach((c, i) => {
+    conferences.slice(0, FINAL_TOPK).forEach((c, i) => {
       context += `[C${i + 1}] ${c.name} | ${c.city || ""} ${c.country || ""}\n`;
     });
 
-    journals.forEach((j, i) => {
+    journals.slice(0, FINAL_TOPK).forEach((j, i) => {
       context += `[J${i + 1}] ${j.title} | ${j.publisher || ""}\n`;
     });
 
     context += `\nCâu hỏi: ${question}`;
 
-    // ================= FINAL LLM =================
-    const llm = await callLLM(context);
+    // ================= FINAL LLM (CHỈ 1 LẦN) =================
+    let answer = "";
+
+    try {
+      const llm = await callLLM(context);
+      answer = llm?.answer || "";
+    } catch (err) {
+      console.error("❌ LLM error:", err.message);
+    }
+
+    // 🔥 fallback nếu LLM fail
+    if (!answer || answer.trim().length < 10) {
+      answer = `Tôi đã tìm thấy ${conferences.length + journals.length} kết quả liên quan. Xem danh sách bên dưới.`;
+    }
 
     return {
-      answer: llm.answer || "",
+      answer,
       conferences: conferences.slice(0, topk),
       journals: journals.slice(0, topk),
       domain,
+      analysis,
       responseTimeMs: Date.now() - start
     };
 
@@ -178,7 +151,9 @@ Chỉ dùng dữ liệu dưới đây. Không bịa.
       answer: "Hệ thống đang gặp lỗi. Vui lòng thử lại.",
       conferences: [],
       journals: [],
-      domain: "error"
+      domain: "error",
+      analysis: {},
+      responseTimeMs: Date.now() - start
     };
   }
 }
