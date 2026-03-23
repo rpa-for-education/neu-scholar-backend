@@ -1,5 +1,5 @@
 // agent/queryRewriter.js
-import { callLLMJson } from "../llm.js";
+import { callLLMJson } from "./llm.js";
 
 export async function rewriteQuery(question) {
   const prompt = `

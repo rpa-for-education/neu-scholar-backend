@@ -1,8 +1,8 @@
 // agent/agent.js
-import { searchConferenceJournalByVector } from "../search.js";
-import { callLLM } from "../llm.js";
-import { getDb } from "../db.js";
-import { detectDomain, analyzeQuestion } from "../agentReasoning.js";
+import { searchConferenceJournalByVector } from "./scholar.search.js";
+import { callLLM } from "../shared/llm.js";
+import { getDb } from "../../db/mongo.js";
+import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
 // ================= CONFIG =================
 const MAX_CANDIDATES = 30;

@@ -14,8 +14,8 @@ const CONTINENT_MAP = [
   { key: "Africa", match: ["châu phi", "africa"] }
 ];
 
-import { COUNTRY_NAME_TO_ISO } from "./scripts/country_iso_full.js";
-import { COUNTRY_VI_TO_ISO } from "./scripts/country_vi_alias.js";
+import { COUNTRY_NAME_TO_ISO } from "../../services/scripts/country_iso_full.js";
+import { COUNTRY_VI_TO_ISO } from "../../services/scripts/country_vi_alias.js";
 
 function normalizeText(str) {
   return str

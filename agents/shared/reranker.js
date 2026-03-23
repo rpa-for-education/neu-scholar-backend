@@ -1,5 +1,5 @@
 // agent/reranker.js
-import { callLLMJson } from "../llm.js";
+import { callLLMJson } from "./llm.js";
 
 export async function rerankAdvanced(query, items) {
   if (!items.length) return items;
