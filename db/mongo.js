@@ -1,28 +1,33 @@
-// db.js
+// mongo.js
 import { MongoClient } from "mongodb";
 import "dotenv/config";
-
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB = process.env.MONGODB_DB || "fitneu";
 
 let _client;
 let _db;
 
 export async function getDb() {
   if (!_db) {
-    const { MONGODB_URI, MONGODB_DB } = process.env;
+    const MONGODB_URI = process.env.MONGODB_URI;
+
+    // 🔥 FIX: fallback DB name
+    const MONGODB_DB =
+      process.env.MONGODB_DB ||
+      process.env.DB_NAME ||   // docker dùng cái này
+      "fitneu";                // default
 
     if (!MONGODB_URI) {
       throw new Error("❌ MONGODB_URI is not set in .env");
     }
-    if (!MONGODB_DB) {
-      throw new Error("❌ MONGODB_DB is not set in .env");
-    }
+
+    // ❌ REMOVE check này (vì đã có default)
+    // if (!MONGODB_DB) {
+    //   throw new Error("❌ MONGODB_DB is not set in .env");
+    // }
 
     _client = new MongoClient(MONGODB_URI, {
-      serverSelectionTimeoutMS: 60000, // 60s để chọn server
-      socketTimeoutMS: 60000,          // 60s tránh disconnect
-      connectTimeoutMS: 60000,         // 60s kết nối ban đầu
+      serverSelectionTimeoutMS: 60000,
+      socketTimeoutMS: 60000,
+      connectTimeoutMS: 60000,
     });
 
     await _client.connect();
