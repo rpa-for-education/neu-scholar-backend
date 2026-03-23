@@ -56,6 +56,11 @@ export async function embedText(text, retry = 2) {
   }
 }
 
+// ================= SAFE DATE =================
+function getDate(item) {
+  return item.deadline || item.start_date || "";
+}
+
 // ================= KEYWORD SCORE =================
 function keywordMatchScore(text, query) {
   if (!text) return 0;
@@ -79,7 +84,7 @@ function intentBoost(item, analysis) {
     boost += 0.3;
   }
 
-  if (analysis.wantsDeadline && item.deadline) {
+  if (analysis.wantsDeadline && getDate(item)) {
     boost += 0.2;
   }
 
@@ -102,6 +107,24 @@ function intentBoost(item, analysis) {
   return boost;
 }
 
+// ================= SAFE FILTER =================
+function safeApplyFilters(items, analysis, domain) {
+  try {
+    const filtered = applyFilters(items, analysis, domain);
+
+    // 👉 fallback nếu filter làm rỗng
+    if (!filtered || filtered.length === 0) {
+      console.warn("⚠️ Filter removed all → fallback to original");
+      return items;
+    }
+
+    return filtered;
+  } catch (err) {
+    console.warn("⚠️ Filter error → fallback:", err.message);
+    return items;
+  }
+}
+
 // ================= MAIN =================
 export async function searchConferenceJournalByVector({
   question,
@@ -110,6 +133,9 @@ export async function searchConferenceJournalByVector({
   try {
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
+
+    console.log("🧠 Query:", question);
+    console.log("🧠 Analysis:", analysis);
 
     // ================= MULTI QUERY =================
     const queries = await expandQuery(question);
@@ -133,6 +159,8 @@ export async function searchConferenceJournalByVector({
       }
     }
 
+    console.log("🔍 RAW Qdrant:", allResults.length);
+
     let conferences = [];
     let journals = [];
 
@@ -152,10 +180,15 @@ export async function searchConferenceJournalByVector({
       }
     }
 
+    console.log("📦 Vector split:", conferences.length, journals.length);
+
     // ================= HYBRID (Mongo) =================
     try {
       const db = await getDb();
-      const regex = new RegExp(question, "i");
+
+      // 👉 regex mềm hơn (không dùng full query)
+      const keyword = question.split(" ").slice(0, 3).join(" ");
+      const regex = new RegExp(keyword, "i");
 
       const mongoConfs = await db.collection("conference")
         .find({ name: regex })
@@ -166,6 +199,8 @@ export async function searchConferenceJournalByVector({
         .find({ title: regex })
         .limit(10)
         .toArray();
+
+      console.log("📦 Mongo:", mongoConfs.length, mongoJournals.length);
 
       conferences = [
         ...conferences,
@@ -191,9 +226,13 @@ export async function searchConferenceJournalByVector({
       console.warn("⚠️ Mongo fallback failed:", err.message);
     }
 
-    // ================= APPLY FILTERS (🔥 giữ logic của bạn) =================
-    conferences = applyFilters(conferences, analysis, "conference");
-    journals = applyFilters(journals, analysis, "journal");
+    console.log("📊 Before filter:", conferences.length, journals.length);
+
+    // ================= SAFE FILTER =================
+    conferences = safeApplyFilters(conferences, analysis, "conference");
+    journals = safeApplyFilters(journals, analysis, "journal");
+
+    console.log("📊 After filter:", conferences.length, journals.length);
 
     return {
       domain,
