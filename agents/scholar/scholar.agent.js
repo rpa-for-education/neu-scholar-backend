@@ -18,11 +18,11 @@ function safe(x) {
 
 // ================= GET URL =================
 function getConferenceUrl(c) {
-  return c.url || "#";
+  return c.url || "";
 }
 
 function getJournalUrl(j) {
-  return j.scimago_link || "#";
+  return j.scimago_link || "";
 }
 
 // ================= DEDUPE =================
@@ -47,25 +47,19 @@ function formatFinalAnswer(answer, conferences, journals) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
     conferences.forEach((c, i) => {
-      const name = safe(c.name);
-      const location = [c.city, c.country].filter(Boolean).join(", ");
-      const deadline = safe(c.deadline);
-
-      content += `### ${i + 1}. **[C${i + 1}] ${name}**  
-- 📍 ${location || "N/A"}  
-- 📅 ${deadline || "N/A"}  
+      content += `### ${i + 1}. **[C${i + 1}] ${safe(c.name)}**  
+- 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  
+- 📅 ${safe(c.deadline) || "N/A"}  
 `;
     });
 
-    // 🔥 LINK SECTION (CONFERENCE)
     content += `\n## 🔗 Link hội thảo\n\n`;
 
     conferences.forEach((c, i) => {
-      const name = safe(c.name);
       const url = getConferenceUrl(c);
 
-      content += `- **[C${i + 1}] ${name}**  
-  👉 ${url !== "#" ? `[Xem chi tiết](${url})` : "Không có link"}\n\n`;
+      content += `- **[C${i + 1}] ${safe(c.name)}**  
+  👉 ${url ? `[Xem chi tiết](${url})` : "Không có link"}\n\n`;
     });
   }
 
@@ -74,24 +68,20 @@ function formatFinalAnswer(answer, conferences, journals) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
     journals.forEach((j, i) => {
-      const title = safe(j.title);
-
-      content += `### ${i + 1}. **[J${i + 1}] ${title}**  
+      content += `### ${i + 1}. **[J${i + 1}] ${safe(j.title)}**  
 - 🏢 ${safe(j.publisher)}  
 - 🏆 ${safe(j.sjr_best_quartile)}  
 - 🌍 ${safe(j.country)}  
 `;
     });
 
-    // 🔥 LINK SECTION (JOURNAL)
     content += `\n## 🔗 Link tạp chí\n\n`;
 
     journals.forEach((j, i) => {
-      const title = safe(j.title);
       const url = getJournalUrl(j);
 
-      content += `- **[J${i + 1}] ${title}**  
-  👉 ${url !== "#" ? `[Xem trên Scimago](${url})` : "Không có link"}\n\n`;
+      content += `- **[J${i + 1}] ${safe(j.title)}**  
+  👉 ${url ? `[Xem trên Scimago](${url})` : "Không có link"}\n\n`;
     });
   }
 
@@ -122,23 +112,32 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     conferences = await rerankWithLLM(conferences, question, topk);
     journals = await rerankWithLLM(journals, question, topk);
 
-    // ================= LLM SUMMARY =================
+    // ================= LLM SUMMARY (SAFE) =================
     let answer = "";
 
     try {
       const llm = await callLLM(`
-Viết 2 câu tóm tắt ngắn gọn (không liệt kê chi tiết).
+Viết tối đa 2 câu mô tả ngắn gọn.
+KHÔNG liệt kê danh sách.
+KHÔNG format markdown.
+KHÔNG nhắc C1, J1.
+
 Câu hỏi: ${question}
       `);
+
       answer = llm?.answer || "";
     } catch {}
 
-    if (!answer || answer.length < 10) {
+    // 🔥 fallback nếu LLM nói dài hoặc lỗi
+    if (!answer || answer.length > 300) {
       answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
     }
 
+    // 🔥 QUAN TRỌNG: luôn dùng formatter
+    const finalAnswer = formatFinalAnswer(answer, conferences, journals);
+
     return {
-      answer: formatFinalAnswer(answer, conferences, journals),
+      answer: finalAnswer,
       conferences,
       journals,
       domain,
