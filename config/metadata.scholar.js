@@ -28,7 +28,6 @@ export const SCHOLAR_METADATA = {
   sample_prompts: [
     "Hãy cho tôi các hội thảo uy tín liên quan đến RPA năm 2026",
     "Các hội thảo quốc tế tại Trung Quốc năm 2026",
-    "Tạp chí Q1 lĩnh vực AI",
     "Tạp chí phù hợp với hệ thống thông tin quản lý",
     "Danh sách journal về kinh tế bền vững"
   ],

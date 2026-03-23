@@ -28,10 +28,9 @@ export const FUND_METADATA = {
 
   sample_prompts: [
     "Các quỹ tài trợ về AI còn hạn nộp năm 2026",
-    "Grant về y tế không yêu cầu cost sharing",
-    "Funding phù hợp cho nghiên cứu sinh ngành Marketing",
-    "Các quỹ NIH liên quan đến dental research",
-    "Danh sách funding về phát triển bền vững"
+    "Quỹ tài trợ liên quan tới đổi mới và sáng tạo khởi nghiệp",
+    "Quỹ tài trợ phù hợp cho nghiên cứu sinh ngành Marketing",
+    "Danh sách quỹ tài trợ về Phát triển bền vững"
   ],
 
   provided_data_types: [
