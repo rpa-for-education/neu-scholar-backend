@@ -1,215 +1,182 @@
-import { chromium } from "playwright";
-import * as cheerio from "cheerio";
-import pLimit from "p-limit";
-import { MongoClient } from "mongodb";
 import axios from "axios";
-import dotenv from "dotenv";
+import * as cheerio from "cheerio";
+import PQueue from "p-queue";
+import { getDb } from "../db.js";
 
-dotenv.config();
+/* ================= CONFIG ================= */
+const CONCURRENCY = 2;
+const TIMEOUT = 20000;
 
-const client = new MongoClient(process.env.MONGODB_URI);
+const OLLAMA_URL =
+  process.env.OLLAMA_BASE_URL + "/api/generate";
 
-const DB_NAME = process.env.DB_NAME || "fitneu";
-const COLLECTION = "conference";
-
-const CONCURRENCY = 1; // 🔥 tránh overload OLLAMA
-const limit = pLimit(CONCURRENCY);
-
-const OLLAMA_URL = process.env.OLLAMA_BASE_URL + "/api/generate";
 const MODEL = "qwen3:8b";
 
-/* ================= INIT ================= */
-let browser;
-let context;
-
-async function init() {
-  browser = await chromium.launch({ headless: true });
-  context = await browser.newContext();
+/* ================= UTILS ================= */
+function cleanText(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/EasyChair.*?Log in/i, "")
+    .replace(/User Guide.*?Watchlist/i, "")
+    .trim();
 }
 
-/* ================= FETCH ================= */
-async function fetchHtml(url) {
-  const page = await context.newPage();
+function cleanLink(link) {
+  if (!link) return null;
 
-  try {
-    console.log("🌐 Fetch:", url);
+  const match = link.match(/https?:\/\/[^\s]+/);
+  if (!match) return null;
 
-    await page.goto(url, {
-      timeout: 15000,
-      waitUntil: "domcontentloaded",
-    });
+  let clean = match[0];
 
-    const html = await page.content();
-    await page.close();
-    return html;
-  } catch {
-    console.log("❌ Fetch fail");
-    await page.close();
-    return "";
-  }
+  // 🔥 fix lỗi dính chữ kiểu "...som2025Abstract"
+  clean = clean.replace(/(Abstract|Submission).*$/i, "");
+
+  return clean;
 }
 
-/* ================= CLEAN ================= */
-function cleanText(html) {
+function extractDeadline(text) {
+  const match = text.match(
+    /(deadline|due).*?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i
+  );
+  return match ? match[2] : null;
+}
+
+function extractTopics(text) {
+  const topicMatch = text.match(/theme:(.*?)(\.|\n)/i);
+
+  if (!topicMatch) return [];
+
+  return topicMatch[1]
+    .split(/,|—|-/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/* ================= RULE PARSER ================= */
+function parseEasyChair(html) {
   const $ = cheerio.load(html);
 
-  $("script, style, nav, footer").remove();
+  $("script, style, nav, footer, header").remove();
 
-  return $("body")
-    .text()
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 6000);
-}
+  const bodyText = cleanText($("body").text());
 
-/* ================= FALLBACK PARSER ================= */
-function fallbackParser(text) {
-  console.log("🧠 Using fallback parser...");
+  let cfp_text = "";
 
-  // deadline (regex)
-  const deadlineMatch = text.match(
-    /(deadline|due).*?(\d{4}[-/]\d{2}[-/]\d{2})/i
-  );
+  $("p, h1, h2, h3").each((_, el) => {
+    const t = $(el).text().trim();
+    if (t.length > 80) {
+      cfp_text += t + "\n";
+    }
+  });
 
-  // link
-  const linkMatch = text.match(/https?:\/\/[^\s]+/);
+  cfp_text = cleanText(cfp_text).slice(0, 5000);
 
-  // topics
-  let topics = [];
-  const topicMatch = text.match(/topics?:\s*(.+)/i);
-  if (topicMatch) {
-    topics = topicMatch[1]
-      .split(",")
-      .map((t) => t.trim())
-      .slice(0, 10);
-  }
+  let submission_link = null;
+
+  $("a").each((_, el) => {
+    const href = $(el).attr("href");
+
+    if (href && href.includes("easychair.org/conferences")) {
+      submission_link = cleanLink(href);
+    }
+  });
+
+  const deadline = extractDeadline(bodyText);
+  const topics = extractTopics(bodyText);
 
   return {
-    cfp_text: text.slice(0, 2000),
+    cfp_text,
+    submission_link,
+    deadline,
     topics,
-    deadline: deadlineMatch ? deadlineMatch[2] : null,
-    submission_link: linkMatch ? linkMatch[0] : null,
-    keywords: topics.slice(0, 5),
   };
 }
 
-/* ================= SAFE JSON PARSER ================= */
-function safeParseJSON(output) {
-  output = output
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
-
-  // try direct
-  try {
-    return JSON.parse(output);
-  } catch {}
-
-  // extract JSON
-  const match = output.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
-/* ================= CALL OLLAMA ================= */
+/* ================= OLLAMA ================= */
 async function callOllama(text) {
   try {
-    console.log("🤖 Calling OLLAMA...");
-
-    const prompt = `
-Trích xuất thông tin hội thảo.
-
-⚠️ BẮT BUỘC:
-- Chỉ trả JSON
-- Không giải thích
-- Không markdown
-
-{
-  "cfp_text": "...",
-  "topics": ["..."],
-  "deadline": "YYYY-MM-DD hoặc null",
-  "submission_link": "...",
-  "keywords": ["..."]
-}
-
-TEXT:
-${text}
-`;
-
     const res = await axios.post(
       OLLAMA_URL,
       {
         model: MODEL,
-        prompt,
+        prompt: `
+Extract:
+- cfp_text
+- deadline
+- topics (array)
+
+Return JSON only.
+
+Text:
+${text.slice(0, 6000)}
+        `,
         stream: false,
-        options: {
-          temperature: 0.1
-        }
       },
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: 60000
-      }
+      { timeout: TIMEOUT }
     );
 
-    const output = res.data?.response || "";
+    const raw = res.data?.response;
 
-    const parsed = safeParseJSON(output);
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
 
-    if (!parsed) {
-      console.log("❌ AI parse fail → fallback");
-      return fallbackParser(text);
-    }
-
-    return parsed;
-
+    return JSON.parse(jsonMatch[0]);
   } catch (err) {
     console.log("❌ OLLAMA error → fallback");
-    return fallbackParser(text);
+    return null;
   }
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  await client.connect();
-  console.log("🚀 AI Enrich FULL (Ollama + Fallback)...");
+  console.log("🚀 AI Enrich FULL (Rule + AI fallback)...");
 
-  const db = client.db(DB_NAME);
-  const col = db.collection(COLLECTION);
+  const db = await getDb();
+  const col = db.collection("conference");
 
-  await init();
+  const docs = await col
+    .find({
+      $or: [
+        { cfp_text: { $exists: false } },
+        { cfp_text: "" },
+      ],
+    })
+    .limit(5000)
+    .toArray();
 
-  const cursor = col.find({
-    $or: [
-      { cfp_text: { $exists: false } },
-      { cfp_text: "" },
-      { status: "pending" }
-    ]
-  });
+  const queue = new PQueue({ concurrency: CONCURRENCY });
 
-  let processed = 0;
+  let count = 0;
 
-  while (await cursor.hasNext()) {
-    const doc = await cursor.next();
-
-    await limit(async () => {
+  for (const doc of docs) {
+    queue.add(async () => {
       try {
-        if (!doc.url) return;
+        console.log("🌐 Fetch:", doc.url);
 
-        if (doc.cfp_text && doc.cfp_text.length > 300) return;
+        const res = await axios.get(doc.url, {
+          timeout: TIMEOUT,
+        });
 
-        const html = await fetchHtml(doc.url);
-        if (!html) return;
+        const html = res.data;
 
-        const text = cleanText(html);
+        /* ================= RULE PARSER ================= */
+        let data = parseEasyChair(html);
 
-        const data = await callOllama(text);
-        if (!data) return;
+        if (data.cfp_text && data.cfp_text.length > 500) {
+          console.log("⚡ Rule parser OK");
+        } else {
+          console.log("🤖 Using AI...");
+
+          const ai = await callOllama(html);
+
+          if (ai) {
+            data = { ...data, ...ai };
+          }
+        }
+
+        /* ================= FINAL CLEAN ================= */
+        data.cfp_text = cleanText(data.cfp_text || "");
 
         await col.updateOne(
           { _id: doc._id },
@@ -217,25 +184,23 @@ async function run() {
             $set: {
               ...data,
               status: "done",
-              enriched_time: new Date(),
-              cfp_length: data.cfp_text?.length || 0
-            }
+              updated_time: new Date().toISOString(),
+            },
           }
         );
 
-        processed++;
-        console.log(`✅ Done: ${processed}`);
-
-      } catch {
-        console.log("❌ Task error");
+        count++;
+        console.log(`✅ Done: ${count}`);
+      } catch (err) {
+        console.log("❌ Failed:", doc.url);
       }
     });
   }
 
-  console.log("🎯 AI ENRICH DONE");
+  await queue.onIdle();
 
-  await browser.close();
-  await client.close();
+  console.log("🎯 DONE CFP ENRICH");
+  process.exit(0);
 }
 
 run();
