@@ -46,8 +46,25 @@ function buildHash(doc) {
   });
 }
 
+// ================= WAIT QDRANT READY =================
+async function waitForQdrant() {
+  console.log("⏳ Waiting for Qdrant API ready...");
+
+  while (true) {
+    try {
+      await axios.get(`${QDRANT_URL}/collections`);
+      console.log("✅ Qdrant ready");
+      return;
+    } catch (err) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 // ================= ENSURE COLLECTION =================
 async function ensureCollection() {
+  await waitForQdrant();
+
   try {
     await qdrant.getCollection(COLLECTION);
     console.log("✅ Collection fund_vectors exists");
@@ -60,6 +77,8 @@ async function ensureCollection() {
         distance: "Cosine",
       },
     });
+
+    console.log("✅ Collection created");
   }
 }
 
@@ -104,7 +123,6 @@ async function main() {
 
   console.log("🚀 Sync FUND (with progress)...");
 
-  // 🔥 đảm bảo collection tồn tại
   await ensureCollection();
 
   const docs = await db.collection("fund").find({}).toArray();
@@ -135,12 +153,12 @@ async function main() {
           with_payload: true,
         });
       } catch (err) {
-        // 🔥 tránh crash nếu collection mới tạo
         existing = [];
       }
 
       if (existing.length > 0) {
         const oldHash = existing[0].payload?.hash;
+
         if (oldHash === hash) {
           skipped++;
           processed++;
