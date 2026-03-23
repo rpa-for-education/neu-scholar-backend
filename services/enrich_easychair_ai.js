@@ -1,7 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
-import { getDb } from "../db.js";
+import { getDb } from "../db/mongo.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
