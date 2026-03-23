@@ -1,75 +1,85 @@
 import express from "express";
-import axios from "axios";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import { runFundAgent } from "../../agents/fund/fund.service.js";
+import { streamFund } from "../../agents/fund/fund.stream.js";
 
 const router = express.Router();
 
-// ================= CONFIG =================
-const QDRANT_URL = process.env.QDRANT_URL;
-const COLLECTION = "fund_vectors";
-
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
-const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
-
-const qdrant = new QdrantClient({
-  url: QDRANT_URL,
-  checkCompatibility: false,
-});
-
-// ================= EMBED =================
-async function embed(text) {
-  const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-    model: EMBED_MODEL,
-    input: text,
-  });
-
-  return res.data?.embeddings?.[0] || res.data?.embedding;
+// ================= UTILS =================
+function safeTopk(topk) {
+  const n = Number(topk);
+  return n && n > 0 ? n : 5;
 }
 
-// ================= SEARCH =================
-async function searchFund(query, topk = 5) {
-  const vector = await embed(query);
-
-  const result = await qdrant.search(COLLECTION, {
-    vector,
-    limit: topk,
-    with_payload: true,
-  });
-
-  return result.map((r) => ({
-    score: r.score,
-    ...r.payload,
-  }));
-}
-
-// ================= ROUTES =================
-
-// 🔥 POST /api/fund/ask
-router.post("/ask", async (req, res) => {
+// ================= NORMAL API =================
+router.post("/", async (req, res) => {
   try {
-    const { question, topk = 5 } = req.body;
+    const {
+      question,
+      prompt,
+      model_id = "qwen3-8b",
+      topk
+    } = req.body;
 
-    if (!question) {
-      return res.status(400).json({ error: "Missing question" });
+    const finalQuestion = (question || prompt || "").trim();
+
+    if (!finalQuestion) {
+      return res.status(400).json({
+        error: "Missing question"
+      });
     }
 
-    const data = await searchFund(question, topk);
+    const finalTopk = safeTopk(topk);
 
-    res.json({
-      type: "fund",
-      total: data.length,
-      data,
-    });
+    const result = await runFundAgent(
+      req,
+      finalQuestion,
+      model_id,
+      finalTopk
+    );
+
+    res.json(result);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Fund error:", err);
+
+    res.status(500).json({
+      error: err.message || "Internal server error"
+    });
   }
 });
 
-// (optional) giữ endpoint cũ
-router.post("/", async (req, res) => {
-  req.url = "/ask";
+// ================= STREAM API =================
+router.post("/stream", async (req, res) => {
+  try {
+    const { question, prompt, topk } = req.body;
+
+    const finalQuestion = (question || prompt || "").trim();
+
+    if (!finalQuestion) {
+      res.write(`data: Missing question\n\n`);
+      return res.end();
+    }
+
+    const finalTopk = safeTopk(topk);
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    await streamFund(req, res, finalQuestion, finalTopk);
+
+  } catch (err) {
+    console.error("❌ Stream Fund error:", err);
+
+    res.write(`data: Error: ${err.message}\n\n`);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  }
+});
+
+// ================= ASK API (ALIAS) =================
+router.post("/ask", async (req, res) => {
+  req.url = "/";
   router.handle(req, res);
 });
 

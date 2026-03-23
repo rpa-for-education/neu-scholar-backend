@@ -9,10 +9,9 @@ import "dotenv/config";
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB || "fitneu";
 
-// 🔥 SỬA TÊN COLLECTION TẠI ĐÂY
-const COLLECTION_NAME = "scholars"; // 👈 đổi đúng tên DB của bạn
-
+const COLLECTION_NAME = "scholar"; // 👉 sửa nếu DB bạn khác
 const QDRANT_COLLECTION = "scholar_vectors";
+
 const QDRANT_URL = process.env.QDRANT_URL;
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
@@ -63,14 +62,14 @@ function buildText(doc) {
 
 // ================= WAIT QDRANT =================
 async function waitForQdrant() {
-  console.log("⏳ Waiting for Qdrant API ready...");
+  console.log("⏳ Waiting for Qdrant...");
 
   while (true) {
     try {
       await axios.get(`${QDRANT_URL}/collections`);
       console.log("✅ Qdrant ready");
       return;
-    } catch (err) {
+    } catch {
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
@@ -82,9 +81,9 @@ async function ensureCollection() {
 
   try {
     await qdrant.getCollection(QDRANT_COLLECTION);
-    console.log("✅ Collection scholar_vectors exists");
-  } catch (err) {
-    console.log("🚀 Creating collection scholar_vectors...");
+    console.log("✅ Collection exists");
+  } catch {
+    console.log("🚀 Creating collection...");
 
     await qdrant.createCollection(QDRANT_COLLECTION, {
       vectors: {
@@ -114,6 +113,7 @@ async function embed(text, retry = RETRY) {
     return vec;
   } catch (err) {
     if (retry > 0) return embed(text, retry - 1);
+
     console.error("❌ Embedding failed");
     return null;
   }
@@ -138,7 +138,7 @@ async function main() {
 
   console.log("🚀 Sync SCHOLAR (with progress)...");
 
-  // 🔥 đảm bảo Qdrant sẵn sàng + có collection
+  // 🔥 đảm bảo Qdrant sẵn sàng
   await ensureCollection();
 
   const docs = await db.collection(COLLECTION_NAME).find({}).toArray();
@@ -170,7 +170,7 @@ async function main() {
           ids: [id],
           with_payload: true,
         });
-      } catch (err) {
+      } catch {
         existing = [];
       }
 
@@ -186,6 +186,7 @@ async function main() {
       }
 
       const text = buildText(doc);
+
       if (!text) {
         processed++;
         updateBar();
@@ -193,6 +194,7 @@ async function main() {
       }
 
       const vector = await embed(text);
+
       if (!vector) {
         processed++;
         updateBar();
@@ -237,6 +239,7 @@ async function main() {
   console.log(`🎯 DONE → updated=${updated} | skipped=${skipped}`);
 
   await mongo.close();
+  console.log("🔌 Mongo closed");
 }
 
 main();
