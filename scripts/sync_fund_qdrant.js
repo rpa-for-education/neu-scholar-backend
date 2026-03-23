@@ -27,6 +27,12 @@ const qdrant = new QdrantClient({
   checkCompatibility: false,
 });
 
+// ================= GLOBAL =================
+let processed = 0;
+let TOTAL = 0;
+let start = 0;
+let bar;
+
 // ================= UTILS =================
 function qid(key) {
   return uuidv5(String(key), UUID_NAMESPACE);
@@ -40,6 +46,23 @@ function buildHash(doc) {
   });
 }
 
+// ================= ENSURE COLLECTION =================
+async function ensureCollection() {
+  try {
+    await qdrant.getCollection(COLLECTION);
+    console.log("✅ Collection fund_vectors exists");
+  } catch (err) {
+    console.log("🚀 Creating collection fund_vectors...");
+
+    await qdrant.createCollection(COLLECTION, {
+      vectors: {
+        size: VECTOR_SIZE,
+        distance: "Cosine",
+      },
+    });
+  }
+}
+
 // ================= EMBEDDING =================
 async function embed(text, retry = RETRY) {
   try {
@@ -48,11 +71,30 @@ async function embed(text, retry = RETRY) {
       input: text,
     });
 
-    return res.data?.embeddings?.[0];
+    const vec = res.data?.embeddings?.[0];
+
+    if (!vec || vec.length !== VECTOR_SIZE) {
+      throw new Error("Invalid vector");
+    }
+
+    return vec;
   } catch (err) {
     if (retry > 0) return embed(text, retry - 1);
+    console.error("❌ Embedding failed");
     return null;
   }
+}
+
+// ================= PROGRESS =================
+function updateBar() {
+  const elapsed = (Date.now() - start) / 1000 || 1;
+  const speed = (processed / elapsed).toFixed(2);
+  const eta = ((TOTAL - processed) / speed).toFixed(0);
+
+  bar.update(processed, {
+    speed: `${speed} docs/s`,
+    eta,
+  });
 }
 
 // ================= MAIN =================
@@ -62,16 +104,18 @@ async function main() {
 
   console.log("🚀 Sync FUND (with progress)...");
 
+  // 🔥 đảm bảo collection tồn tại
+  await ensureCollection();
+
   const docs = await db.collection("fund").find({}).toArray();
-  const TOTAL = docs.length;
+  TOTAL = docs.length;
 
   let updated = 0;
   let skipped = 0;
-  let processed = 0;
 
-  const start = Date.now();
+  start = Date.now();
 
-  const bar = new cliProgress.SingleBar({
+  bar = new cliProgress.SingleBar({
     format:
       "📊 {bar} {percentage}% | {value}/{total} | ⚡ {speed} | ETA {eta}s",
   });
@@ -79,59 +123,72 @@ async function main() {
   bar.start(TOTAL, 0, { speed: "0 docs/s", eta: 0 });
 
   for (const doc of docs) {
-    const id = qid(doc._id);
-    const hash = buildHash(doc);
+    try {
+      const id = qid(doc._id);
+      const hash = buildHash(doc);
 
-    const existing = await qdrant.retrieve(COLLECTION, {
-      ids: [id],
-      with_payload: true,
-    });
+      let existing = [];
 
-    if (existing.length > 0) {
-      const oldHash = existing[0].payload?.hash;
-      if (oldHash === hash) {
-        skipped++;
-        processed++;
-        updateBar();
-        continue;
+      try {
+        existing = await qdrant.retrieve(COLLECTION, {
+          ids: [id],
+          with_payload: true,
+        });
+      } catch (err) {
+        // 🔥 tránh crash nếu collection mới tạo
+        existing = [];
       }
-    }
 
-    const text = `
+      if (existing.length > 0) {
+        const oldHash = existing[0].payload?.hash;
+        if (oldHash === hash) {
+          skipped++;
+          processed++;
+          updateBar();
+          continue;
+        }
+      }
+
+      const text = `
 ${doc["OPPORTUNITY TITLE"]}
 ${doc["AGENCY NAME"]}
 ${doc["FUNDING DESCRIPTION"]}
 `;
 
-    const vector = await embed(text);
+      const vector = await embed(text);
 
-    if (!vector || vector.length !== VECTOR_SIZE) {
+      if (!vector) {
+        processed++;
+        updateBar();
+        continue;
+      }
+
+      await qdrant.upsert(COLLECTION, {
+        points: [
+          {
+            id,
+            vector,
+            payload: {
+              title: doc["OPPORTUNITY TITLE"],
+              agency: doc["AGENCY NAME"],
+              text: doc["FUNDING DESCRIPTION"],
+              deadline: doc["ESTIMATED APPLICATION DUE DATE"],
+              amount: doc["ESTIMATED TOTAL FUNDING"],
+              url: doc["OPPORTUNITY URL"],
+              hash,
+            },
+          },
+        ],
+      });
+
+      updated++;
       processed++;
       updateBar();
-      continue;
+    } catch (err) {
+      console.error("❌ Skip doc:", doc._id);
+      processed++;
+      updateBar();
     }
-
-    await qdrant.upsert(COLLECTION, {
-      points: [
-        {
-          id,
-          vector,
-          payload: {
-            title: doc["OPPORTUNITY TITLE"],
-            agency: doc["AGENCY NAME"],
-            text: doc["FUNDING DESCRIPTION"],
-            deadline: doc["ESTIMATED APPLICATION DUE DATE"],
-            amount: doc["ESTIMATED TOTAL FUNDING"],
-            url: doc["OPPORTUNITY URL"],
-            hash,
-          },
-        },
-      ],
-    });
-
-    updated++;
-    processed++;
-    updateBar();
   }
 
   bar.stop();
@@ -139,18 +196,6 @@ ${doc["FUNDING DESCRIPTION"]}
   console.log(`🎯 DONE → updated=${updated} | skipped=${skipped}`);
 
   await mongo.close();
-}
-
-// ================= PROGRESS =================
-function updateBar() {
-  const elapsed = (Date.now() - start) / 1000;
-  const speed = (processed / elapsed).toFixed(2);
-  const eta = ((TOTAL - processed) / speed).toFixed(0);
-
-  bar.update(processed, {
-    speed: `${speed} docs/s`,
-    eta,
-  });
 }
 
 main();
