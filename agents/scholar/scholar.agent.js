@@ -17,14 +17,12 @@ function safe(x) {
 }
 
 // ================= GET URL =================
-function getUrl(item) {
-  return (
-    item.url ||
-    item.link ||
-    item.scimago_link ||
-    item.website ||
-    "#"
-  );
+function getConferenceUrl(c) {
+  return c.url || "#";
+}
+
+function getJournalUrl(j) {
+  return j.scimago_link || "#";
 }
 
 // ================= DEDUPE =================
@@ -59,15 +57,15 @@ function formatFinalAnswer(answer, conferences, journals) {
 `;
     });
 
-    // 🔥 LINK SECTION (QUAN TRỌNG)
+    // 🔥 LINK SECTION (CONFERENCE)
     content += `\n## 🔗 Link hội thảo\n\n`;
 
     conferences.forEach((c, i) => {
       const name = safe(c.name);
-      const url = getUrl(c);
+      const url = getConferenceUrl(c);
 
       content += `- **[C${i + 1}] ${name}**  
-  👉 [Xem chi tiết](${url})\n\n`;
+  👉 ${url !== "#" ? `[Xem chi tiết](${url})` : "Không có link"}\n\n`;
     });
   }
 
@@ -81,18 +79,19 @@ function formatFinalAnswer(answer, conferences, journals) {
       content += `### ${i + 1}. **[J${i + 1}] ${title}**  
 - 🏢 ${safe(j.publisher)}  
 - 🏆 ${safe(j.sjr_best_quartile)}  
+- 🌍 ${safe(j.country)}  
 `;
     });
 
-    // 🔥 LINK JOURNAL
+    // 🔥 LINK SECTION (JOURNAL)
     content += `\n## 🔗 Link tạp chí\n\n`;
 
     journals.forEach((j, i) => {
       const title = safe(j.title);
-      const url = getUrl(j);
+      const url = getJournalUrl(j);
 
       content += `- **[J${i + 1}] ${title}**  
-  👉 [Xem chi tiết](${url})\n\n`;
+  👉 ${url !== "#" ? `[Xem trên Scimago](${url})` : "Không có link"}\n\n`;
     });
   }
 
