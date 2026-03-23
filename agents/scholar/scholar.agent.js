@@ -1,6 +1,5 @@
 import { searchConferenceJournalByVector } from "./scholar.search.js";
 import { callLLM } from "../shared/llm.js";
-import { getDb } from "../../db/mongo.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
 import { rankItems, smartFilter } from "./scholar.ranking.js";
@@ -15,6 +14,17 @@ function safe(x) {
   if (Array.isArray(x)) return x.join(", ");
   if (typeof x === "object") return JSON.stringify(x);
   return String(x);
+}
+
+// ================= GET URL =================
+function getUrl(item) {
+  return (
+    item.url ||
+    item.link ||
+    item.scimago_link ||
+    item.website ||
+    "#"
+  );
 }
 
 // ================= DEDUPE =================
@@ -34,34 +44,55 @@ function dedupe(items, key = "title") {
 function formatFinalAnswer(answer, conferences, journals) {
   let content = answer || "";
 
+  // ================= CONFERENCE =================
   if (conferences.length) {
-    content += `\n\n## 🎓 Hội thảo\n\n`;
+    content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
     conferences.forEach((c, i) => {
-      content += `### ${i + 1}. ${safe(c.name)}
-- 📍 ${safe(c.country)}
-- 📅 ${safe(c.deadline)}
+      const name = safe(c.name);
+      const location = [c.city, c.country].filter(Boolean).join(", ");
+      const deadline = safe(c.deadline);
 
+      content += `### ${i + 1}. **[C${i + 1}] ${name}**  
+- 📍 ${location || "N/A"}  
+- 📅 ${deadline || "N/A"}  
 `;
     });
 
-    content += `## 🔗 Link hội thảo\n\n`;
+    // 🔥 LINK SECTION (QUAN TRỌNG)
+    content += `\n## 🔗 Link hội thảo\n\n`;
 
-    conferences.forEach((c) => {
-      content += `- ${safe(c.name)}  
-👉 ${safe(c.url)}\n\n`;
+    conferences.forEach((c, i) => {
+      const name = safe(c.name);
+      const url = getUrl(c);
+
+      content += `- **[C${i + 1}] ${name}**  
+  👉 [Xem chi tiết](${url})\n\n`;
     });
   }
 
+  // ================= JOURNAL =================
   if (journals.length) {
-    content += `\n## 📚 Tạp chí\n\n`;
+    content += `\n## 📚 Tạp chí liên quan\n\n`;
 
     journals.forEach((j, i) => {
-      content += `### ${i + 1}. ${safe(j.title)}
-- 🏆 ${safe(j.sjr_best_quartile)}
-- 🏢 ${safe(j.publisher)}
+      const title = safe(j.title);
 
+      content += `### ${i + 1}. **[J${i + 1}] ${title}**  
+- 🏢 ${safe(j.publisher)}  
+- 🏆 ${safe(j.sjr_best_quartile)}  
 `;
+    });
+
+    // 🔥 LINK JOURNAL
+    content += `\n## 🔗 Link tạp chí\n\n`;
+
+    journals.forEach((j, i) => {
+      const title = safe(j.title);
+      const url = getUrl(j);
+
+      content += `- **[J${i + 1}] ${title}**  
+  👉 [Xem chi tiết](${url})\n\n`;
     });
   }
 
@@ -97,13 +128,15 @@ export async function runAgent(question, topk = FINAL_TOPK) {
 
     try {
       const llm = await callLLM(`
-Viết 2 câu tóm tắt ngắn gọn.
+Viết 2 câu tóm tắt ngắn gọn (không liệt kê chi tiết).
 Câu hỏi: ${question}
       `);
       answer = llm?.answer || "";
     } catch {}
 
-    if (!answer) answer = "Dưới đây là kết quả phù hợp.";
+    if (!answer || answer.length < 10) {
+      answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
+    }
 
     return {
       answer: formatFinalAnswer(answer, conferences, journals),
@@ -118,7 +151,7 @@ Câu hỏi: ${question}
     console.error("❌ Agent error:", err);
 
     return {
-      answer: "Lỗi hệ thống",
+      answer: "Hệ thống đang gặp lỗi.",
       conferences: [],
       journals: [],
       domain: "error",
