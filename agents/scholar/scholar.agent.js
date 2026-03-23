@@ -16,7 +16,7 @@ function safe(x) {
   return String(x);
 }
 
-// ================= GET URL =================
+// ================= URL =================
 function getConferenceUrl(c) {
   return c.url || "";
 }
@@ -42,7 +42,7 @@ function dedupe(items, key = "title") {
 function formatFinalAnswer(answer, conferences, journals) {
   let content = answer || "";
 
-  // ================= CONFERENCE =================
+  // ===== CONFERENCE =====
   if (conferences.length) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
@@ -63,7 +63,7 @@ function formatFinalAnswer(answer, conferences, journals) {
     });
   }
 
-  // ================= JOURNAL =================
+  // ===== JOURNAL =====
   if (journals.length) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
@@ -104,15 +104,15 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let conferences = dedupe(res.conferences || [], "name");
     let journals = dedupe(res.journals || [], "title");
 
-    // ================= SMART RANK =================
+    // ===== SMART RANK =====
     conferences = smartFilter(rankItems(conferences, question));
     journals = smartFilter(rankItems(journals, question));
 
-    // ================= LLM RERANK =================
+    // ===== LLM RERANK =====
     conferences = await rerankWithLLM(conferences, question, topk);
     journals = await rerankWithLLM(journals, question, topk);
 
-    // ================= LLM SUMMARY (SAFE) =================
+    // ===== LLM SUMMARY (SAFE) =====
     let answer = "";
 
     try {
@@ -120,7 +120,6 @@ export async function runAgent(question, topk = FINAL_TOPK) {
 Viết tối đa 2 câu mô tả ngắn gọn.
 KHÔNG liệt kê danh sách.
 KHÔNG format markdown.
-KHÔNG nhắc C1, J1.
 
 Câu hỏi: ${question}
       `);
@@ -128,16 +127,19 @@ Câu hỏi: ${question}
       answer = llm?.answer || "";
     } catch {}
 
-    // 🔥 fallback nếu LLM nói dài hoặc lỗi
     if (!answer || answer.length > 300) {
       answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
     }
 
-    // 🔥 QUAN TRỌNG: luôn dùng formatter
+    // ===== FINAL FORMAT =====
     const finalAnswer = formatFinalAnswer(answer, conferences, journals);
+
+    // ===== DEBUG (có thể tắt) =====
+    console.log("✅ FINAL ANSWER:\n", finalAnswer);
 
     return {
       answer: finalAnswer,
+      content_markdown: finalAnswer, // 🔥 FIX QUAN TRỌNG
       conferences,
       journals,
       domain,
@@ -150,6 +152,7 @@ Câu hỏi: ${question}
 
     return {
       answer: "Hệ thống đang gặp lỗi.",
+      content_markdown: "Hệ thống đang gặp lỗi.",
       conferences: [],
       journals: [],
       domain: "error",
