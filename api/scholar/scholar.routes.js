@@ -18,7 +18,7 @@ async function handleAsk(req, res) {
       prompt,
       query,
       message,
-      model_id = "qwen3-4b",
+      model_id = "qwen3-8b",
       topk
     } = req.body || {};
 
