@@ -11,28 +11,50 @@ const COLLECTION = "scholar_vectors";
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
 
+// ================= INIT =================
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
   checkCompatibility: false,
 });
 
+// ================= CACHE =================
+const embedCache = new Map();
+
 // ================= EMBED =================
 async function embed(text) {
-  const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-    model: EMBED_MODEL,
-    input: text,
-  });
+  if (embedCache.has(text)) {
+    return embedCache.get(text);
+  }
 
-  return res.data?.embeddings?.[0] || res.data?.embedding;
+  const res = await axios.post(
+    `${OLLAMA_BASE}/api/embed`,
+    {
+      model: EMBED_MODEL,
+      input: text,
+    },
+    {
+      timeout: 30000, // 🔥 tránh treo
+    }
+  );
+
+  const vec =
+    res.data?.embeddings?.[0] ||
+    res.data?.embedding ||
+    null;
+
+  if (vec) embedCache.set(text, vec);
+
+  return vec;
 }
 
 // ================= SEARCH =================
 async function searchScholar(query, topk = 5) {
   const vector = await embed(query);
+  if (!vector) return [];
 
   const result = await qdrant.search(COLLECTION, {
     vector,
-    limit: topk,
+    limit: Math.min(topk, 5), // 🔥 limit
     with_payload: true,
   });
 
@@ -42,35 +64,52 @@ async function searchScholar(query, topk = 5) {
   }));
 }
 
-// ================= ROUTES =================
-
-// 🔥 POST /api/scholar/ask
-router.post("/ask", async (req, res) => {
+// ================= CORE =================
+async function handleAsk(req, res) {
   try {
-    const { question, topk = 5 } = req.body;
+    const {
+      question,
+      prompt,
+      query,
+      message,
+      topk
+    } = req.body || {};
 
-    if (!question) {
-      return res.status(400).json({ error: "Missing question" });
+    const finalQuestion = (
+      question ||
+      prompt ||
+      query ||
+      message ||
+      ""
+    ).trim();
+
+    if (!finalQuestion) {
+      return res.status(400).json({
+        error: "Missing question"
+      });
     }
 
-    const data = await searchScholar(question, topk);
+    const data = await searchScholar(finalQuestion, topk || 5);
 
-    res.json({
+    return res.json({
       type: "scholar",
       total: data.length,
       data,
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    console.error("❌ Scholar error:", err);
 
-// (optional) giữ endpoint cũ
-router.post("/", async (req, res) => {
-  req.url = "/ask";
-  router.handle(req, res);
-});
+    return res.status(200).json({
+      success: false,
+      error: err.message,
+      data: []
+    });
+  }
+}
+
+// ================= ROUTES =================
+router.post("/", handleAsk);
+router.post("/ask", handleAsk);
 
 export default router;

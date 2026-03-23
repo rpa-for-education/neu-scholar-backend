@@ -7,7 +7,7 @@ const router = express.Router();
 // ================= UTILS =================
 function safeTopk(topk) {
   const n = Number(topk);
-  return n && n > 0 ? n : 5;
+  return n && n > 0 ? Math.min(n, 5) : 5; // 🔥 limit topk
 }
 
 // ================= CORE HANDLER =================
@@ -18,9 +18,9 @@ async function handleAsk(req, res) {
       prompt,
       query,
       message,
-      model_id = "qwen3-8b",
+      model_id = "qwen3-4b", // 🔥 nhẹ hơn
       topk
-    } = req.body;
+    } = req.body || {};
 
     const finalQuestion = (
       question ||
@@ -65,7 +65,7 @@ router.post("/ask", handleAsk);
 // ================= STREAM =================
 router.post("/stream", async (req, res) => {
   try {
-    const { question, prompt, query, message, topk } = req.body;
+    const { question, prompt, query, message, topk } = req.body || {};
 
     const finalQuestion = (
       question ||
