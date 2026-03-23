@@ -5,12 +5,34 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getDb } from "../db/mongo.js";
-import { COUNTRY_NAME_TO_ISO } from "../scripts/country_map.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
+
+/* ================= COUNTRY MAP (EMBED) ================= */
+const COUNTRY_NAME_TO_ISO = {
+  "italy": "IT",
+  "france": "FR",
+  "china": "CN",
+  "vietnam": "VN",
+  "united states": "US",
+  "usa": "US",
+  "uk": "GB",
+  "united kingdom": "GB",
+  "germany": "DE",
+  "japan": "JP",
+  "spain": "ES",
+  "canada": "CA",
+  "peru": "PE",
+  "qatar": "QA",
+  "india": "IN",
+  "netherlands": "NL",
+  "switzerland": "CH",
+  "australia": "AU",
+  "singapore": "SG"
+};
 
 /* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
@@ -40,7 +62,6 @@ function titleCase(s = "") {
 async function initGeo() {
   console.log("🌍 Loading Geo...");
 
-  // country
   const countryText = await fs.readFile(COUNTRY_FILE, "utf8");
 
   countryText.split("\n").forEach(line => {
@@ -63,7 +84,6 @@ async function initGeo() {
     }[continent] || null;
   });
 
-  // cities
   const geoText = await fs.readFile(CITY_FILE, "utf8");
 
   geoText.split("\n").forEach(line => {
@@ -89,12 +109,10 @@ function extractFromLocation(location) {
   const parts = location.split(",").map(s => s.trim());
   const cityKey = clean(parts[0]);
 
-  // GeoNames match
   if (geoMap.has(cityKey)) {
     return geoMap.get(cityKey);
   }
 
-  // country fallback
   for (let i = parts.length - 1; i >= 1; i--) {
     const key = clean(parts[i]);
     if (COUNTRY_NAME_TO_ISO[key]) {
@@ -108,78 +126,7 @@ function extractFromLocation(location) {
   return {};
 }
 
-/* ================= AI (FALLBACK ONLY) ================= */
-function isValidLocation(ai) {
-  if (!ai?.city || !ai?.country) return false;
-
-  const bad = ["learning", "content", "security", "model", "data"];
-
-  const city = ai.city.toLowerCase();
-
-  if (city.length > 50) return false;
-  if (bad.some(w => city.includes(w))) return false;
-
-  return true;
-}
-
-async function extractLocationAI(text) {
-  try {
-    const res = await axios.post(
-      process.env.OLLAMA_BASE_URL + "/api/generate",
-      {
-        model: process.env.OLLAMA_MODEL || "qwen3:8b",
-        prompt: `Extract location JSON {city, country}:\n${text.slice(0, 1500)}`,
-        stream: false
-      },
-      { timeout: 15000 }
-    );
-
-    const match = res.data.response.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
-/* ================= GEO SMART ================= */
-async function extractGeoSmart(doc, text) {
-  // 1. location field (BEST)
-  if (doc.location) {
-    const ex = extractFromLocation(doc.location);
-    if (ex.city) {
-      return {
-        city: ex.city,
-        country_code: ex.country_code,
-        country: ISO_TO_COUNTRY[ex.country_code],
-        continent: ISO_TO_CONTINENT[ex.country_code]
-      };
-    }
-  }
-
-  // 2. skip AI nếu text yếu
-  if (text.length < 200) return {};
-
-  // 3. AI fallback
-  const ai = await extractLocationAI(text);
-
-  if (isValidLocation(ai)) {
-    const code = COUNTRY_NAME_TO_ISO[clean(ai.country)];
-    if (code) {
-      return {
-        city: ai.city,
-        country: ai.country,
-        country_code: code,
-        continent: ISO_TO_CONTINENT[code]
-      };
-    }
-  }
-
-  return {};
-}
-
-/* ================= CFP (FIX CHUẨN) ================= */
+/* ================= CFP ================= */
 function extractCFP($) {
   $("script, style, nav, footer, header").remove();
 
@@ -194,22 +141,10 @@ function extractCFP($) {
 
   const good = parts.filter(p =>
     p.length > 80 &&
-    !/login|easychair|copyright/i.test(p)
+    !/login|easychair/i.test(p)
   );
 
   let cfp = good.join("\n");
-
-  // cut noise tail
-  const stop = ["committee", "editor", "copyright"];
-  let lower = cfp.toLowerCase();
-  let cut = cfp.length;
-
-  for (const s of stop) {
-    const idx = lower.indexOf(s);
-    if (idx !== -1 && idx < cut) cut = idx;
-  }
-
-  cfp = cfp.slice(0, cut);
 
   if (cfp.length > MAX_CFP_LENGTH) {
     cfp = cfp.slice(0, MAX_CFP_LENGTH);
@@ -237,13 +172,13 @@ async function parseEasyChair(doc, html) {
   return {
     cfp_text: extractCFP($),
     deadline: extractDeadline(bodyText),
-    ...(await extractGeoSmart(doc, bodyText))
+    ...extractFromLocation(doc.location || "")
   };
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH FINAL (STABLE + CLEAN CFP)");
+  console.log("🚀 ENRICH FINAL (NO FILE DEPENDENCY)");
 
   await initGeo();
 
