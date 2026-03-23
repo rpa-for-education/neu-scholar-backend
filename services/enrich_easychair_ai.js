@@ -115,47 +115,62 @@ function extractFromLocation(location) {
 
 /* ================= CFP ================= */
 function extractCFP($) {
-  $("script, style, nav, footer, header").remove();
+  try {
+    $("script, style, nav, footer, header").remove();
 
-  let text = $("body").text();
+    let text = $("body").text();
 
-  text = text
-    .replace(/EasyChair.*?Log in/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+    text = text
+      .replace(/EasyChair.*?Log in/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  const parts = text.split(/(?<=\.)\s+/);
+    const parts = text.split(/(?<=\.)\s+/);
 
-  const good = parts.filter(p =>
-    p.length > 80 && !/login|easychair/i.test(p)
-  );
+    const good = parts.filter(p =>
+      p.length > 80 && !/login|easychair/i.test(p)
+    );
 
-  let cfp = good.join("\n");
+    let cfp = good.join("\n");
 
-  if (cfp.length > MAX_CFP_LENGTH) cfp = cfp.slice(0, MAX_CFP_LENGTH);
-  if (cfp.length < 200) return null;
+    if (cfp.length > MAX_CFP_LENGTH) cfp = cfp.slice(0, MAX_CFP_LENGTH);
+    if (cfp.length < 200) return null;
 
-  return cfp.trim();
+    return cfp.trim();
+  } catch {
+    return null;
+  }
 }
 
 /* ================= DATE ================= */
 function extractDeadline(text) {
-  const match = text.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
-  if (!match) return null;
+  try {
+    const match = text.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
+    if (!match) return null;
 
-  return new Date(match[1]).toISOString().slice(0, 10);
+    const d = new Date(match[1]);
+    if (isNaN(d)) return null;
+
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
 }
 
 /* ================= PARSER ================= */
 async function parseEasyChair(doc, html) {
-  const $ = cheerio.load(html);
-  const bodyText = $("body").text();
+  try {
+    const $ = cheerio.load(html);
+    const bodyText = $("body").text();
 
-  return {
-    cfp_text: extractCFP($),
-    deadline: extractDeadline(bodyText),
-    ...extractFromLocation(doc.location || "")
-  };
+    return {
+      cfp_text: extractCFP($),
+      deadline: extractDeadline(bodyText),
+      ...extractFromLocation(doc.location || "")
+    };
+  } catch (err) {
+    throw new Error("Parse crash: " + err.message);
+  }
 }
 
 /* ================= AXIOS ================= */
@@ -165,7 +180,7 @@ async function fetchAxios(url) {
       timeout: TIMEOUT,
       headers: {
         "User-Agent": "Mozilla/5.0 Chrome/120",
-        "Accept": "text/html",
+        "Accept": "text/html"
       },
       validateStatus: () => true
     });
@@ -218,7 +233,7 @@ async function smartFetch(url) {
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH SMART CRAWLER");
+  console.log("🚀 ENRICH FINAL STABLE");
 
   await initGeo();
 
@@ -236,12 +251,20 @@ async function run() {
       try {
         const { html, source } = await smartFetch(doc.url);
 
-        if (!html) {
-          console.log("❌ FAIL:", doc.url);
+        if (!html || html.length < 500) {
+          console.log("❌ HTML yếu:", doc.url);
           return;
         }
 
-        const data = await parseEasyChair(doc, html);
+        let data = {};
+
+        try {
+          data = await parseEasyChair(doc, html);
+        } catch (err) {
+          console.log("⚠️ Parse fail:", doc.url);
+          console.log("👉", err.message);
+          data = {};
+        }
 
         await col.updateOne(
           { _id: doc._id },
@@ -249,7 +272,7 @@ async function run() {
             $set: {
               ...data,
               crawl_source: source,
-              status: "done",
+              status: Object.keys(data).length ? "done" : "partial",
               updated_time: new Date().toISOString()
             }
           }
@@ -257,8 +280,9 @@ async function run() {
 
         done++;
         console.log(`✅ ${done} (${source})`);
-      } catch {
+      } catch (err) {
         console.log("❌ ERROR:", doc.url);
+        console.log("👉", err.message);
       }
     });
   }
