@@ -3,8 +3,7 @@ import { qdrantClient as qdrant } from "../../db/qdrant.js";
 import {
   detectDomain,
   analyzeQuestion,
-  finalizeResults,
-  applyFilters
+  finalizeResults
 } from "./agentReasoning.js";
 
 import "dotenv/config";
@@ -19,10 +18,11 @@ function cleanQuery(q) {
     .toLowerCase()
     .normalize("NFC")
     .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-// ================= 🔥 VI → EN =================
+// ================= VI → EN =================
 function normalizeSemantic(q) {
   return q
     .toLowerCase()
@@ -40,11 +40,47 @@ async function embed(text) {
       model: EMBED_MODEL,
       input: text,
     });
+
     return res.data?.embeddings?.[0];
   } catch (err) {
     console.error("❌ embed error:", err.message);
     return null;
   }
+}
+
+// ================= DEDUPE =================
+function dedupe(items) {
+  const map = new Map();
+
+  for (const it of items) {
+    const key = (it.title || it.name || "").toLowerCase();
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, it);
+    }
+  }
+
+  return [...map.values()];
+}
+
+// ================= TYPE DETECT =================
+function isConference(i) {
+  return (
+    i.type === "conference" ||
+    i.acronym ||
+    i.cfp_text ||
+    i.deadline ||
+    i.start_date
+  );
+}
+
+function isJournal(i) {
+  return (
+    i.type === "journal" ||
+    i.sjr_best_quartile ||
+    i.publisher
+  );
 }
 
 // ================= MAIN =================
@@ -61,26 +97,21 @@ export async function searchConferenceJournalByVector({
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
 
-    let collections =
+    const collections =
       domain === "conference"
         ? ["conference_vectors"]
         : domain === "journal"
         ? ["journal_vectors"]
         : ["conference_vectors", "journal_vectors"];
 
-    // ================= QUERY =================
-    const queries = [
-      question,
-      cleaned,
-      semantic
-    ];
+    const queries = [question, cleaned, semantic];
 
     let results = [];
 
     // ================= SEARCH =================
     for (const col of collections) {
-      try {
-        for (const q of queries) {
+      for (const q of queries) {
+        try {
           const vector = await embed(q);
           if (!vector) continue;
 
@@ -90,22 +121,23 @@ export async function searchConferenceJournalByVector({
             with_payload: true,
           });
 
-          results.push(...res.map(r => ({
-            ...r.payload,
-            _score: r.score
-          })));
+          results.push(
+            ...res.map(r => ({
+              ...r.payload,
+              _score: r.score
+            }))
+          );
+
+        } catch (err) {
+          console.warn(`⚠️ skip ${col}:`, err.message);
         }
-      } catch (err) {
-        console.warn(`⚠️ skip collection ${col}:`, err.message);
       }
     }
 
     console.log("📊 Raw results:", results.length);
 
-    // ================= STOP BỊA =================
+    // ================= NO DATA =================
     if (!results.length) {
-      console.warn("⚠️ NO DATA FROM QDRANT");
-
       return {
         domain,
         conferences: [],
@@ -113,10 +145,10 @@ export async function searchConferenceJournalByVector({
       };
     }
 
-    // ================= FILTER SAFE =================
+    // ================= FILTER =================
     if (analysis.wantsCountryCode) {
-      const filtered = results.filter(i =>
-        i.country_code === analysis.wantsCountryCode
+      const filtered = results.filter(
+        i => i.country_code === analysis.wantsCountryCode
       );
 
       if (filtered.length) {
@@ -128,35 +160,34 @@ export async function searchConferenceJournalByVector({
 
     console.log("📊 After filter:", results.length);
 
-    // ================= RANK =================
-    results = results.map(i => {
-      const text = [
-        i.title,
-        i.country,
-        i.city,
-        i.text
-      ].join(" ");
+    // ================= DEDUPE =================
+    results = dedupe(results);
 
-      return {
-        ...i,
-        score: i._score || 0.5
-      };
-    });
+    // ================= SCORE =================
+    results = results.map(i => ({
+      ...i,
+      score: i._score ?? 0.3
+    }));
 
     results.sort((a, b) => b.score - a.score);
 
-    const final = results.slice(0, topk);
+    const final = results.slice(0, topk * 2);
 
+    console.log("📦 FINAL ITEMS:", final.length);
+
+    // ================= SPLIT =================
     const conferences = [];
     const journals = [];
 
     for (const i of final) {
-      if (i.type === "conference" || i.acronym) {
+      if (isConference(i)) {
         conferences.push(i);
-      } else {
+      } else if (isJournal(i)) {
         journals.push(i);
       }
     }
+
+    console.log("📊 SPLIT:", conferences.length, journals.length);
 
     return {
       domain,
