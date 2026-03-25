@@ -186,14 +186,14 @@ async function main() {
   });
 
   await sync({
-    mongoCol: "conferences",
+    mongoCol: "conference",
     qdrantCol: "conference_vectors",
     buildText: buildConferenceText,
     buildPayload: conferencePayload,
   });
 
   await sync({
-    mongoCol: "journals",
+    mongoCol: "journal",
     qdrantCol: "journal_vectors",
     buildText: buildJournalText,
     buildPayload: journalPayload,
