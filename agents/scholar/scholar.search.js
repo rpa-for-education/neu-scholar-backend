@@ -1,5 +1,5 @@
 import axios from "axios";
-import { QDRANT_CLIENT as qdrant } from "../../db/qdrant.js";
+import { qdrantClient as qdrant } from "../../db/qdrant.js";
 import {
   detectDomain,
   analyzeQuestion,
