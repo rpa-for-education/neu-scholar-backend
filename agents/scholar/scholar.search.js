@@ -11,6 +11,13 @@ import "dotenv/config";
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
 
+// ================= CACHE =================
+const EMBED_CACHE = new Map();
+const QUERY_CACHE = new Map();
+
+const EMBED_TTL = 1000 * 60 * 60; // 1h
+const QUERY_TTL = 1000 * 60 * 5;  // 5 min
+
 // ================= CLEAN =================
 function cleanQuery(q) {
   return q
@@ -32,15 +39,32 @@ function normalizeSemantic(q) {
     .replace(/tạp chí/g, "journal");
 }
 
-// ================= EMBED =================
+// ================= EMBED (CÓ CACHE) =================
 async function embed(text) {
+  const key = text.toLowerCase();
+
+  const cached = EMBED_CACHE.get(key);
+  if (cached && Date.now() - cached.time < EMBED_TTL) {
+    return cached.value;
+  }
+
   try {
     const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
       model: EMBED_MODEL,
       input: text,
     });
 
-    return res.data?.embeddings?.[0];
+    const vec = res.data?.embeddings?.[0];
+
+    if (vec) {
+      EMBED_CACHE.set(key, {
+        value: vec,
+        time: Date.now()
+      });
+    }
+
+    return vec;
+
   } catch (err) {
     console.error("❌ embed error:", err.message);
     return null;
@@ -90,6 +114,15 @@ export async function searchConferenceJournalByVector({
   try {
     console.log("🧠 Query:", question);
 
+    // ================= QUERY CACHE =================
+    const cacheKey = question.toLowerCase();
+
+    const cached = QUERY_CACHE.get(cacheKey);
+    if (cached && Date.now() - cached.time < QUERY_TTL) {
+      console.log("⚡ CACHE HIT");
+      return cached.value;
+    }
+
     const cleaned = cleanQuery(question);
     const semantic = normalizeSemantic(question);
 
@@ -107,31 +140,39 @@ export async function searchConferenceJournalByVector({
 
     let results = [];
 
-    // ================= SEARCH =================
+    // ================= 🚀 PARALLEL SEARCH =================
+    const tasks = [];
+
     for (const col of collections) {
       for (const q of queries) {
-        try {
-          const vector = await embed(q);
-          if (!vector) continue;
+        tasks.push(
+          (async () => {
+            const vector = await embed(q);
+            if (!vector) return [];
 
-          const res = await qdrant.search(col, {
-            vector,
-            limit: topk * 5,
-            with_payload: true,
-          });
+            try {
+              const res = await qdrant.search(col, {
+                vector,
+                limit: topk * 3, // 🔥 giảm load
+                with_payload: true,
+              });
 
-          results.push(
-            ...res.map(r => ({
-              ...r.payload,
-              _score: r.score
-            }))
-          );
+              return res.map(r => ({
+                ...r.payload,
+                _score: r.score
+              }));
 
-        } catch (err) {
-          console.warn(`⚠️ skip ${col}:`, err.message);
-        }
+            } catch (err) {
+              console.warn(`⚠️ skip ${col}:`, err.message);
+              return [];
+            }
+          })()
+        );
       }
     }
+
+    const resultsArr = await Promise.all(tasks);
+    results = resultsArr.flat();
 
     console.log("📊 Raw results:", results.length);
 
@@ -170,7 +211,6 @@ export async function searchConferenceJournalByVector({
 
     results.sort((a, b) => b.score - a.score);
 
-    // 🔥 lấy nhiều hơn để agent còn rank
     const final = results.slice(0, topk * 3);
 
     console.log("📦 FINAL ITEMS:", final.length);
@@ -189,17 +229,24 @@ export async function searchConferenceJournalByVector({
 
     console.log("📊 SPLIT:", conferences.length, journals.length);
 
-    // 🔥 KHÔNG dùng finalizeResults nữa (BUG)
     const finalConfs = conferences.slice(0, topk);
     const finalJournals = journals.slice(0, topk);
 
     console.log("🚀 RETURN:", finalConfs.length, finalJournals.length);
 
-    return {
+    const finalResult = {
       domain,
       conferences: finalConfs,
       journals: finalJournals,
     };
+
+    // ================= SAVE CACHE =================
+    QUERY_CACHE.set(cacheKey, {
+      value: finalResult,
+      time: Date.now()
+    });
+
+    return finalResult;
 
   } catch (err) {
     console.error("❌ search fatal:", err);
