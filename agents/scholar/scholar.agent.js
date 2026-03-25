@@ -2,7 +2,7 @@ import { searchConferenceJournalByVector } from "./scholar.search.js";
 import { callLLM } from "../shared/llm.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
-// 🔥 dùng file đã gộp
+// 🔥 dùng ranking đã gộp
 import { rankItems, smartFilter, rerankWithLLM } from "./scholar.ranking.js";
 
 const MAX_CANDIDATES = 15;
@@ -25,14 +25,23 @@ function getJournalUrl(j) {
   return j.scimago_link || "";
 }
 
-// ================= DEDUPE =================
-function dedupe(items, key = "title") {
+// ================= 🔥 FIXED DEDUPE =================
+function dedupe(items) {
   const map = new Map();
 
   for (const it of items) {
-    const k = (it[key] || it.name || "").toLowerCase();
-    if (!k) continue;
-    if (!map.has(k)) map.set(k, it);
+    const key = (
+      it.title ||
+      it.name ||
+      it.acronym ||
+      ""
+    ).toLowerCase();
+
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, it);
+    }
   }
 
   return [...map.values()];
@@ -123,8 +132,8 @@ export async function runAgent(question, topk = FINAL_TOPK) {
       topk: MAX_CANDIDATES,
     });
 
-    let conferences = dedupe(res.conferences || [], "name");
-    let journals = dedupe(res.journals || [], "title");
+    let conferences = dedupe(res.conferences || []);
+    let journals = dedupe(res.journals || []);
 
     console.log("📊 BEFORE RANK:", conferences.length, journals.length);
 
@@ -153,7 +162,7 @@ Câu hỏi: ${question}
       `);
 
       answer = llm?.answer || "";
-    } catch (err) {
+    } catch {
       console.warn("⚠️ summary fail");
     }
 
