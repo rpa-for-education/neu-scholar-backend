@@ -1,9 +1,7 @@
 // agentReasoning.js
 // =========================================
-// Academic Agent Reasoning (NEU multi-field)
+// Academic Agent Reasoning (NEU FIXED)
 // =========================================
-
-
 
 const CONTINENT_MAP = [
   { key: "Asia", match: ["châu á", "asia", "asian"] },
@@ -17,48 +15,59 @@ const CONTINENT_MAP = [
 import { COUNTRY_NAME_TO_ISO } from "../../services/scripts/country_iso_full.js";
 import { COUNTRY_VI_TO_ISO } from "../../services/scripts/country_vi_alias.js";
 
+// ================= NORMALIZE =================
 function normalizeText(str) {
   return str
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu tiếng Việt
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[.,()]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-export function extractCountryIntent(question) {
-  if (!question) return null;
-
+// ================= 🔥 LOCATION GROUNDING =================
+function detectSpecialLocation(question) {
   const q = normalizeText(question);
-  const words = ` ${q} `; // padding để bắt biên từ
 
-  // 1️⃣ Vietnamese aliases (ưu tiên tuyệt đối)
-  for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
-    const n = ` ${normalizeText(name)} `;
-    if (words.includes(n)) {
-      return iso;
-    }
-  }
-
-  // 2️⃣ English / international aliases
-  const entries = Object.entries(COUNTRY_NAME_TO_ISO)
-    .sort((a, b) => b[0].length - a[0].length);
-
-  for (const [name, iso] of entries) {
-    const n = ` ${normalizeText(name)} `;
-    if (words.includes(n)) {
-      return iso;
-    }
+  // 👉 NEU fix cứng
+  if (q.includes("neu") || q.includes("kinh te quoc dan")) {
+    return {
+      type: "point",
+      name: "NEU",
+      city: "Hanoi",
+      country: "Vietnam",
+      countryCode: "VN"
+    };
   }
 
   return null;
 }
 
+// ================= COUNTRY DETECTION =================
+export function extractCountryIntent(question) {
+  if (!question) return null;
 
-/**
- * DOMAIN DETECTION
- */
+  const q = normalizeText(question);
+  const words = ` ${q} `;
+
+  for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
+    const n = ` ${normalizeText(name)} `;
+    if (words.includes(n)) return iso;
+  }
+
+  const entries = Object.entries(COUNTRY_NAME_TO_ISO)
+    .sort((a, b) => b[0].length - a[0].length);
+
+  for (const [name, iso] of entries) {
+    const n = ` ${normalizeText(name)} `;
+    if (words.includes(n)) return iso;
+  }
+
+  return null;
+}
+
+// ================= DOMAIN =================
 export function detectDomain(question) {
   const q = question.toLowerCase();
 
@@ -78,22 +87,27 @@ export function detectDomain(question) {
   return "general";
 }
 
-/**
- * ANALYZE INTENT
- */
+// ================= ANALYZE =================
 export function analyzeQuestion(question) {
   const q = question.toLowerCase();
 
+  // 🔥 detect special location FIRST
+  const specialLocation = detectSpecialLocation(question);
+
   let wantsContinent = null;
-  for (const c of CONTINENT_MAP) {
-    if (c.match.some(m => q.includes(m))) {
-      wantsContinent = c.key;
-      break;
+
+  // 👉 nếu đã detect NEU thì bỏ continent
+  if (!specialLocation) {
+    for (const c of CONTINENT_MAP) {
+      if (c.match.some(m => q.includes(m))) {
+        wantsContinent = c.key;
+        break;
+      }
     }
   }
 
-  const countryCode = extractCountryIntent(question);
-
+  const countryCode =
+    specialLocation?.countryCode || extractCountryIntent(question);
 
   return {
     wantsRanking:
@@ -127,76 +141,30 @@ export function analyzeQuestion(question) {
       q.includes("so sánh") ||
       q.includes("compare"),
 
-    // 🔥 NEW
+    // 🔥 FIX
     wantsContinent,
-
     wantsCountryCode: countryCode,
+
+    // 🔥 NEW
+    location: specialLocation,
 
     fieldHint: extractResearchField(question)
   };
 }
 
-/**
- * MULTI-DISCIPLINE FIELD EXTRACTION (NEU)
- */
+// ================= FIELD =================
 export function extractResearchField(question) {
   const q = question.toLowerCase();
 
   const fields = [
-    // ===== ECONOMICS =====
     { key: "economics", match: ["kinh tế học", "economics"] },
-    { key: "development economics", match: ["phát triển", "development"] },
-    { key: "macroeconomics", match: ["vĩ mô", "macroeconomics"] },
-    { key: "microeconomics", match: ["vi mô", "microeconomics"] },
-
-    // ===== BUSINESS & MANAGEMENT =====
-    { key: "business administration", match: ["quản trị kinh doanh", "qtkd", "business administration"] },
-    { key: "strategic management", match: ["chiến lược", "strategy"] },
-    { key: "human resource management", match: ["nhân sự", "hrm", "nhân lực"] },
+    { key: "business administration", match: ["quản trị kinh doanh", "qtkd"] },
+    { key: "finance", match: ["tài chính"] },
     { key: "marketing", match: ["marketing"] },
-    { key: "consumer behavior", match: ["hành vi người tiêu dùng"] },
-
-    // ===== FINANCE =====
-    { key: "finance", match: ["tài chính", "finance"] },
-    { key: "banking", match: ["ngân hàng", "banking"] },
-    { key: "accounting", match: ["kế toán", "accounting"] },
-    { key: "auditing", match: ["kiểm toán", "auditing"] },
-
-    // ===== INFORMATION SYSTEMS =====
-    { key: "management information systems", match: ["mis", "hệ thống thông tin quản lý"] },
-    { key: "information systems", match: ["information systems"] },
-
-    // ===== DATA & ANALYTICS =====
-    { key: "business analytics", match: ["business analytics", "phân tích kinh doanh"] },
-    { key: "data analytics", match: ["data analytics", "phân tích dữ liệu"] },
-    { key: "econometrics", match: ["kinh tế lượng", "econometrics"] },
-    { key: "statistics", match: ["thống kê", "statistics"] },
-
-    // ===== LOGISTICS =====
-    { key: "logistics and supply chain management", match: ["logistics", "chuỗi cung ứng"] },
-
-    // ===== LAW & POLICY =====
-    { key: "economic law", match: ["luật kinh tế"] },
-    { key: "public policy", match: ["chính sách công"] },
-
-    // ===== PUBLIC ADMIN =====
-    { key: "public administration", match: ["quản lý công"] },
-
-    // ===== INTERNATIONAL =====
-    { key: "international business", match: ["kinh doanh quốc tế"] },
-    { key: "international economics", match: ["kinh tế quốc tế"] },
-
-    // ===== TOURISM =====
-    { key: "tourism management", match: ["du lịch"] },
-
-    // ===== SUSTAINABILITY =====
-    { key: "sustainable development", match: ["phát triển bền vững", "sustainability"] },
-
-    // ===== SOCIAL SCIENCES =====
-    { key: "social sciences", match: ["xã hội học", "social science"] },
-
-    // ===== DEFAULT =====
-    { key: "business and economics", match: ["cntt", "it", "công nghệ"] }
+    { key: "data analytics", match: ["phân tích dữ liệu"] },
+    { key: "econometrics", match: ["kinh tế lượng"] },
+    { key: "logistics", match: ["chuỗi cung ứng"] },
+    { key: "information systems", match: ["mis"] }
   ];
 
   for (const f of fields) {
@@ -208,37 +176,46 @@ export function extractResearchField(question) {
   return null;
 }
 
-/**
- * BUILD SEMANTIC QUERY FOR VECTOR SEARCH
- */
+// ================= SEMANTIC =================
 export function buildSemanticQuery(analysis, domain) {
-  if (analysis.fieldHint) {
-    return analysis.fieldHint;
+  // 🔥 ưu tiên location
+  if (analysis.location) {
+    return `academic conference in ${analysis.location.city} Vietnam`;
   }
 
-  if (domain === "journal") {
-    return "academic journal in economics and business";
-  }
+  if (analysis.fieldHint) return analysis.fieldHint;
 
-  if (domain === "conference") {
-    return "international academic conference in economics and management";
-  }
+  if (domain === "conference")
+    return "international academic conference in economics";
 
-  return "scientific research in economics and management";
+  if (domain === "journal")
+    return "academic journal in economics";
+
+  return "scientific research";
 }
 
-/**
- * FILTER BY METADATA
- */
+// ================= FILTER =================
 export function applyFilters(items, analysis, domain) {
   let results = [...items];
 
-  if (domain === "journal" && analysis.wantsQuartile) {
-    results = results.filter(j =>
-      ["Q1", "Q2"].includes(j.sjr_best_quartile)
+  // 🔥 FILTER BY COUNTRY (IMPORTANT)
+  if (analysis.wantsCountryCode) {
+    results = results.filter(r =>
+      (r.metadata?.country_code || "").toUpperCase() ===
+      analysis.wantsCountryCode
     );
   }
 
+  // 🔥 FILTER BY CITY (NEU case)
+  if (analysis.location?.city) {
+    results = results.filter(r =>
+      (r.metadata?.city || "").toLowerCase().includes(
+        analysis.location.city.toLowerCase()
+      )
+    );
+  }
+
+  // existing filters
   if (domain === "conference" && analysis.wantsRecent) {
     const year = String(analysis.wantsRecent[0]);
     results = results.filter(c =>
@@ -249,34 +226,32 @@ export function applyFilters(items, analysis, domain) {
   return results;
 }
 
-/**
- * RANKING STRATEGY
- */
-export function rankResults(items, domain) {
+// ================= RANK =================
+export function rankResults(items, domain, analysis) {
   const results = [...items];
-
-  if (domain === "journal") {
-    results.sort((a, b) => {
-      const hA = Number(a.h_index || 0);
-      const hB = Number(b.h_index || 0);
-      return hB - hA;
-    });
-  }
 
   if (domain === "conference") {
     results.sort((a, b) => {
-      const dA = new Date(a.deadline || "2100-01-01");
-      const dB = new Date(b.deadline || "2100-01-01");
-      return dA - dB;
+      let scoreA = 0;
+      let scoreB = 0;
+
+      // 🔥 boost Vietnam / Hanoi
+      if (analysis.location) {
+        if (a.metadata?.country === "Vietnam") scoreA += 50;
+        if (b.metadata?.country === "Vietnam") scoreB += 50;
+
+        if (a.metadata?.city === "Hanoi") scoreA += 100;
+        if (b.metadata?.city === "Hanoi") scoreB += 100;
+      }
+
+      return scoreB - scoreA;
     });
   }
 
   return results;
 }
 
-/**
- * FINAL OUTPUT
- */
+// ================= FINAL =================
 export function finalizeResults(items, limit = 10) {
   return items.slice(0, limit);
 }
