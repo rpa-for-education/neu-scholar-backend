@@ -1,101 +1,159 @@
-// ================= SMART RANKING =================
+// =========================================
+// 🔥 HYBRID RANKING SYSTEM (PRODUCTION)
+// BM25-lite + Semantic + Intent + Recency
+// =========================================
 
-// 👉 normalize text
+// ================= CONFIG =================
+const WEIGHTS = {
+  vector: 0.4,     // Qdrant score
+  keyword: 0.25,   // keyword matching
+  intent: 0.2,     // intent boost
+  recency: 0.1,    // deadline gần
+  quality: 0.05    // Q1 / rank
+};
+
+// ================= UTILS =================
 function normalize(text) {
-  return (text || "")
-    .toString()
+  if (!text) return "";
+  return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ");
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-// 👉 extract keywords từ câu hỏi
-export function extractKeywords(question) {
-  const stopwords = new Set([
-    "the","is","are","a","an","of","in","on","for","and","to",
-    "các","những","về","liên","quan","đến","cho","tôi","năm","bao","gồm"
-  ]);
-
-  return normalize(question)
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopwords.has(w));
+// ================= TOKENIZE =================
+function tokenize(text) {
+  return normalize(text).split(" ").filter(w => w.length > 2);
 }
 
-// 👉 tính điểm semantic match (rất quan trọng)
-function keywordScore(text, keywords) {
-  const t = normalize(text);
+// ================= KEYWORD SCORE =================
+function keywordScore(item, query) {
+  const qWords = tokenize(query);
+  const text = normalize(
+    item.name ||
+    item.title ||
+    ""
+  );
 
-  let score = 0;
+  if (!text) return 0;
 
-  for (const k of keywords) {
-    if (t.includes(k)) score += 1;
+  let match = 0;
+
+  for (const w of qWords) {
+    if (text.includes(w)) match++;
   }
 
-  return score / (keywords.length || 1);
+  return match / qWords.length;
 }
 
-// 👉 deadline score (ưu tiên còn hạn)
-function deadlineScore(deadline) {
-  if (!deadline) return 0;
+// ================= INTENT BOOST =================
+function intentScore(item, analysis) {
+  let score = 0;
+
+  // 🎯 NEU boost
+  if (analysis.isNEU) {
+    if ((item.organizer || "").toLowerCase().includes("kinh tế quốc dân")) {
+      score += 1.0; // MAX boost
+    }
+  }
+
+  // 🎯 country
+  if (analysis.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
+    score += 0.5;
+  }
+
+  // 🎯 field
+  if (analysis.fieldHint) {
+    const text = normalize(
+      item.topics ||
+      item.categories ||
+      item.areas ||
+      ""
+    );
+
+    if (text.includes(normalize(analysis.fieldHint))) {
+      score += 0.5;
+    }
+  }
+
+  return Math.min(score, 1);
+}
+
+// ================= RECENCY =================
+function recencyScore(item) {
+  const dateStr = item.deadline || item.start_date;
+  if (!dateStr) return 0;
 
   const now = new Date();
-  const d = new Date(deadline);
+  const d = new Date(dateStr);
 
-  if (isNaN(d)) return 0;
+  const diff = (d - now) / (1000 * 60 * 60 * 24);
 
-  const diffDays = (d - now) / (1000 * 60 * 60 * 24);
+  if (diff < 0) return 0;
+  if (diff < 30) return 1;
+  if (diff < 90) return 0.7;
+  if (diff < 180) return 0.4;
 
-  if (diffDays < 0) return -1;       // quá hạn
-  if (diffDays < 30) return 2;       // rất gần
-  if (diffDays < 90) return 1;       // gần
-  return 0.5;                        // xa
+  return 0.1;
 }
 
-// 👉 main ranking function
-export function rankItems(items, question) {
-  const keywords = extractKeywords(question);
+// ================= QUALITY =================
+function qualityScore(item) {
+  // journal Q1
+  if (item.sjr_best_quartile === "Q1") return 1;
+  if (item.sjr_best_quartile === "Q2") return 0.7;
 
-  return items.map(item => {
-    const text = [
-      item.name,
-      item.title,
-      item.topics,
-      item.categories,
-      item.areas
-    ].join(" ");
+  // conference (có thể mở rộng sau)
+  return 0.3;
+}
 
-    const semantic = keywordScore(text, keywords);
-    const timeScore = deadlineScore(item.deadline);
+// ================= FINAL SCORE =================
+function computeScore(item, query, analysis) {
+  const vector = item.score || 0;
 
-    const vectorScore = item.score || 0;
+  const keyword = keywordScore(item, query);
+  const intent = intentScore(item, analysis);
+  const recency = recencyScore(item);
+  const quality = qualityScore(item);
 
-    // 👉 weighted score
-    const finalScore =
-      vectorScore * 0.5 +
-      semantic * 0.3 +
-      timeScore * 0.2;
+  return (
+    vector * WEIGHTS.vector +
+    keyword * WEIGHTS.keyword +
+    intent * WEIGHTS.intent +
+    recency * WEIGHTS.recency +
+    quality * WEIGHTS.quality
+  );
+}
 
-    return {
+// ================= MAIN RANK =================
+export function rankItems(items, query, analysis = {}) {
+  if (!items || items.length === 0) return [];
+
+  return items
+    .map(item => ({
       ...item,
-      finalScore,
-      semantic,
-      timeScore
-    };
-  })
-  .sort((a, b) => b.finalScore - a.finalScore);
+      finalScore: computeScore(item, query, analysis)
+    }))
+    .sort((a, b) => b.finalScore - a.finalScore);
 }
 
-// 👉 filter thông minh
+// ================= SMART FILTER =================
 export function smartFilter(items) {
-  return items.filter(item => {
-    // bỏ những cái quá yếu
-    if ((item.finalScore || 0) < 0.1) return false;
+  if (!items || items.length === 0) return [];
 
-    // bỏ conference quá hạn
-    if (item.deadline) {
-      const d = new Date(item.deadline);
-      if (d < new Date()) return false;
-    }
+  // 🔥 dynamic threshold
+  const topScore = items[0]?.finalScore || 0;
 
-    return true;
-  });
+  // giữ item >= 40% top
+  const threshold = topScore * 0.4;
+
+  const filtered = items.filter(it => it.finalScore >= threshold);
+
+  // fallback nếu filter quá mạnh
+  if (filtered.length === 0) return items.slice(0, 5);
+
+  return filtered;
 }
