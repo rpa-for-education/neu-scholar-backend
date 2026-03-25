@@ -105,8 +105,8 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let journals = dedupe(res.journals || [], "title");
 
     // ===== SMART RANK =====
-    conferences = smartFilter(rankItems(conferences, question));
-    journals = smartFilter(rankItems(journals, question));
+    conferences = smartFilter(rankItems(conferences, question, analysis));
+    journals = smartFilter(rankItems(journals, question, analysis));
 
     // ===== LLM RERANK =====
     conferences = await rerankWithLLM(conferences, question, topk);
