@@ -1,11 +1,14 @@
 // ./shared/embedding.js
 
-const TIMEOUT = 10000;
-const MAX_RETRIES = 2;
-const CACHE_TTL = 1000 * 60 * 10; // 10 phút
+const TIMEOUT = 2500; // 🔥 giảm mạnh
+const MAX_RETRIES = 1;
+const CACHE_TTL = 1000 * 60 * 30; // 30 phút
 
-// ================= SIMPLE CACHE =================
+// ================= CACHE =================
 const CACHE = new Map();
+
+// 🔥 NEW: in-flight dedupe
+const INFLIGHT = new Map();
 
 function getCache(key) {
   const item = CACHE.get(key);
@@ -47,45 +50,30 @@ function buildRequest(text) {
 
   const mode = getMode();
 
-  // 🔥 AUTO detect
   if (mode === "auto") {
     if (base.includes("/ollama")) {
       return {
         url: `${base}/api/embed`,
-        body: {
-          model,
-          input: text,
-        },
+        body: { model, input: text },
       };
     }
 
     return {
       url: `${base}/api/embeddings`,
-      body: {
-        model,
-        prompt: text,
-      },
+      body: { model, prompt: text },
     };
   }
 
-  // 👉 FORCE proxy
   if (mode === "proxy") {
     return {
       url: `${base}/api/embed`,
-      body: {
-        model,
-        input: text,
-      },
+      body: { model, input: text },
     };
   }
 
-  // 👉 FORCE ollama
   return {
     url: `${base}/api/embeddings`,
-    body: {
-      model,
-      prompt: text,
-    },
+    body: { model, prompt: text },
   };
 }
 
@@ -104,65 +92,78 @@ export async function embed(text) {
   if (!text || !text.trim()) return null;
 
   const normalized = normalizeText(text);
-
   const cacheKey = `embed:${normalized}`;
 
-  // 🔥 CACHE HIT
+  // ================= CACHE HIT =================
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
-  const { url, body } = buildRequest(normalized);
-
-  let lastError;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), TIMEOUT);
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      clearTimeout(id);
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-
-      const vector = parseEmbedding(data);
-
-      if (!vector || !Array.isArray(vector)) {
-        throw new Error("Invalid embedding");
-      }
-
-      // 🔥 SAVE CACHE
-      setCache(cacheKey, vector);
-
-      return vector;
-
-    } catch (err) {
-      lastError = err;
-
-      console.warn(
-        `⚠️ Embedding attempt ${attempt + 1} failed:`,
-        err.message
-      );
-
-      if (attempt < MAX_RETRIES) {
-        await sleep(300 * (attempt + 1));
-      }
-    }
+  // ================= 🔥 INFLIGHT DEDUPE =================
+  if (INFLIGHT.has(cacheKey)) {
+    return INFLIGHT.get(cacheKey);
   }
 
-  console.error("❌ Embedding failed after retries:", lastError?.message);
+  const task = (async () => {
+    const { url, body } = buildRequest(normalized);
 
-  return null; // 👈 không crash hệ thống
+    let lastError;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), TIMEOUT);
+
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+
+        clearTimeout(id);
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const vector = parseEmbedding(data);
+
+        if (!vector || !Array.isArray(vector)) {
+          throw new Error("Invalid embedding");
+        }
+
+        // ================= SAVE CACHE =================
+        setCache(cacheKey, vector);
+
+        return vector;
+
+      } catch (err) {
+        lastError = err;
+
+        console.warn(
+          `⚠️ Embedding attempt ${attempt + 1} failed:`,
+          err.message
+        );
+
+        if (attempt < MAX_RETRIES) {
+          await sleep(200); // 🔥 retry nhanh
+        }
+      }
+    }
+
+    console.error("❌ Embedding failed:", lastError?.message);
+
+    return null;
+  })();
+
+  // lưu inflight
+  INFLIGHT.set(cacheKey, task);
+
+  try {
+    const result = await task;
+    return result;
+  } finally {
+    INFLIGHT.delete(cacheKey);
+  }
 }

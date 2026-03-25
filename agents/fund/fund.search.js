@@ -1,5 +1,3 @@
-// agents/fund/fund.search.js
-
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
 
@@ -9,6 +7,7 @@ const COLLECTION =
 
 const CACHE_TTL = 1000 * 60 * 5; // 5 phút
 const MAX_RETRIES = 1;
+const TIMEOUT = 2500; // 🔥 chống treo
 
 // ================= CACHE =================
 const CACHE = new Map();
@@ -42,6 +41,16 @@ function safeTopk(topk) {
   return n && n > 0 ? n : 5;
 }
 
+// ================= 🔥 TIMEOUT WRAPPER =================
+function withTimeout(promise, ms = TIMEOUT) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ]);
+}
+
 // ================= MAIN =================
 export async function searchFund(query, topk = 5) {
   try {
@@ -50,12 +59,15 @@ export async function searchFund(query, topk = 5) {
 
     const cacheKey = `fund:vector:${normalized}:${limit}`;
 
-    // 🔥 CACHE HIT
+    // ================= CACHE HIT =================
     const cached = getCache(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      console.log("⚡ FUND CACHE HIT");
+      return cached;
+    }
 
-    // 🔥 EMBEDDING
-    const vector = await embed(normalized);
+    // ================= EMBEDDING =================
+    const vector = await withTimeout(embed(normalized), 2000);
 
     if (!vector) {
       console.warn("⚠️ No embedding → skip");
@@ -66,15 +78,18 @@ export async function searchFund(query, topk = 5) {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const result = await qdrantClient.search(COLLECTION, {
-          vector,
-          limit,
-          with_payload: true,
-        });
+        const result = await withTimeout(
+          qdrantClient.search(COLLECTION, {
+            vector,
+            limit,
+            with_payload: true,
+          }),
+          TIMEOUT
+        );
 
         const finalResult = result || [];
 
-        // 🔥 CACHE SAVE
+        // ================= CACHE SAVE =================
         setCache(cacheKey, finalResult);
 
         return finalResult;
@@ -91,10 +106,12 @@ export async function searchFund(query, topk = 5) {
 
     console.error("❌ Qdrant search failed:", lastError?.message);
 
+    // ================= FALLBACK =================
     return [];
 
   } catch (err) {
     console.error("❌ searchFund error:", err.message);
+
     return [];
   }
 }
