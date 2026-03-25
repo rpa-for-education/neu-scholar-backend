@@ -31,10 +31,8 @@ services:
       until curl -s http://qdrant:6333/collections > /dev/null; do
         sleep 2;
       done &&
-      echo '🚀 Sync FUND...' &&
-      node scripts/sync_fund_qdrant.js &&
-      echo '🚀 Sync SCHOLAR...' &&
-      node scripts/sync_scholar_qdrant.js &&
+      echo '🚀 Sync ALL (fund + conference + journal)...' &&
+      node scripts/syncAllQdrant.js &&
       echo '✅ Sync DONE'
       "
 
