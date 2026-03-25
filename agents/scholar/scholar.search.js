@@ -7,89 +7,44 @@ import {
   applyFilters
 } from "./agentReasoning.js";
 
-import { expandQuery } from "./scholar.queryExpansion.js";
 import "dotenv/config";
 
 // ================= CONFIG =================
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
-const LLM_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
-// ================= CACHE =================
-const CACHE = new Map();
-
-// ================= CLEAN QUERY =================
+// ================= CLEAN =================
 function cleanQuery(q) {
   return q
     .toLowerCase()
     .normalize("NFC")
     .replace(/[^\p{L}\p{N}\s]/gu, "")
-    .replace(/\s+/g, " ")
     .trim();
+}
+
+// ================= 🔥 VI → EN =================
+function normalizeSemantic(q) {
+  return q
+    .toLowerCase()
+    .replace(/trung quốc/g, "china")
+    .replace(/việt nam/g, "vietnam")
+    .replace(/hội thảo/g, "conference")
+    .replace(/quốc tế/g, "international")
+    .replace(/tạp chí/g, "journal");
 }
 
 // ================= EMBED =================
 async function embed(text) {
-  const key = "embed:" + text;
-
-  if (CACHE.has(key)) return CACHE.get(key);
-
   try {
     const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
       model: EMBED_MODEL,
       input: text,
     });
-
-    const vec = res.data?.embeddings?.[0];
-    if (vec) CACHE.set(key, vec);
-
-    return vec;
-
+    return res.data?.embeddings?.[0];
   } catch (err) {
-    console.error("❌ embed fail:", err.message);
+    console.error("❌ embed error:", err.message);
     return null;
   }
-}
-
-// ================= CHECK COLLECTION =================
-async function collectionExists(name) {
-  try {
-    await qdrant.getCollection(name);
-    return true;
-  } catch {
-    console.warn(`⚠️ Collection not found: ${name}`);
-    return false;
-  }
-}
-
-// ================= KEYWORD SCORE =================
-function keywordScore(text, query) {
-  if (!text) return 0;
-
-  const words = query.split(/\s+/);
-  let hit = 0;
-
-  for (const w of words) {
-    if (text.toLowerCase().includes(w)) hit++;
-  }
-
-  return hit / words.length;
-}
-
-// ================= HIGHLIGHT =================
-function highlight(text, query) {
-  if (!text) return "";
-
-  let result = text;
-
-  for (const w of query.split(/\s+/)) {
-    if (w.length < 3) continue;
-
-    const regex = new RegExp(`(${w})`, "gi");
-    result = result.replace(regex, "**$1**");
-  }
-
-  return result.slice(0, 300);
 }
 
 // ================= MAIN =================
@@ -98,14 +53,14 @@ export async function searchConferenceJournalByVector({
   topk = 10,
 }) {
   try {
+    console.log("🧠 Query:", question);
+
     const cleaned = cleanQuery(question);
+    const semantic = normalizeSemantic(question);
 
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
 
-    console.log("🧠 Query:", question);
-
-    // ================= COLLECTION =================
     let collections =
       domain === "conference"
         ? ["conference_vectors"]
@@ -113,39 +68,22 @@ export async function searchConferenceJournalByVector({
         ? ["journal_vectors"]
         : ["conference_vectors", "journal_vectors"];
 
-    // 🔥 FILTER COLLECTION EXISTS
-    const validCollections = [];
-
-    for (const col of collections) {
-      if (await collectionExists(col)) {
-        validCollections.push(col);
-      }
-    }
-
-    if (!validCollections.length) {
-      console.error("❌ No valid collections found");
-      return {
-        domain,
-        conferences: [],
-        journals: [],
-      };
-    }
-
     // ================= QUERY =================
     const queries = [
       question,
-      cleaned
+      cleaned,
+      semantic
     ];
 
     let results = [];
 
     // ================= SEARCH =================
-    for (const col of validCollections) {
-      for (const q of queries) {
-        const vector = await embed(q);
-        if (!vector) continue;
+    for (const col of collections) {
+      try {
+        for (const q of queries) {
+          const vector = await embed(q);
+          if (!vector) continue;
 
-        try {
           const res = await qdrant.search(col, {
             vector,
             limit: topk * 5,
@@ -156,16 +94,18 @@ export async function searchConferenceJournalByVector({
             ...r.payload,
             _score: r.score
           })));
-
-        } catch (err) {
-          console.error(`❌ Qdrant search failed (${col}):`, err.message);
         }
+      } catch (err) {
+        console.warn(`⚠️ skip collection ${col}:`, err.message);
       }
     }
 
-    // ================= NO RESULT =================
+    console.log("📊 Raw results:", results.length);
+
+    // ================= STOP BỊA =================
     if (!results.length) {
-      console.warn("⚠️ No data from Qdrant");
+      console.warn("⚠️ NO DATA FROM QDRANT");
+
       return {
         domain,
         conferences: [],
@@ -173,18 +113,33 @@ export async function searchConferenceJournalByVector({
       };
     }
 
-    // ================= FILTER =================
-    results = applyFilters(results, analysis, domain);
+    // ================= FILTER SAFE =================
+    if (analysis.wantsCountryCode) {
+      const filtered = results.filter(i =>
+        i.country_code === analysis.wantsCountryCode
+      );
+
+      if (filtered.length) {
+        results = filtered;
+      } else {
+        console.warn("⚠️ filter removed all → fallback");
+      }
+    }
+
+    console.log("📊 After filter:", results.length);
 
     // ================= RANK =================
     results = results.map(i => {
-      const text = i.text || i.cfp_text || "";
+      const text = [
+        i.title,
+        i.country,
+        i.city,
+        i.text
+      ].join(" ");
 
       return {
         ...i,
-        score:
-          (i._score || 0.5) * 0.7 +
-          keywordScore(text, cleaned) * 0.3
+        score: i._score || 0.5
       };
     });
 
@@ -192,12 +147,11 @@ export async function searchConferenceJournalByVector({
 
     const final = results.slice(0, topk);
 
-    // ================= SPLIT =================
     const conferences = [];
     const journals = [];
 
     for (const i of final) {
-      if (i.type === "conference" || i.acronym || i.start_date) {
+      if (i.type === "conference" || i.acronym) {
         conferences.push(i);
       } else {
         journals.push(i);
@@ -211,12 +165,11 @@ export async function searchConferenceJournalByVector({
     };
 
   } catch (err) {
-    console.error("❌ search error:", err);
+    console.error("❌ search fatal:", err);
 
     return {
       conferences: [],
       journals: [],
-      domain: "error"
     };
   }
 }
