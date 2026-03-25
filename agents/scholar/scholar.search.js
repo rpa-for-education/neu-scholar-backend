@@ -7,7 +7,6 @@ import {
   applyFilters
 } from "./agentReasoning.js";
 
-import { getDb } from "../../db/mongo.js";
 import { expandQuery } from "./scholar.queryExpansion.js";
 
 import "dotenv/config";
@@ -24,24 +23,33 @@ const CACHE = new Map();
 function cleanQuery(q) {
   return q
     .toLowerCase()
-    .replace(/[^\w\s]/g, "")
-    .replace(/\b(tại|ở|về|cho|các|những)\b/g, "")
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 // ================= EMBED =================
 async function embed(text) {
-  if (CACHE.has("embed:" + text)) return CACHE.get("embed:" + text);
+  const key = "embed:" + text;
 
-  const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-    model: EMBED_MODEL,
-    input: text,
-  });
+  if (CACHE.has(key)) return CACHE.get(key);
 
-  const vec = res.data?.embeddings?.[0];
-  CACHE.set("embed:" + text, vec);
+  try {
+    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
+      model: EMBED_MODEL,
+      input: text,
+    });
 
-  return vec;
+    const vec = res.data?.embeddings?.[0];
+    if (vec) CACHE.set(key, vec);
+
+    return vec;
+
+  } catch (err) {
+    console.warn("⚠️ embed fail:", err.message);
+    return null;
+  }
 }
 
 // ================= KEYWORD SCORE =================
@@ -66,6 +74,7 @@ function highlight(text, query) {
 
   for (const w of query.split(/\s+/)) {
     if (w.length < 3) continue;
+
     const regex = new RegExp(`(${w})`, "gi");
     result = result.replace(regex, "**$1**");
   }
@@ -75,13 +84,15 @@ function highlight(text, query) {
 
 // ================= LLM RERANK =================
 async function rerankWithLLM(query, items) {
+  if (!items.length) return [];
+
   const prompt = `
 Bạn là AI chọn hội thảo/tạp chí phù hợp nhất.
 
 Query: "${query}"
 
 Danh sách:
-${items.map((i, idx) => `${idx + 1}. ${i.title}`).join("\n")}
+${items.map((i, idx) => `${idx + 1}. ${i.title || i.name}`).join("\n")}
 
 Chọn ra top 5 phù hợp nhất (chỉ trả về số).
 `;
@@ -94,14 +105,14 @@ Chọn ra top 5 phù hợp nhất (chỉ trả về số).
     });
 
     const text = res.data.response || "";
-
     const picks = text.match(/\d+/g)?.map(Number) || [];
 
     return picks
       .map(i => items[i - 1])
       .filter(Boolean);
 
-  } catch {
+  } catch (err) {
+    console.warn("⚠️ rerank fail:", err.message);
     return items.slice(0, 5);
   }
 }
@@ -111,81 +122,109 @@ export async function searchConferenceJournalByVector({
   question,
   topk = 10,
 }) {
-  const cleaned = cleanQuery(question);
+  try {
+    const cleaned = cleanQuery(question);
 
-  const domain = detectDomain(question);
-  const analysis = analyzeQuestion(question);
+    const domain = detectDomain(question);
+    const analysis = analyzeQuestion(question);
 
-  console.log("🧠 Query:", cleaned);
+    console.log("🧠 Query:", question);
 
-  let collections =
-    domain === "conference"
-      ? ["conference_vectors"]
-      : domain === "journal"
-      ? ["journal_vectors"]
-      : ["conference_vectors", "journal_vectors"];
+    // ================= COLLECTION =================
+    const collections =
+      domain === "conference"
+        ? ["conference_vectors"]
+        : domain === "journal"
+        ? ["journal_vectors"]
+        : ["conference_vectors", "journal_vectors"];
 
-  const queries = await expandQuery(cleaned);
+    // ================= MULTI QUERY =================
+    const queries = [
+      question,
+      cleaned,
+      ...(await expandQuery(question))
+    ];
 
-  let results = [];
+    const uniqueQueries = [...new Set(queries)];
 
-  for (const col of collections) {
-    for (const q of queries) {
-      const vector = await embed(q);
+    let results = [];
 
-      const res = await qdrant.search(col, {
-        vector,
-        limit: topk * 5,
-        with_payload: true,
-      });
+    // ================= SEARCH =================
+    for (const col of collections) {
+      for (const q of uniqueQueries) {
+        const vector = await embed(q);
+        if (!vector) continue;
 
-      results.push(...res.map(r => ({
-        ...r.payload,
-        _score: r.score
-      })));
+        try {
+          const res = await qdrant.search(col, {
+            vector,
+            limit: topk * 5,
+            with_payload: true,
+          });
+
+          results.push(...res.map(r => ({
+            ...r.payload,
+            _score: r.score
+          })));
+
+        } catch (err) {
+          console.warn("⚠️ qdrant error:", err.message);
+        }
+      }
     }
-  }
 
-  // ================= FILTER =================
-  results = applyFilters(results, analysis, domain);
+    // ================= FILTER =================
+    results = applyFilters(results, analysis, domain);
 
-  // ================= RANK =================
-  results = results.map(i => {
-    const text = i.text || i.cfp_text || "";
+    // ================= RANK =================
+    results = results.map(i => {
+      const text = i.text || i.cfp_text || "";
+
+      return {
+        ...i,
+        score:
+          (i._score || 0.5) * 0.6 +
+          keywordScore(text, cleaned) * 0.3
+      };
+    });
+
+    results.sort((a, b) => b.score - a.score);
+
+    // ================= RERANK =================
+    const reranked = await rerankWithLLM(cleaned, results.slice(0, 15));
+
+    // ================= HIGHLIGHT =================
+    const final = reranked.map(i => ({
+      ...i,
+      highlight: highlight(i.text || i.cfp_text || "", cleaned)
+    }));
+
+    // ================= SPLIT =================
+    const conferences = [];
+    const journals = [];
+
+    for (const i of final) {
+      if (i.type === "conference" || i.acronym || i.start_date) {
+        conferences.push(i);
+      } else {
+        journals.push(i);
+      }
+    }
 
     return {
-      ...i,
-      score:
-        i._score * 0.6 +
-        keywordScore(text, cleaned) * 0.3
+      domain,
+      analysis,
+      conferences: finalizeResults(conferences, topk),
+      journals: finalizeResults(journals, topk),
     };
-  });
 
-  results.sort((a, b) => b.score - a.score);
+  } catch (err) {
+    console.error("❌ search error:", err);
 
-  // ================= LLM RERANK =================
-  const reranked = await rerankWithLLM(cleaned, results.slice(0, 15));
-
-  // ================= HIGHLIGHT =================
-  const final = reranked.map(i => ({
-    ...i,
-    highlight: highlight(i.text || "", cleaned)
-  }));
-
-  const conferences = [];
-  const journals = [];
-
-  for (const i of final) {
-    if (i.type === "conference" || i.acronym) {
-      conferences.push(i);
-    } else {
-      journals.push(i);
-    }
+    return {
+      conferences: [],
+      journals: [],
+      domain: "error"
+    };
   }
-
-  return {
-    domain,
-    conferences: finalizeResults(conferences, topk),
-    journals: finalizeResults(journals, topk),
-  };
 }
