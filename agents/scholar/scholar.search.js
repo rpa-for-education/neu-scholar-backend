@@ -2,8 +2,7 @@ import axios from "axios";
 import { qdrantClient as qdrant } from "../../db/qdrant.js";
 import {
   detectDomain,
-  analyzeQuestion,
-  finalizeResults
+  analyzeQuestion
 } from "./agentReasoning.js";
 
 import "dotenv/config";
@@ -171,7 +170,8 @@ export async function searchConferenceJournalByVector({
 
     results.sort((a, b) => b.score - a.score);
 
-    const final = results.slice(0, topk * 2);
+    // 🔥 lấy nhiều hơn để agent còn rank
+    const final = results.slice(0, topk * 3);
 
     console.log("📦 FINAL ITEMS:", final.length);
 
@@ -189,10 +189,16 @@ export async function searchConferenceJournalByVector({
 
     console.log("📊 SPLIT:", conferences.length, journals.length);
 
+    // 🔥 KHÔNG dùng finalizeResults nữa (BUG)
+    const finalConfs = conferences.slice(0, topk);
+    const finalJournals = journals.slice(0, topk);
+
+    console.log("🚀 RETURN:", finalConfs.length, finalJournals.length);
+
     return {
       domain,
-      conferences: finalizeResults(conferences, topk),
-      journals: finalizeResults(journals, topk),
+      conferences: finalConfs,
+      journals: finalJournals,
     };
 
   } catch (err) {
