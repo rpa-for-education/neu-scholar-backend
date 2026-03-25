@@ -16,13 +16,26 @@ function safe(x) {
   return String(x);
 }
 
-// ================= URL =================
+// ================= 🔥 URL FIX FULL =================
 function getConferenceUrl(c) {
-  return c.url || "";
+  let url =
+    c.url ||
+    c.link ||
+    c.website ||
+    c.cfp_link ||
+    "";
+
+  // 🔥 fallback nếu không có link
+  if (!url && (c.title || c.name)) {
+    const q = encodeURIComponent((c.title || c.name) + " conference");
+    url = `https://www.google.com/search?q=${q}`;
+  }
+
+  return url;
 }
 
 function getJournalUrl(j) {
-  return j.scimago_link || "";
+  return j.scimago_link || j.url || "";
 }
 
 // ================= 🔥 FIXED DEDUPE =================
@@ -89,7 +102,7 @@ function formatFinalAnswer(answer, conferences, journals) {
       const url = getConferenceUrl(c);
 
       content += `- **[C${i + 1}] ${safe(title)}**  
-  👉 ${url ? `[Xem chi tiết](${url})` : "Không có link"}\n\n`;
+  👉 ${url ? `[🌐 Xem CFP / Website](${url})` : "⚠️ Chưa có link"}\n\n`;
     });
   }
 
@@ -149,14 +162,18 @@ export async function runAgent(question, topk = FINAL_TOPK) {
 
     console.log("📊 AFTER RERANK:", conferences.length, journals.length);
 
-    // ===== LLM SUMMARY =====
+    // ================= 🔥 LLM SUMMARY (NÂNG CẤP) =================
     let answer = "";
 
     try {
       const llm = await callLLM(`
-Viết tối đa 2 câu mô tả ngắn gọn.
-KHÔNG liệt kê danh sách.
-KHÔNG format markdown.
+Bạn là trợ lý học thuật.
+
+Hãy trả lời NGẮN GỌN nhưng CÓ GIÁ TRỊ:
+- 2–4 câu
+- Nêu rõ lĩnh vực hội thảo
+- Có thông tin cụ thể (quốc gia, xu hướng)
+- KHÔNG nói chung chung
 
 Câu hỏi: ${question}
       `);
@@ -166,7 +183,7 @@ Câu hỏi: ${question}
       console.warn("⚠️ summary fail");
     }
 
-    if (!answer || answer.length > 300) {
+    if (!answer || answer.length > 500) {
       answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
     }
 
