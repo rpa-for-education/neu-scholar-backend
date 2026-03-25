@@ -2,8 +2,8 @@ import { searchConferenceJournalByVector } from "./scholar.search.js";
 import { callLLM } from "../shared/llm.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 
-import { rankItems, smartFilter } from "./scholar.ranking.js";
-import { rerankWithLLM } from "./scholar.rerank.js";
+// 🔥 dùng file đã gộp
+import { rankItems, smartFilter, rerankWithLLM } from "./scholar.ranking.js";
 
 const MAX_CANDIDATES = 15;
 const FINAL_TOPK = 5;
@@ -38,6 +38,24 @@ function dedupe(items, key = "title") {
   return [...map.values()];
 }
 
+// ================= SAFE RERANK =================
+async function safeRerank(items, question, topk) {
+  try {
+    const r = await rerankWithLLM(items, question, topk);
+
+    if (!r || !r.length) {
+      console.warn("⚠️ rerank empty → fallback");
+      return items.slice(0, topk);
+    }
+
+    return r;
+
+  } catch (err) {
+    console.warn("⚠️ rerank fail → fallback:", err.message);
+    return items.slice(0, topk);
+  }
+}
+
 // ================= FORMAT =================
 function formatFinalAnswer(answer, conferences, journals) {
   let content = answer || "";
@@ -47,7 +65,9 @@ function formatFinalAnswer(answer, conferences, journals) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
     conferences.forEach((c, i) => {
-      content += `### ${i + 1}. **[C${i + 1}] ${safe(c.name)}**  
+      const title = c.name || c.title;
+
+      content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}**  
 - 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  
 - 📅 ${safe(c.deadline) || "N/A"}  
 `;
@@ -56,9 +76,10 @@ function formatFinalAnswer(answer, conferences, journals) {
     content += `\n## 🔗 Link hội thảo\n\n`;
 
     conferences.forEach((c, i) => {
+      const title = c.name || c.title;
       const url = getConferenceUrl(c);
 
-      content += `- **[C${i + 1}] ${safe(c.name)}**  
+      content += `- **[C${i + 1}] ${safe(title)}**  
   👉 ${url ? `[Xem chi tiết](${url})` : "Không có link"}\n\n`;
     });
   }
@@ -96,6 +117,7 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
 
+    // 🔍 SEARCH
     const res = await searchConferenceJournalByVector({
       question,
       topk: MAX_CANDIDATES,
@@ -104,15 +126,21 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let conferences = dedupe(res.conferences || [], "name");
     let journals = dedupe(res.journals || [], "title");
 
-    // ===== SMART RANK =====
+    console.log("📊 BEFORE RANK:", conferences.length, journals.length);
+
+    // ===== RANK =====
     conferences = smartFilter(rankItems(conferences, question, analysis));
     journals = smartFilter(rankItems(journals, question, analysis));
 
-    // ===== LLM RERANK =====
-    conferences = await rerankWithLLM(conferences, question, topk);
-    journals = await rerankWithLLM(journals, question, topk);
+    console.log("📊 AFTER RANK:", conferences.length, journals.length);
 
-    // ===== LLM SUMMARY (SAFE) =====
+    // ===== SAFE RERANK =====
+    conferences = await safeRerank(conferences, question, topk);
+    journals = await safeRerank(journals, question, topk);
+
+    console.log("📊 AFTER RERANK:", conferences.length, journals.length);
+
+    // ===== LLM SUMMARY =====
     let answer = "";
 
     try {
@@ -125,21 +153,21 @@ Câu hỏi: ${question}
       `);
 
       answer = llm?.answer || "";
-    } catch {}
+    } catch (err) {
+      console.warn("⚠️ summary fail");
+    }
 
     if (!answer || answer.length > 300) {
       answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
     }
 
-    // ===== FINAL FORMAT =====
     const finalAnswer = formatFinalAnswer(answer, conferences, journals);
 
-    // ===== DEBUG (có thể tắt) =====
-    console.log("✅ FINAL ANSWER:\n", finalAnswer);
+    console.log("✅ FINAL ANSWER OK");
 
     return {
       answer: finalAnswer,
-      content_markdown: finalAnswer, // 🔥 FIX QUAN TRỌNG
+      content_markdown: finalAnswer,
       conferences,
       journals,
       domain,

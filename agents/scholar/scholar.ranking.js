@@ -1,20 +1,24 @@
 // =========================================
-// 🔥 HYBRID RANKING SYSTEM (PRODUCTION)
+// 🔥 HYBRID RANKING SYSTEM (FINAL)
 // BM25-lite + Semantic + Intent + Recency
+// + SAFE LLM RERANK (NO DATA LOSS)
 // =========================================
+
+import { callLLM } from "../shared/llm.js";
 
 // ================= CONFIG =================
 const WEIGHTS = {
-  vector: 0.4,     // Qdrant score
-  keyword: 0.25,   // keyword matching
-  intent: 0.2,     // intent boost
-  recency: 0.1,    // deadline gần
-  quality: 0.05    // Q1 / rank
+  vector: 0.4,
+  keyword: 0.25,
+  intent: 0.2,
+  recency: 0.1,
+  quality: 0.05
 };
 
-// ================= UTILS =================
+// ================= NORMALIZE =================
 function normalize(text) {
   if (!text) return "";
+
   return text
     .toLowerCase()
     .normalize("NFD")
@@ -30,49 +34,52 @@ function tokenize(text) {
 }
 
 // ================= KEYWORD SCORE =================
-function keywordScore(item, query) {
-  const qWords = tokenize(query);
-  const text = normalize(
-    item.name ||
-    item.title ||
-    ""
-  );
+function keywordScore(item, queryWords) {
+  const text = normalize([
+    item.name,
+    item.title,
+    item.topics,
+    item.categories,
+    item.areas,
+    item.cfp_text,   // 🔥 quan trọng nhất
+    item.city,
+    item.country
+  ].join(" "));
 
-  if (!text) return 0;
+  if (!text || !queryWords.length) return 0;
 
   let match = 0;
 
-  for (const w of qWords) {
+  for (const w of queryWords) {
     if (text.includes(w)) match++;
   }
 
-  return match / qWords.length;
+  return match / queryWords.length;
 }
 
-// ================= INTENT BOOST =================
+// ================= INTENT =================
 function intentScore(item, analysis) {
   let score = 0;
 
   // 🎯 NEU boost
-  if (analysis.isNEU) {
+  if (analysis?.isNEU) {
     if ((item.organizer || "").toLowerCase().includes("kinh tế quốc dân")) {
-      score += 1.0; // MAX boost
+      score += 1;
     }
   }
 
   // 🎯 country
-  if (analysis.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
+  if (analysis?.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
     score += 0.5;
   }
 
   // 🎯 field
-  if (analysis.fieldHint) {
-    const text = normalize(
-      item.topics ||
-      item.categories ||
-      item.areas ||
-      ""
-    );
+  if (analysis?.fieldHint) {
+    const text = normalize([
+      item.topics,
+      item.categories,
+      item.areas
+    ].flat().join(" "));
 
     if (text.includes(normalize(analysis.fieldHint))) {
       score += 0.5;
@@ -102,19 +109,16 @@ function recencyScore(item) {
 
 // ================= QUALITY =================
 function qualityScore(item) {
-  // journal Q1
   if (item.sjr_best_quartile === "Q1") return 1;
   if (item.sjr_best_quartile === "Q2") return 0.7;
-
-  // conference (có thể mở rộng sau)
   return 0.3;
 }
 
 // ================= FINAL SCORE =================
-function computeScore(item, query, analysis) {
-  const vector = item.score || 0;
+function computeScore(item, queryWords, analysis) {
+  const vector = item.score ?? item._score ?? 0.3;
 
-  const keyword = keywordScore(item, query);
+  const keyword = keywordScore(item, queryWords);
   const intent = intentScore(item, analysis);
   const recency = recencyScore(item);
   const quality = qualityScore(item);
@@ -132,10 +136,12 @@ function computeScore(item, query, analysis) {
 export function rankItems(items, query, analysis = {}) {
   if (!items || items.length === 0) return [];
 
+  const queryWords = tokenize(query);
+
   return items
     .map(item => ({
       ...item,
-      finalScore: computeScore(item, query, analysis)
+      finalScore: computeScore(item, queryWords, analysis)
     }))
     .sort((a, b) => b.finalScore - a.finalScore);
 }
@@ -144,16 +150,78 @@ export function rankItems(items, query, analysis = {}) {
 export function smartFilter(items) {
   if (!items || items.length === 0) return [];
 
-  // 🔥 dynamic threshold
   const topScore = items[0]?.finalScore || 0;
 
-  // giữ item >= 40% top
-  const threshold = topScore * 0.4;
+  // 🔥 tránh giữ quá nhiều item
+  const threshold = Math.max(topScore * 0.4, 0.15);
 
   const filtered = items.filter(it => it.finalScore >= threshold);
 
-  // fallback nếu filter quá mạnh
-  if (filtered.length === 0) return items.slice(0, 5);
+  if (!filtered.length) return items.slice(0, 5);
 
   return filtered;
+}
+
+// =========================================
+// 🔥 SAFE LLM RERANK (KHÔNG BAO GIỜ MẤT DATA)
+// =========================================
+
+function buildRerankPrompt(question, items) {
+  let text = `Bạn là AI chọn lọc học thuật.
+
+Chọn ra 5 mục phù hợp nhất với câu hỏi.
+
+Chỉ trả về danh sách index (không giải thích).
+Format: 0,2,4,...
+
+Câu hỏi: ${question}
+
+Danh sách:
+`;
+
+  items.forEach((it, i) => {
+    const title = it.name || it.title;
+    const extra = it.topics || it.categories || "";
+
+    text += `[${i}] ${title} | ${extra}\n`;
+  });
+
+  return text;
+}
+
+function parseIndexes(output, max) {
+  if (!output) return [];
+
+  return output
+    .split(/[, \n]/)
+    .map(x => parseInt(x))
+    .filter(x => !isNaN(x) && x >= 0 && x < max);
+}
+
+// ================= MAIN RERANK =================
+export async function rerankWithLLM(items, question, topk = 5) {
+  if (!items.length) return [];
+
+  try {
+    const slice = items.slice(0, 10);
+
+    const prompt = buildRerankPrompt(question, slice);
+
+    const res = await callLLM(prompt);
+    const text = res?.answer || "";
+
+    const indexes = parseIndexes(text, slice.length);
+
+    // 🔥 fallback nếu LLM fail
+    if (!indexes.length) {
+      console.warn("⚠️ rerank empty → fallback");
+      return slice.slice(0, topk);
+    }
+
+    return indexes.map(i => slice[i]).slice(0, topk);
+
+  } catch (err) {
+    console.warn("⚠️ rerank fail:", err.message);
+    return items.slice(0, topk);
+  }
 }
