@@ -13,14 +13,24 @@ const MODEL = "qwen3-embedding:8b";
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 
 const UUID_NAMESPACE = uuidv5.URL;
-const BATCH_SIZE = 64;
+
+// 🔥 FIX QUAN TRỌNG
+const BATCH_SIZE = 20;        // giảm tải
+const RETRY = 3;              // retry upsert
+const DELAY = 50;             // delay mỗi request
 
 // ================= INIT =================
 const mongo = new MongoClient(MONGO_URI);
-const qdrant = new QdrantClient({ url: QDRANT_URL });
+
+const qdrant = new QdrantClient({
+  url: QDRANT_URL,
+  timeout: 60000, // tránh timeout
+});
 
 // ================= UTILS =================
 const qid = (id) => uuidv5(String(id), UUID_NAMESPACE);
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const safe = (v) => {
   if (!v) return "";
@@ -29,15 +39,40 @@ const safe = (v) => {
 };
 
 // ================= EMBED =================
-async function embed(text) {
-  const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-    model: MODEL,
-    input: text,
-  });
-  return res.data?.embeddings?.[0];
+async function embed(text, retry = 2) {
+  try {
+    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
+      model: MODEL,
+      input: text,
+    });
+
+    return res.data?.embeddings?.[0];
+
+  } catch (err) {
+    if (retry > 0) {
+      await sleep(500);
+      return embed(text, retry - 1);
+    }
+    console.warn("⚠️ embed fail:", err.message);
+    return null;
+  }
 }
 
-// ================= CREATE COLLECTION =================
+// ================= SAFE UPSERT =================
+async function safeUpsert(col, points, retry = RETRY) {
+  try {
+    await qdrant.upsert(col, { points });
+  } catch (err) {
+    if (retry > 0) {
+      console.warn(`⚠️ retry upsert ${col}...`);
+      await sleep(1000);
+      return safeUpsert(col, points, retry - 1);
+    }
+    console.error(`❌ upsert failed (${col}):`, err.message);
+  }
+}
+
+// ================= COLLECTION =================
 async function ensureCollection(name, size) {
   try {
     await qdrant.getCollection(name);
@@ -52,16 +87,14 @@ async function ensureCollection(name, size) {
 
 // ================= BUILD TEXT =================
 
-// 🔥 FUND
 function buildFundText(doc) {
   return [
     doc["OPPORTUNITY TITLE"],
     doc["AGENCY NAME"],
     doc["FUNDING DESCRIPTION"],
-  ].join(" ").toLowerCase();
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
-// 🔥 CONFERENCE (QUAN TRỌNG)
 function buildConferenceText(doc) {
   return [
     doc.name,
@@ -70,21 +103,17 @@ function buildConferenceText(doc) {
     doc.city,
     doc.country,
     ...(doc.topics || []),
-    doc.cfp_text // 🔥 KEY CHÍNH
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+    doc.cfp_text
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
-// 🔥 JOURNAL
 function buildJournalText(doc) {
   return [
     doc.title,
     doc.categories,
     doc.areas,
     doc.publisher,
-  ].join(" ").toLowerCase();
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 // ================= PAYLOAD =================
@@ -112,7 +141,7 @@ function conferencePayload(doc) {
     start_date: doc.start_date,
     deadline: doc.deadline,
     url: doc.url,
-    text: buildConferenceText(doc), // 🔥 quan trọng
+    text: buildConferenceText(doc),
   };
 }
 
@@ -130,14 +159,25 @@ function journalPayload(doc) {
   };
 }
 
-// ================= GENERIC SYNC =================
+// ================= SYNC =================
 async function sync({ mongoCol, qdrantCol, buildText, buildPayload }) {
   console.log(`\n🚀 Sync ${mongoCol} → ${qdrantCol}`);
 
   const db = mongo.db(DB_NAME);
+
+  const total = await db.collection(mongoCol).countDocuments();
+  console.log(`📊 ${mongoCol} total:`, total);
+
+  if (!total) {
+    console.warn(`⚠️ ${mongoCol} EMPTY → skip`);
+    return;
+  }
+
   const cursor = db.collection(mongoCol).find({});
 
   const testVec = await embed("test");
+  if (!testVec) throw new Error("❌ Cannot embed");
+
   await ensureCollection(qdrantCol, testVec.length);
 
   let batch = [];
@@ -159,16 +199,20 @@ async function sync({ mongoCol, qdrantCol, buildText, buildPayload }) {
     });
 
     if (batch.length >= BATCH_SIZE) {
-      await qdrant.upsert(qdrantCol, { points: batch });
+      await safeUpsert(qdrantCol, batch);
       batch = [];
+      await sleep(DELAY); // 🔥 chống overload
     }
 
     count++;
-    if (count % 100 === 0) console.log(`⚡ ${mongoCol}: ${count}`);
+
+    if (count % 100 === 0) {
+      console.log(`⚡ ${mongoCol}: ${count}/${total}`);
+    }
   }
 
   if (batch.length) {
-    await qdrant.upsert(qdrantCol, { points: batch });
+    await safeUpsert(qdrantCol, batch);
   }
 
   console.log(`✅ DONE ${mongoCol}: ${count}`);
@@ -176,31 +220,38 @@ async function sync({ mongoCol, qdrantCol, buildText, buildPayload }) {
 
 // ================= MAIN =================
 async function main() {
-  await mongo.connect();
+  try {
+    await mongo.connect();
+    console.log("✅ Mongo connected");
 
-  await sync({
-    mongoCol: "fund",
-    qdrantCol: "fund_vectors",
-    buildText: buildFundText,
-    buildPayload: fundPayload,
-  });
+    await sync({
+      mongoCol: "fund",
+      qdrantCol: "fund_vectors",
+      buildText: buildFundText,
+      buildPayload: fundPayload,
+    });
 
-  await sync({
-    mongoCol: "conference",
-    qdrantCol: "conference_vectors",
-    buildText: buildConferenceText,
-    buildPayload: conferencePayload,
-  });
+    await sync({
+      mongoCol: "conference",
+      qdrantCol: "conference_vectors",
+      buildText: buildConferenceText,
+      buildPayload: conferencePayload,
+    });
 
-  await sync({
-    mongoCol: "journal",
-    qdrantCol: "journal_vectors",
-    buildText: buildJournalText,
-    buildPayload: journalPayload,
-  });
+    await sync({
+      mongoCol: "journal",
+      qdrantCol: "journal_vectors",
+      buildText: buildJournalText,
+      buildPayload: journalPayload,
+    });
 
-  await mongo.close();
-  console.log("\n🎯 ALL DONE");
+    console.log("\n🎯 ALL DONE");
+
+  } catch (err) {
+    console.error("❌ SYNC FATAL:", err);
+  } finally {
+    await mongo.close();
+  }
 }
 
 main();

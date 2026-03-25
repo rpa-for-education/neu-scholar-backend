@@ -8,7 +8,6 @@ import {
 } from "./agentReasoning.js";
 
 import { expandQuery } from "./scholar.queryExpansion.js";
-
 import "dotenv/config";
 
 // ================= CONFIG =================
@@ -47,8 +46,19 @@ async function embed(text) {
     return vec;
 
   } catch (err) {
-    console.warn("⚠️ embed fail:", err.message);
+    console.error("❌ embed fail:", err.message);
     return null;
+  }
+}
+
+// ================= CHECK COLLECTION =================
+async function collectionExists(name) {
+  try {
+    await qdrant.getCollection(name);
+    return true;
+  } catch {
+    console.warn(`⚠️ Collection not found: ${name}`);
+    return false;
   }
 }
 
@@ -82,41 +92,6 @@ function highlight(text, query) {
   return result.slice(0, 300);
 }
 
-// ================= LLM RERANK =================
-async function rerankWithLLM(query, items) {
-  if (!items.length) return [];
-
-  const prompt = `
-Bạn là AI chọn hội thảo/tạp chí phù hợp nhất.
-
-Query: "${query}"
-
-Danh sách:
-${items.map((i, idx) => `${idx + 1}. ${i.title || i.name}`).join("\n")}
-
-Chọn ra top 5 phù hợp nhất (chỉ trả về số).
-`;
-
-  try {
-    const res = await axios.post(`${OLLAMA_BASE}/api/generate`, {
-      model: LLM_MODEL,
-      prompt,
-      stream: false,
-    });
-
-    const text = res.data.response || "";
-    const picks = text.match(/\d+/g)?.map(Number) || [];
-
-    return picks
-      .map(i => items[i - 1])
-      .filter(Boolean);
-
-  } catch (err) {
-    console.warn("⚠️ rerank fail:", err.message);
-    return items.slice(0, 5);
-  }
-}
-
 // ================= MAIN =================
 export async function searchConferenceJournalByVector({
   question,
@@ -131,27 +106,42 @@ export async function searchConferenceJournalByVector({
     console.log("🧠 Query:", question);
 
     // ================= COLLECTION =================
-    const collections =
+    let collections =
       domain === "conference"
         ? ["conference_vectors"]
         : domain === "journal"
         ? ["journal_vectors"]
         : ["conference_vectors", "journal_vectors"];
 
-    // ================= MULTI QUERY =================
+    // 🔥 FILTER COLLECTION EXISTS
+    const validCollections = [];
+
+    for (const col of collections) {
+      if (await collectionExists(col)) {
+        validCollections.push(col);
+      }
+    }
+
+    if (!validCollections.length) {
+      console.error("❌ No valid collections found");
+      return {
+        domain,
+        conferences: [],
+        journals: [],
+      };
+    }
+
+    // ================= QUERY =================
     const queries = [
       question,
-      cleaned,
-      ...(await expandQuery(question))
+      cleaned
     ];
-
-    const uniqueQueries = [...new Set(queries)];
 
     let results = [];
 
     // ================= SEARCH =================
-    for (const col of collections) {
-      for (const q of uniqueQueries) {
+    for (const col of validCollections) {
+      for (const q of queries) {
         const vector = await embed(q);
         if (!vector) continue;
 
@@ -168,9 +158,19 @@ export async function searchConferenceJournalByVector({
           })));
 
         } catch (err) {
-          console.warn("⚠️ qdrant error:", err.message);
+          console.error(`❌ Qdrant search failed (${col}):`, err.message);
         }
       }
+    }
+
+    // ================= NO RESULT =================
+    if (!results.length) {
+      console.warn("⚠️ No data from Qdrant");
+      return {
+        domain,
+        conferences: [],
+        journals: [],
+      };
     }
 
     // ================= FILTER =================
@@ -183,21 +183,14 @@ export async function searchConferenceJournalByVector({
       return {
         ...i,
         score:
-          (i._score || 0.5) * 0.6 +
+          (i._score || 0.5) * 0.7 +
           keywordScore(text, cleaned) * 0.3
       };
     });
 
     results.sort((a, b) => b.score - a.score);
 
-    // ================= RERANK =================
-    const reranked = await rerankWithLLM(cleaned, results.slice(0, 15));
-
-    // ================= HIGHLIGHT =================
-    const final = reranked.map(i => ({
-      ...i,
-      highlight: highlight(i.text || i.cfp_text || "", cleaned)
-    }));
+    const final = results.slice(0, topk);
 
     // ================= SPLIT =================
     const conferences = [];
@@ -213,7 +206,6 @@ export async function searchConferenceJournalByVector({
 
     return {
       domain,
-      analysis,
       conferences: finalizeResults(conferences, topk),
       journals: finalizeResults(journals, topk),
     };
