@@ -45,21 +45,30 @@ function normalizeCountry(c) {
   return map[n] || n;
 }
 
-// ================= 🔥 COUNTRY FILTER =================
+// ================= 🔥 SMART COUNTRY FILTER =================
 function filterByCountry(items, analysis) {
   if (!analysis?.wantsCountryCode) return items;
 
   const target = normalizeCountry(analysis.wantsCountryCode);
 
-  const filtered = items.filter(it => {
+  // ===== tier 1: strict match =====
+  const strict = items.filter(it => {
     const c = normalizeCountry(it.country);
     return c.includes(target);
   });
 
-  // ⚠️ nếu không có kết quả thì KHÔNG fallback (tránh sai)
-  if (filtered.length === 0) return [];
+  if (strict.length > 0) return strict;
 
-  return filtered;
+  // ===== tier 2: semantic fallback =====
+  const fallback = items.filter(it => {
+    const text = normalizeText(it.text || "");
+    return text.includes(target);
+  });
+
+  if (fallback.length > 0) return fallback;
+
+  // ===== tier 3: return original (ranking sẽ xử lý) =====
+  return items;
 }
 
 // ================= URL =================
@@ -69,7 +78,7 @@ function getConferenceUrl(c) {
     c.url ||
     c.link ||
     c.website ||
-    "" // ❌ bỏ google search
+    "" // ❌ no google fallback
   );
 }
 
@@ -155,7 +164,6 @@ function buildExplain(item, analysis) {
     reasons.push("🏆 Q1");
   }
 
-  // ❌ nếu chỉ có 1 reason yếu thì bỏ
   if (reasons.length <= 1) return "";
 
   return `💡 ${reasons.join(" • ")}`;
@@ -164,7 +172,10 @@ function buildExplain(item, analysis) {
 // ================= ANALYSIS =================
 function buildAnalysis(question, conferences, journals) {
   const total = conferences.length + journals.length;
-  if (!total) return "Không tìm thấy kết quả phù hợp.";
+
+  if (!total) {
+    return "Không tìm thấy kết quả chính xác, hiển thị kết quả gần nhất.";
+  }
 
   return `Tìm thấy ${total} kết quả phù hợp với "${question}".`;
 }
