@@ -21,11 +21,13 @@
     "cli-progress": "^3.12.0",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "csv-parser": "^3.2.0",
     "docx-parser": "^0.2.1",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-session": "^1.18.2",
+    "fs": "^0.0.1-security",
     "gpt-tokenizer": "^3.0.1",
     "mammoth": "^1.11.0",
     "md5": "^2.3.0",
@@ -41,6 +43,9 @@
     "patch-package": "^8.0.1",
     "pdf-parse": "^1.1.1",
     "playwright": "^1.58.2",
-    "uuid": "^11.1.0"
+    "puppeteer": "^24.40.0",
+    "rss-parser": "^3.13.0",
+    "uuid": "^11.1.0",
+    "xml2js": "^0.6.2"
   }
 }

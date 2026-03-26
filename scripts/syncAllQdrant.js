@@ -6,69 +6,51 @@ import "dotenv/config";
 
 // ================= CONFIG =================
 const MONGO_URI = process.env.MONGODB_URI;
-const DB_NAME = process.env.MONGODB_DB || "fitneu";
+const DB_NAME = process.env.MONGODB_DB;
 
 const QDRANT_URL = process.env.QDRANT_URL;
 const MODEL = "qwen3-embedding:8b";
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
+const OLLAMA = process.env.OLLAMA_BASE_URL;
 
 const UUID_NAMESPACE = uuidv5.URL;
 
-// 🔥 FIX QUAN TRỌNG
-const BATCH_SIZE = 20;        // giảm tải
-const RETRY = 3;              // retry upsert
-const DELAY = 50;             // delay mỗi request
+const EMBED_BATCH = 16;
+const UPSERT_BATCH = 64;
+const DELAY = 20;
 
 // ================= INIT =================
 const mongo = new MongoClient(MONGO_URI);
-
-const qdrant = new QdrantClient({
-  url: QDRANT_URL,
-  timeout: 60000, // tránh timeout
-});
+const qdrant = new QdrantClient({ url: QDRANT_URL });
 
 // ================= UTILS =================
 const qid = (id) => uuidv5(String(id), UUID_NAMESPACE);
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const safe = (v) => {
-  if (!v) return "";
-  if (Array.isArray(v)) return v.join(" ");
-  return String(v);
-};
+const norm = (t) =>
+  String(t || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 // ================= EMBED =================
-async function embed(text, retry = 2) {
+async function embedBatch(texts, retry = 2) {
   try {
-    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
+    const res = await axios.post(`${OLLAMA}/api/embed`, {
       model: MODEL,
-      input: text,
+      input: texts,
     });
 
-    return res.data?.embeddings?.[0];
+    return res.data?.embeddings || [];
 
   } catch (err) {
     if (retry > 0) {
-      await sleep(500);
-      return embed(text, retry - 1);
+      await sleep(300);
+      return embedBatch(texts, retry - 1);
     }
-    console.warn("⚠️ embed fail:", err.message);
-    return null;
-  }
-}
 
-// ================= SAFE UPSERT =================
-async function safeUpsert(col, points, retry = RETRY) {
-  try {
-    await qdrant.upsert(col, { points });
-  } catch (err) {
-    if (retry > 0) {
-      console.warn(`⚠️ retry upsert ${col}...`);
-      await sleep(1000);
-      return safeUpsert(col, points, retry - 1);
-    }
-    console.error(`❌ upsert failed (${col}):`, err.message);
+    return texts.map(() => null);
   }
 }
 
@@ -76,182 +58,230 @@ async function safeUpsert(col, points, retry = RETRY) {
 async function ensureCollection(name, size) {
   try {
     await qdrant.getCollection(name);
-    console.log(`✅ ${name} exists`);
   } catch {
     await qdrant.createCollection(name, {
       vectors: { size, distance: "Cosine" },
     });
-    console.log(`🚀 Created ${name}`);
+    console.log("🚀 Created:", name);
   }
 }
 
-// ================= BUILD TEXT =================
+//
+// ===================== TEXT BUILD (TỐI ƯU NHẤT) =====================
+//
 
-function buildFundText(doc) {
-  return [
-    doc["OPPORTUNITY TITLE"],
-    doc["AGENCY NAME"],
-    doc["FUNDING DESCRIPTION"],
-  ].filter(Boolean).join(" ").toLowerCase();
+// 🔥 JOURNAL (cực quan trọng)
+function buildJournalText(doc) {
+  return norm([
+    "journal",
+    doc.title,
+
+    // semantic boost
+    ...(doc.fields || []),
+    doc.categories,
+    doc.areas,
+
+    doc.publisher,
+    doc.country,
+
+    // ranking context
+    doc.sjr ? `sjr ${doc.sjr}` : "",
+    doc.sjr_best_quartile ? `quartile ${doc.sjr_best_quartile}` : "",
+
+    // synonym
+    "research journal academic publication"
+  ].join(" "));
 }
 
+// 🔥 FUND
+function buildFundText(doc) {
+  return norm([
+    "research grant funding",
+
+    doc.opportunity_title,
+    doc.agency_name,
+
+    doc.category,
+    doc.funding_categories,
+
+    doc.description,
+
+    doc.applicant_types,
+    doc.funding_instruments,
+
+    doc.country,
+
+    "grant funding scholarship research support"
+  ].join(" "));
+}
+
+// 🔥 CONFERENCE
 function buildConferenceText(doc) {
-  return [
+  return norm([
+    "academic conference call for papers cfp",
+
     doc.name,
     doc.acronym,
+
     doc.location,
     doc.city,
     doc.country,
-    ...(doc.topics || []),
-    doc.cfp_text
-  ].filter(Boolean).join(" ").toLowerCase();
+
+    doc.cfp_text,
+
+    "conference submission research event"
+  ].join(" "));
 }
 
-function buildJournalText(doc) {
-  return [
-    doc.title,
-    doc.categories,
-    doc.areas,
-    doc.publisher,
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
-// ================= PAYLOAD =================
-
-function fundPayload(doc) {
-  return {
-    type: "fund",
-    title: doc["OPPORTUNITY TITLE"],
-    agency: doc["AGENCY NAME"],
-    deadline: doc["ESTIMATED APPLICATION DUE DATE"],
-    amount: doc["ESTIMATED TOTAL FUNDING"],
-    url: doc["OPPORTUNITY URL"],
-    text: buildFundText(doc),
-  };
-}
-
-function conferencePayload(doc) {
-  return {
-    type: "conference",
-    title: doc.name,
-    acronym: doc.acronym,
-    city: doc.city,
-    country: doc.country,
-    country_code: doc.country_code,
-    start_date: doc.start_date,
-    deadline: doc.deadline,
-    url: doc.url,
-    text: buildConferenceText(doc),
-  };
-}
+//
+// ===================== PAYLOAD (FILTER + UI) =====================
+//
 
 function journalPayload(doc) {
   return {
     type: "journal",
+
     title: doc.title,
     publisher: doc.publisher,
+
     country: doc.country,
+
+    fields: doc.fields || [],
+
     sjr: doc.sjr,
-    sjr_best_quartile: doc.sjr_best_quartile,
-    h_index: doc.h_index,
+    quartile: doc.sjr_best_quartile,
+
+    open_access: doc.open_access,
+    vn: doc.vn_professor_council,
+
     url: doc.scimago_link,
-    text: buildJournalText(doc),
   };
 }
 
-// ================= SYNC =================
+function fundPayload(doc) {
+  return {
+    type: "fund",
+
+    title: doc.opportunity_title,
+    agency: doc.agency_name,
+
+    deadline: doc.close_date,
+    amount: doc.funding_amount,
+
+    category: doc.category,
+
+    country: doc.country,
+
+    url: doc.url,
+  };
+}
+
+function confPayload(doc) {
+  return {
+    type: "conference",
+
+    title: doc.name,
+    acronym: doc.acronym,
+
+    deadline: doc.deadline,
+
+    city: doc.city,
+    country: doc.country,
+
+    url: doc.url,
+  };
+}
+
+//
+// ===================== CORE SYNC =====================
+//
+
 async function sync({ mongoCol, qdrantCol, buildText, buildPayload }) {
-  console.log(`\n🚀 Sync ${mongoCol} → ${qdrantCol}`);
+  console.log(`\n🚀 Sync ${mongoCol}`);
 
-  const db = mongo.db(DB_NAME);
+  const col = mongo.db(DB_NAME).collection(mongoCol);
 
-  const total = await db.collection(mongoCol).countDocuments();
-  console.log(`📊 ${mongoCol} total:`, total);
+  const cursor = col.find({});
+  const total = await col.countDocuments();
 
-  if (!total) {
-    console.warn(`⚠️ ${mongoCol} EMPTY → skip`);
-    return;
-  }
+  console.log("📊 total:", total);
 
-  const cursor = db.collection(mongoCol).find({});
-
-  const testVec = await embed("test");
-  if (!testVec) throw new Error("❌ Cannot embed");
+  const testVec = (await embedBatch(["test"]))[0];
+  if (!testVec) throw new Error("❌ embedding fail");
 
   await ensureCollection(qdrantCol, testVec.length);
 
-  let batch = [];
+  let docs = [];
   let count = 0;
 
   while (await cursor.hasNext()) {
-    const doc = await cursor.next();
+    docs.push(await cursor.next());
 
-    const text = buildText(doc);
-    if (!text) continue;
-
-    const vector = await embed(text);
-    if (!vector) continue;
-
-    batch.push({
-      id: qid(doc._id),
-      vector,
-      payload: buildPayload(doc),
-    });
-
-    if (batch.length >= BATCH_SIZE) {
-      await safeUpsert(qdrantCol, batch);
-      batch = [];
-      await sleep(DELAY); // 🔥 chống overload
+    if (docs.length >= EMBED_BATCH) {
+      await processBatch(docs);
+      docs = [];
     }
 
     count++;
-
-    if (count % 100 === 0) {
+    if (count % 200 === 0) {
       console.log(`⚡ ${mongoCol}: ${count}/${total}`);
     }
   }
 
-  if (batch.length) {
-    await safeUpsert(qdrantCol, batch);
-  }
+  if (docs.length) await processBatch(docs);
 
-  console.log(`✅ DONE ${mongoCol}: ${count}`);
+  console.log(`✅ DONE ${mongoCol}`);
+
+  async function processBatch(batchDocs) {
+    const texts = batchDocs.map(buildText);
+    const vectors = await embedBatch(texts);
+
+    const points = batchDocs.map((doc, i) => ({
+      id: qid(doc.u_key || doc._id),
+      vector: vectors[i] || new Array(testVec.length).fill(0),
+      payload: buildPayload(doc),
+    }));
+
+    // chunk upsert
+    for (let i = 0; i < points.length; i += UPSERT_BATCH) {
+      const slice = points.slice(i, i + UPSERT_BATCH);
+      await qdrant.upsert(qdrantCol, { points: slice });
+      await sleep(DELAY);
+    }
+  }
 }
 
-// ================= MAIN =================
+//
+// ===================== MAIN =====================
+//
+
 async function main() {
-  try {
-    await mongo.connect();
-    console.log("✅ Mongo connected");
+  await mongo.connect();
+  console.log("✅ Mongo connected");
 
-    await sync({
-      mongoCol: "fund",
-      qdrantCol: "fund_vectors",
-      buildText: buildFundText,
-      buildPayload: fundPayload,
-    });
+  await sync({
+    mongoCol: "journal",
+    qdrantCol: "journal_vectors",
+    buildText: buildJournalText,
+    buildPayload: journalPayload,
+  });
 
-    await sync({
-      mongoCol: "conference",
-      qdrantCol: "conference_vectors",
-      buildText: buildConferenceText,
-      buildPayload: conferencePayload,
-    });
+  await sync({
+    mongoCol: "fund",
+    qdrantCol: "fund_vectors",
+    buildText: buildFundText,
+    buildPayload: fundPayload,
+  });
 
-    await sync({
-      mongoCol: "journal",
-      qdrantCol: "journal_vectors",
-      buildText: buildJournalText,
-      buildPayload: journalPayload,
-    });
+  await sync({
+    mongoCol: "conference",
+    qdrantCol: "conference_vectors",
+    buildText: buildConferenceText,
+    buildPayload: confPayload,
+  });
 
-    console.log("\n🎯 ALL DONE");
-
-  } catch (err) {
-    console.error("❌ SYNC FATAL:", err);
-  } finally {
-    await mongo.close();
-  }
+  console.log("\n🎯 ALL DONE");
+  process.exit(0);
 }
 
 main();

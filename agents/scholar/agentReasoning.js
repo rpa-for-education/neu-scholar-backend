@@ -1,21 +1,28 @@
 // agentReasoning.js
-// =========================================
-// 🔥 FINAL: ChatGPT-style Reasoning Engine
-// Không filter chết, dùng scoring thông minh
-// =========================================
 
 import { COUNTRY_NAME_TO_ISO } from "../../services/scripts/country_iso_full.js";
 import { COUNTRY_VI_TO_ISO } from "../../services/scripts/country_vi_alias.js";
 
 // ================= NORMALIZE =================
 function normalizeText(str) {
-  return str
+  return (str || "")
     .toLowerCase()
-    .normalize("NFD") // 🔥 giữ tiếng Việt
+    .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// ================= COUNTRY NORMALIZE =================
+function normalizeCountry(c) {
+  const map = {
+    vn: "vietnam",
+    usa: "united states",
+    us: "united states"
+  };
+
+  return map[normalizeText(c)] || normalizeText(c);
 }
 
 // ================= LOCATION =================
@@ -42,13 +49,11 @@ export function extractCountryIntent(question) {
   const q = normalizeText(question);
   const words = ` ${q} `;
 
-  // 🇻🇳 tiếng Việt
   for (const [name, iso] of Object.entries(COUNTRY_VI_TO_ISO)) {
     const n = ` ${normalizeText(name)} `;
     if (words.includes(n)) return iso;
   }
 
-  // 🌍 tiếng Anh
   const entries = Object.entries(COUNTRY_NAME_TO_ISO)
     .sort((a, b) => b[0].length - a[0].length);
 
@@ -84,20 +89,20 @@ export function detectDomain(question) {
 
 // ================= FIELD =================
 export function extractResearchField(question) {
-  const q = question.toLowerCase();
+  const q = normalizeText(question);
 
   const fields = [
-    { key: "economics", match: ["kinh tế học", "economics"] },
-    { key: "business administration", match: ["quản trị kinh doanh", "qtkd"] },
-    { key: "finance", match: ["tài chính"] },
+    { key: "economics", match: ["kinh te", "economics"] },
+    { key: "finance", match: ["tai chinh", "finance"] },
     { key: "marketing", match: ["marketing"] },
-    { key: "data analytics", match: ["phân tích dữ liệu"] },
-    { key: "econometrics", match: ["kinh tế lượng"] },
-    { key: "logistics", match: ["chuỗi cung ứng"] },
-    {
-      key: "information systems",
-      match: ["mis", "hệ thống thông tin", "information system"]
-    }
+    { key: "business", match: ["quan tri", "business"] },
+
+    { key: "artificial intelligence", match: ["ai", "tri tue nhan tao"] },
+    { key: "data science", match: ["data science", "khoa hoc du lieu"] },
+    { key: "machine learning", match: ["machine learning", "hoc may"] },
+    { key: "blockchain", match: ["blockchain"] },
+    { key: "information systems", match: ["mis", "he thong thong tin"] },
+    { key: "computer science", match: ["cntt", "computer science"] }
   ];
 
   for (const f of fields) {
@@ -121,8 +126,7 @@ export function analyzeQuestion(question) {
     wantsRanking:
       q.includes("uy tín") ||
       q.includes("top") ||
-      q.includes("ranking") ||
-      q.includes("impact"),
+      q.includes("ranking"),
 
     wantsQuartile:
       q.includes("q1") ||
@@ -137,17 +141,7 @@ export function analyzeQuestion(question) {
 
     wantsRecommendation:
       q.includes("nên") ||
-      q.includes("phù hợp") ||
-      q.includes("recommend"),
-
-    wantsSurvey:
-      q.includes("tổng quan") ||
-      q.includes("overview") ||
-      q.includes("review"),
-
-    wantsCompare:
-      q.includes("so sánh") ||
-      q.includes("compare"),
+      q.includes("phù hợp"),
 
     wantsCountryCode: countryCode,
     location,
@@ -155,90 +149,84 @@ export function analyzeQuestion(question) {
   };
 }
 
-// ================= 🔥 REASONING CORE =================
+// ================= 🔥 FIELD MATCH (UPGRADE) =================
+function fieldMatch(item, fieldHint) {
+  const field = normalizeText(fieldHint);
+
+  const text = normalizeText(
+    item.text ||
+    item.topics ||
+    item.categories ||
+    ""
+  );
+
+  const fields = (item.fields || []).map(normalizeText);
+
+  let score = 0;
+
+  // exact
+  if (text.includes(field)) score += 0.25;
+
+  // partial match
+  for (const f of fields) {
+    if (f.includes(field) || field.includes(f)) {
+      score += 0.25;
+    }
+  }
+
+  // token overlap (AI, data, etc.)
+  const tokens = field.split(" ");
+  for (const t of tokens) {
+    if (text.includes(t)) score += 0.1;
+  }
+
+  return score;
+}
+
+// ================= BOOST ENGINE =================
 export function applyFilters(items, analysis, domain) {
   if (!items || !items.length) return [];
 
-  const now = new Date();
+  const now = Date.now();
 
-  return items
-    .map(item => {
-      let score = item._score || item.score || 0.3;
+  return items.map(item => {
+    let boost = 0;
 
-      // ===== COUNTRY =====
-      if (analysis.wantsCountryCode) {
-        if (
-          (item.country_code || "").toUpperCase() ===
-          analysis.wantsCountryCode
-        ) {
-          score += 0.4;
-        } else {
-          score -= 0.2;
-        }
+    // ===== COUNTRY =====
+    if (analysis.wantsCountryCode) {
+      const itemCountry = normalizeCountry(item.country);
+      const target = normalizeCountry(analysis.wantsCountryCode);
+
+      if (itemCountry.includes(target)) boost += 0.2;
+    }
+
+    // ===== DEADLINE =====
+    if (item.deadline) {
+      const d = new Date(item.deadline).getTime();
+      const diff = (d - now) / (1000 * 60 * 60 * 24);
+
+      if (diff > 0) {
+        boost += 0.3;
+
+        if (diff < 30) boost += 0.3;
+      } else {
+        boost -= 0.2;
       }
+    }
 
-      // ===== CITY / NEU =====
-      if (analysis.location?.city) {
-        const city = (item.city || "").toLowerCase();
+    // ===== FIELD (🔥 FIX CHÍNH) =====
+    if (analysis.fieldHint) {
+      boost += fieldMatch(item, analysis.fieldHint);
+    }
 
-        if (city.includes(analysis.location.city)) {
-          score += 0.5;
-        }
-      }
+    // ===== QUALITY =====
+    if (item.sjr_best_quartile === "Q1") boost += 0.2;
 
-      // ===== YEAR =====
-      if (domain === "conference" && analysis.wantsRecent) {
-        const year = String(analysis.wantsRecent[0]);
-
-        if (item.start_date?.startsWith(year)) {
-          score += 0.4;
-        } else {
-          score -= 0.1;
-        }
-      }
-
-      // ===== DEADLINE =====
-      if (analysis.wantsDeadline && item.deadline) {
-        const d = new Date(item.deadline);
-        const diff = (d - now) / (1000 * 60 * 60 * 24);
-
-        if (diff > 0 && diff < 60) {
-          score += 0.3;
-        }
-      }
-
-      // ===== FIELD =====
-      if (analysis.fieldHint) {
-        const text = (
-          item.text ||
-          item.topics ||
-          item.categories ||
-          ""
-        ).toLowerCase();
-
-        if (text.includes(analysis.fieldHint)) {
-          score += 0.4;
-        }
-      }
-
-      // ===== QUALITY =====
-      if (item.sjr_best_quartile === "Q1") score += 0.3;
-      if (item.sjr_best_quartile === "Q2") score += 0.2;
-
-      // ===== INTENT =====
-      if (analysis.wantsRanking && item.h_index > 50) {
-        score += 0.3;
-      }
-
-      // ===== ANTI NEGATIVE =====
-      if (score < 0) score = 0;
-
-      return {
-        ...item,
-        reasoningScore: score
-      };
-    })
-    .sort((a, b) => b.reasoningScore - a.reasoningScore);
+    return {
+      ...item,
+      reasoningBoost: boost
+    };
+  });
 }
 
 // ================= FINAL =================

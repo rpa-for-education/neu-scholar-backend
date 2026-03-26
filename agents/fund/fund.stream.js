@@ -1,24 +1,57 @@
+// fund.stream.js
 import fetch from "node-fetch";
-import { searchFund } from "./fund.search.js";
+import { runFundSearch } from "./fund.agent.js";
 import { buildFundPrompt } from "./fund.prompt.js";
 import { getSessionHistory, addToHistory } from "../../middlewares/session.js";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
-const TIMEOUT = 20000;
+const MAX_CONTEXT = 6;
+const FETCH_TIMEOUT = 20000; // 🔥 chống treo LLM
 
-// ================= TIMEOUT =================
-function fetchWithTimeout(url, options, ms = TIMEOUT) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), ms);
+// ================= SAFE WRITE =================
+function writeSSE(res, data) {
+  if (res.writableEnded || res.destroyed) return true;
+
+  const safe = String(data).replace(/\n/g, " ");
+  return res.write(`data: ${safe}\n\n`);
+}
+
+// ================= PARSE LINE =================
+function parseLine(line) {
+  try {
+    line = line.trim();
+    if (!line) return null;
+
+    if (line.startsWith("data:")) {
+      line = line.replace(/^data:\s*/, "");
+    }
+
+    if (line === "[DONE]") return { done: true };
+
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+// ================= FETCH TIMEOUT =================
+function fetchWithTimeout(url, options, controller) {
+  const id = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
   return fetch(url, {
     ...options,
-    signal: controller.signal,
+    signal: controller.signal
   }).finally(() => clearTimeout(id));
 }
 
 // ================= MAIN =================
-export async function streamFund(req, res, question, topk = 5) {
+export async function streamFund(req, res, question, model_id, topk = 5) {
+  let isClosed = false;
+  let keepAlive = null;
+  let reader = null;
+
+  const controller = new AbortController();
+
   try {
     // ================= SSE HEADER =================
     res.writeHead(200, {
@@ -29,25 +62,42 @@ export async function streamFund(req, res, question, topk = 5) {
 
     res.flushHeaders?.();
 
-    // ================= UX =================
-    res.write(`data: 🔍 Đang tìm nguồn tài trợ...\n\n`);
+    // 🔥 keep-alive
+    keepAlive = setInterval(() => {
+      if (!isClosed && !res.writableEnded && !res.destroyed) {
+        res.write(": ping\n\n");
+      }
+    }, 15000);
+
+    // 🔥 disconnect
+    req.once("close", () => {
+      isClosed = true;
+      controller.abort();
+      try { reader?.cancel(); } catch {}
+      clearInterval(keepAlive);
+      console.log("❌ Client disconnected");
+    });
+
+    writeSSE(res, "🔍 Đang tìm nguồn tài trợ...");
 
     const history = getSessionHistory(req);
 
-    const results = await searchFund(question, topk);
+    // ================= SEARCH =================
+    const results = await runFundSearch(question, model_id, topk);
 
     if (!results.length) {
-      res.write(`data: ❌ Không có dữ liệu phù hợp\n\n`);
-      return res.end();
+      writeSSE(res, "❌ Không có dữ liệu phù hợp");
+      clearInterval(keepAlive);
+      if (!res.writableEnded) res.end();
+      return;
     }
 
-    res.write(`data: 💰 Đã tìm thấy ${results.length} nguồn, đang phân tích...\n\n`);
+    writeSSE(res, `💰 Đã tìm thấy ${results.length} nguồn, đang phân tích...`);
 
-    const funds = results.map(r => r.payload);
-
+    const funds = results.slice(0, MAX_CONTEXT).map(r => r.payload);
     const prompt = buildFundPrompt(question, funds, history);
 
-    // ================= STREAM =================
+    // ================= FETCH =================
     const response = await fetchWithTimeout(
       `${OLLAMA_BASE}/api/chat`,
       {
@@ -59,71 +109,116 @@ export async function streamFund(req, res, question, topk = 5) {
           stream: true,
         }),
       },
-      TIMEOUT
+      controller
     );
 
-    if (!response.body) {
-      throw new Error("No stream body");
-    }
+    if (!response.body) throw new Error("No stream body");
 
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     const decoder = new TextDecoder();
 
+    let buffer = "";
     let finalText = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
+    // ================= STREAM =================
+    while (!isClosed) {
+      let result;
+
+      try {
+        result = await reader.read();
+      } catch {
+        break; // 🔥 abort safe
+      }
+
+      const { done, value } = result;
       if (done) break;
 
-      const chunk = decoder.decode(value);
+      buffer += decoder.decode(value, { stream: true });
 
-      for (const line of chunk.split("\n")) {
+      // 🔥 chống buffer phình to
+      if (buffer.length > 10000) {
+        buffer = buffer.slice(-5000);
+      }
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
         if (!line.trim()) continue;
 
-        try {
-          const json = JSON.parse(line);
-          const token = json.message?.content || "";
+        const json = parseLine(line);
+        if (!json || json.done) continue;
 
-          if (!token) continue;
+        const token = json?.message?.content;
+        if (!token) continue;
 
-          finalText += token;
+        finalText += token;
 
-          res.write(`data: ${token}\n\n`);
+        if (!isClosed) {
+          const ok = writeSSE(res, token);
 
-        } catch {}
+          // 🔥 backpressure safe
+          if (ok === false) {
+            await new Promise(resolve => {
+              if (res.writableEnded || res.destroyed) return resolve();
+              res.once("drain", resolve);
+            });
+          }
+        }
       }
     }
 
-    // ================= SAVE HISTORY =================
+    // 🔥 flush cuối
     try {
-      addToHistory(req, question, finalText);
-    } catch {
-      console.warn("⚠️ history fail");
+      buffer += decoder.decode();
+    } catch {}
+
+    if (buffer && !isClosed) {
+      const json = parseLine(buffer);
+      const token = json?.message?.content;
+
+      if (token) {
+        finalText += token;
+        writeSSE(res, token);
+      }
     }
 
-    res.write(`data: [DONE]\n\n`);
-    res.end();
+    // ================= SAVE =================
+    if (!isClosed && !res.writableEnded && !res.destroyed) {
+      try {
+        addToHistory(req, question, finalText);
+      } catch {
+        console.warn("⚠️ history fail");
+      }
+
+      writeSSE(res, "[DONE]");
+      res.end();
+    }
 
   } catch (err) {
     console.error("❌ fund stream error:", err.message);
 
-    // ================= FALLBACK =================
-    res.write(`data: ⚠️ Hệ thống đang bận, trả kết quả nhanh...\n\n`);
+    if (isClosed || res.writableEnded || res.destroyed) return;
+
+    writeSSE(res, "⚠️ Hệ thống đang bận, trả kết quả nhanh...");
 
     try {
-      const results = await searchFund(question, topk);
+      const results = await runFundSearch(question, model_id, topk);
 
       const fallback = results
         .slice(0, 3)
         .map(r => r.payload?.title)
         .join(", ");
 
-      res.write(`data: ${fallback || "Có dữ liệu liên quan"}\n\n`);
+      writeSSE(res, fallback || "Có dữ liệu liên quan");
     } catch {
-      res.write(`data: ❌ Lỗi hệ thống\n\n`);
+      writeSSE(res, "❌ Lỗi hệ thống");
     }
 
-    res.write(`data: [DONE]\n\n`);
+    writeSSE(res, "[DONE]");
     res.end();
+  } finally {
+    try { reader?.cancel(); } catch {}
+    clearInterval(keepAlive);
   }
 }

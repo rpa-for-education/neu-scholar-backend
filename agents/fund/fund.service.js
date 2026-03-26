@@ -1,48 +1,91 @@
+// fund.service.js
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 
 const MAX_RETURN = 5;
 
+// ================= PARSE AMOUNT =================
+function parseAmount(v) {
+  if (!v) return 0;
+  if (typeof v === "number") return v;
+
+  const str = String(v).toLowerCase().replace(/,/g, "").trim();
+
+  // 🔥 detect unit trước
+  const isBillion = /\b(billion|bn)\b/.test(str);
+  const isMillion = /\b(million|mn)\b|\d+(\.\d+)?m\b/.test(str);
+  const isThousand = /\b(thousand)\b|\d+(\.\d+)?k\b/.test(str);
+
+  const num = parseFloat(str.replace(/[^0-9.]/g, ""));
+  if (!num) return 0;
+
+  if (isBillion) return num * 1e9;
+  if (isMillion) return num * 1e6;
+  if (isThousand) return num * 1e3;
+
+  return num;
+}
+
 // ================= NORMALIZE =================
 function normalizeFunds(arr) {
-  return arr.map(r => {
+  return arr.map((r, idx) => {
     const p = r.payload || r;
+
+    const amount_num = p.amount_num || parseAmount(p.amount);
 
     return {
       title: p.title || "N/A",
       agency: p.agency || "",
       deadline: p.deadline || "",
-      amount: Number(p.amount) || 0,
-      url: p.url || ""
+      amount: p.amount || "",
+      amount_num,
+      url: p.url || "",
+      score: Math.max(0, Math.min(1, Number(r.finalScore ?? r.score ?? 0))),
+      _idx: idx
     };
   });
 }
 
 // ================= FORMAT MONEY =================
-function formatMoney(v) {
-  if (!v || isNaN(v)) return "Không rõ";
+function formatMoney(amount, amount_num) {
+  const num = amount_num || parseAmount(amount);
 
-  if (v >= 1e9) return (v / 1e9).toFixed(1) + " tỷ USD";
-  if (v >= 1e6) return (v / 1e6).toFixed(1) + " triệu USD";
+  if (!num) return amount || "Không rõ";
 
-  return v.toLocaleString();
+  if (num >= 1e9) return (num / 1e9).toFixed(1) + " tỷ USD";
+  if (num >= 1e6) return (num / 1e6).toFixed(1) + " triệu USD";
+
+  return num.toLocaleString();
+}
+
+// ================= DEADLINE =================
+function getDeadlineInfo(deadline) {
+  if (!deadline) return "";
+
+  const d = new Date(deadline);
+  if (isNaN(d)) return "";
+
+  const diff = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+
+  if (diff < 0) return "đã hết hạn";
+  if (diff <= 7) return "deadline rất gần";
+  if (diff <= 30) return "deadline sắp tới";
+
+  return "";
 }
 
 // ================= REASONING =================
 function buildReasoning(fund, index) {
   const reasons = [];
 
-  if (index === 0) {
-    reasons.push("phù hợp tổng thể tốt nhất");
-  }
+  if (index === 0) reasons.push("phù hợp tổng thể tốt nhất");
 
-  if (fund.amount >= 1e7) {
+  if ((fund.amount_num || 0) >= 1e7) {
     reasons.push("mức tài trợ cao");
   }
 
-  if (!fund.deadline) {
-    reasons.push("chưa rõ deadline (cần kiểm tra thêm)");
-  }
+  const deadlineInfo = getDeadlineInfo(fund.deadline);
+  if (deadlineInfo) reasons.push(deadlineInfo);
 
   if ((fund.agency || "").toLowerCase().includes("nsf")) {
     reasons.push("nguồn tài trợ uy tín (NSF)");
@@ -53,12 +96,20 @@ function buildReasoning(fund, index) {
     : "";
 }
 
-// ================= SORT SAFE =================
-function sortFunds(funds) {
-  return [...funds].sort((a, b) => (b.amount || 0) - (a.amount || 0));
+// ================= SORT =================
+function stableSort(funds) {
+  return [...funds].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+
+    if ((b.amount_num || 0) !== (a.amount_num || 0)) {
+      return (b.amount_num || 0) - (a.amount_num || 0);
+    }
+
+    return a._idx - b._idx;
+  });
 }
 
-// ================= MAIN ANSWER =================
+// ================= BUILD ANSWER =================
 function buildAnswer(funds, question) {
   if (!funds.length) {
     return "Không tìm thấy quỹ phù hợp với yêu cầu của bạn.";
@@ -66,38 +117,30 @@ function buildAnswer(funds, question) {
 
   const best = funds[0];
 
-  // 🔥 PHÂN TÍCH MỞ ĐẦU
-  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã phân tích và lựa chọn các nguồn tài trợ phù hợp dựa trên mức độ liên quan nội dung, quy mô kinh phí và tính khả thi về thời gian. `;
-  
-  txt += `Các quỹ bên dưới chủ yếu tập trung vào lĩnh vực liên quan, trong đó ưu tiên những chương trình có tính ứng dụng cao và khả năng triển khai thực tế. `;
-  
-  txt += `Một số nguồn tài trợ đến từ các tổ chức uy tín, giúp đảm bảo độ tin cậy và tiềm năng hỗ trợ nghiên cứu dài hạn. `;
-  
-  txt += `Bạn nên ưu tiên các quỹ có mức tài trợ tốt và còn thời hạn nộp hồ sơ phù hợp.\n\n`;
+  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất dựa trên mức độ liên quan (semantic), quy mô kinh phí và thời hạn.\n\n`;
 
-  // 🔥 BEST FUND
-  txt += `🔥 **Quỹ nổi bật nhất:**\n\n`;
+  // BEST
+  txt += `🔥 **Quỹ phù hợp nhất:**\n\n`;
   txt += `🎓 **${best.title}**\n`;
-  txt += `🏢 Cơ quan: ${best.agency || "N/A"}\n`;
-  txt += `💰 Kinh phí: ${formatMoney(best.amount)}\n`;
-  txt += `🔎 Chi tiết: ${best.url || "N/A"}\n`;
+  txt += `🏢 ${best.agency || "N/A"}\n`;
+  txt += `💰 ${formatMoney(best.amount, best.amount_num)}\n`;
+  txt += `🔎 ${best.url || "N/A"}\n`;
   txt += `${buildReasoning(best, 0)}\n\n`;
 
-  // 🔥 DANH SÁCH KHÁC (không tiêu đề cứng)
+  // OTHERS
   funds.slice(1).forEach((f, i) => {
     txt += `---\n`;
     txt += `🎓 **${f.title}**\n`;
-    txt += `🏢 Cơ quan: ${f.agency || "N/A"}\n`;
-    txt += `💰 Kinh phí: ${formatMoney(f.amount)}\n`;
-    txt += `🔎 Chi tiết: ${f.url || "N/A"}\n`;
+    txt += `🏢 ${f.agency || "N/A"}\n`;
+    txt += `💰 ${formatMoney(f.amount, f.amount_num)}\n`;
+    txt += `🔎 ${f.url || "N/A"}\n`;
     txt += `${buildReasoning(f, i + 1)}\n\n`;
   });
 
-  // 🔥 KẾT LUẬN
-  txt += `---\n💡 **Gợi ý thêm cho giảng viên:**\n`;
-  txt += `- Ưu tiên các quỹ có mức tài trợ lớn và nguồn cấp uy tín\n`;
-  txt += `- Kiểm tra kỹ deadline và điều kiện tham gia (eligibility)\n`;
-  txt += `- Có thể mở rộng sang NSF, EU Horizon hoặc quỹ quốc gia\n`;
+  txt += `---\n💡 **Gợi ý:**\n`;
+  txt += `- Ưu tiên quỹ có funding cao & deadline phù hợp\n`;
+  txt += `- Kiểm tra eligibility trước khi apply\n`;
+  txt += `- Có thể mở rộng sang NSF, EU Horizon\n`;
 
   return txt;
 }
@@ -116,10 +159,7 @@ export async function runFundAgent(req, question, model_id, topk = 5) {
 
     let funds = normalizeFunds(raw);
 
-    // 🔥 SORT SAFE
-    funds = sortFunds(funds);
-
-    // 🔥 LIMIT OUTPUT
+    funds = stableSort(funds);
     funds = funds.slice(0, MAX_RETURN);
 
     const answer = buildAnswer(funds, question);

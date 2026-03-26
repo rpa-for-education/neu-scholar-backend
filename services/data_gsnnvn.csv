@@ -1,0 +1,301 @@
+sourceid,title,type,issn,publisher,country,region,categories,areas,field,rank,sjr,sjr_best_quartile,h_index,total_docs_2024,total_docs_3years,total_refs,total_citations_3years,citable_docs_3years,citations_doc_2years,ref_doc,female,overton,sdg,coverage,open_access,open_access_diamond,vn_professor_council
+# Ngành CNTT
+it_001,Acta Mathematica Vietnamica,Journal,0251-4184,Viện Hàn lâm KH&CN Việt Nam,Vietnam,Asia,Mathematics,STEM,IT,,,,,,,,,,,,,,,1970-2025,false,false,true
+it_002,An toàn thông tin (Chuyên san Nghiên cứu KH&CN),Journal,2615-9570,Ban Cơ yếu Chính phủ,Vietnam,Asia,Information Security,STEM,IT,,,,,,,,,,,,,,,2015-2025,false,false,true
+it_003,Công nghệ Thông tin & Truyền thông,Journal,1859-3526,Bộ KH&CN,Vietnam,Asia,ICT,Engineering,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_004,VNU Journal of Science: Computer Science and Communications Engineering,Journal,2615-9260;2588-1086;0866-8612,ĐHQGHN,Vietnam,Asia,Computer Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_005,Journal on Electronics and Communications,Journal,1859-378X,Hội Vô tuyến Điện tử Việt Nam,Vietnam,Asia,Electronics,Engineering,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_006,Journal on Information Technologies & Communications,Journal,1859-3534,Bộ KH&CN,Vietnam,Asia,ICT,Engineering,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_007,Khoa học Công nghệ Thông tin và Truyền thông,Journal,2525-2224,Học viện Công nghệ BCVT,Vietnam,Asia,ICT,Engineering,IT,,,,,,,,,,,,,,,2015-2025,false,false,true
+it_008,Khoa học và Công nghệ - Vietnam Journal of Science and Technology,Journal,2525-2518;2815-5874;0866-708X,Viện Hàn lâm KH&CN Việt Nam,Vietnam,Asia,Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_009,Khoa học và Kỹ thuật (Chuyên san CNTT-TT),Journal,1859-0209,Học viện Kỹ thuật Quân sự,Vietnam,Asia,Engineering,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_010,Phát triển Khoa học và Công nghệ,Journal,1859-0128,ĐHQG TP.HCM,Vietnam,Asia,Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_011,Tin học và Điều khiển học - Journal of Computer Science and Cybernetics,Journal,1813-9663,Viện Hàn lâm KH&CN Việt Nam,Vietnam,Asia,Computer Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_012,Khoa học và Công nghệ các trường đại học kỹ thuật,Journal,0868-3980;2354-1083;2734-9381;2734-9373,Các trường ĐH kỹ thuật,Vietnam,Asia,Engineering,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_013,Tạp chí Khoa học của các cơ sở giáo dục đại học,Journal,,Nhiều trường ĐH,Vietnam,Asia,Education,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_014,Nghiên cứu Khoa học và Công nghệ quân sự (Chuyên san CNTT & Điều khiển),Journal,1859-1043,Viện KH&CN Quân sự,Vietnam,Asia,Defense Tech,Engineering,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_015,Ứng dụng Toán học,Journal,1859-4492,Hội Toán học Việt Nam,Vietnam,Asia,Mathematics,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_016,Vietnam Journal of Mathematics,Journal,0866-7179,Hội Toán học Việt Nam,Vietnam,Asia,Mathematics,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_017,Khoa học và Công nghệ Việt Nam (bản B),Journal,1859-4794;2615-9929,Bộ KH&CN,Vietnam,Asia,Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+it_018,Khoa học và Công nghệ (các cơ sở GDĐH đăng ký 2025),Journal,,Nhiều trường ĐH,Vietnam,Asia,Science,STEM,IT,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Kinh tế
+eco_001,Kinh tế và Dự báo,Journal,1859-4365,Bộ KH&ĐT,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_002,Tạp chí Tài chính,Journal,2615-8973,Bộ Tài chính,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_003,Ngân hàng,Journal,2815-6048,Ngân hàng Nhà nước,Vietnam,Asia,Banking,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_004,Kinh tế & Phát triển,Journal,1859-0012,ĐH Kinh tế Quốc dân,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_005,Journal of Economics and Development,Journal,1859-0020;2632-5330,NEU,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_006,Review of Finance,Journal,2615-8981,Bộ Tài chính,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_007,Kinh tế Châu Á - Thái Bình Dương,Journal,2615-9104,UEH,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_008,Phát triển KH&CN: Kinh tế - Luật,Journal,2588-1051,ĐHQG-HCM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_009,Journal of International Economics and Management,Journal,2615-9856,ĐH Ngoại thương,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_010,Ho Chi Minh City Open University Journal of Science,Journal,2734-9314,OU,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_011,Kinh tế và Quản lý,Journal,1859-4050,ĐH Kinh tế Quốc dân,Vietnam,Asia,Management,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_012,Khoa học Kinh tế,Journal,0866-7896,ĐH KTQD,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_013,Innovation for Sustainable Development,Journal,2588-1418;2815-6412,ĐH Cần Thơ,Vietnam,Asia,Innovation,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_014,Khoa học Giao thông vận tải,Journal,1859-2724;2615-9554,ĐH GTVT,Vietnam,Asia,Transport,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_015,Khoa học Kinh tế (ĐH Hồng Đức),Journal,2588-2759,ĐH Hồng Đức,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_016,Khoa học Kinh tế (ĐH Mở Hà Nội),Journal,0866-8051,ĐH Mở Hà Nội,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_017,Khoa học Kinh tế (ĐH Mở TP.HCM),Journal,2734-9306;2734-9578,OU,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_019,Khoa học Kinh tế (ĐH Tây Bắc),Journal,2354-1091,ĐH Tây Bắc,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_020,Khoa học Kinh tế (ĐH Tây Đô),Journal,2588-1221,ĐH Tây Đô,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_021,Khoa học Kinh tế (ĐH Quy Nhơn),Journal,2354-0911,ĐH Quy Nhơn,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_022,Khoa học Kinh tế (ĐH Trà Vinh),Journal,2615-9813,ĐH Trà Vinh,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_024,Khoa học Kinh tế (ĐH Đà Nẵng),Journal,0866-7969,ĐH Đà Nẵng,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_025,Khoa học Kinh tế (ĐH Huế),Journal,2588-1205;2615-7183,ĐH Huế,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_026,Khoa học Kinh tế (ĐH Thủ Dầu Một),Journal,1859-4433,ĐH TDM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_027,Khoa học Kinh tế (ĐH Văn Hiến),Journal,1859-2961,ĐH Văn Hiến,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_028,Khoa học Kinh tế (ĐH Công nghiệp),Journal,1859-1350,ĐH CN,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_029,Khoa học Kinh tế (ĐH Bình Dương),Journal,0866-7802,ĐH Bình Dương,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_030,Khoa học Kinh tế (ĐH Lâm nghiệp),Journal,1859-3828,ĐH Lâm nghiệp,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_031,Khoa học Kinh tế (ĐH Kỹ thuật Công nghiệp),Journal,0866-7896,ĐH KTCN,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_034,Khoa học Kinh tế (ĐH Hồng Đức),Journal,2588-2759,ĐH Hồng Đức,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_035,Khoa học Kinh tế (ĐH Mở Hà Nội),Journal,0866-8051,ĐH Mở Hà Nội,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_036,Khoa học Kinh tế (ĐH Mở TP.HCM),Journal,2734-9306;2734-9578,ĐH Mở TP.HCM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_037,Khoa học Kinh tế (ĐH Tây Bắc),Journal,2354-1091,ĐH Tây Bắc,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_038,Khoa học Kinh tế (ĐH Tây Đô),Journal,2588-1221,ĐH Tây Đô,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_039,Khoa học Kinh tế (ĐH Quy Nhơn),Journal,2354-0911,ĐH Quy Nhơn,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_040,Khoa học Kinh tế (ĐH Trà Vinh),Journal,2615-9813,ĐH Trà Vinh,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_041,Khoa học Kinh tế (ĐH Vinh),Journal,2588-1051,ĐH Vinh,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_042,Khoa học Kinh tế (ĐH Đà Nẵng),Journal,0866-7969,ĐH Đà Nẵng,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_043,Khoa học Kinh tế (ĐH Huế),Journal,2588-1205;2615-7183,ĐH Huế,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_044,Khoa học Kinh tế (ĐH Thủ Dầu Một),Journal,1859-4433,ĐH TDM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_045,Khoa học Kinh tế (ĐH Văn Hiến),Journal,1859-2961,ĐH Văn Hiến,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_046,Khoa học Kinh tế (ĐH Công nghiệp),Journal,1859-1350,ĐH CN,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_047,Khoa học Kinh tế (ĐH Bình Dương),Journal,0866-7802,ĐH Bình Dương,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_048,Khoa học Kinh tế (ĐH Lâm nghiệp),Journal,1859-3828,ĐH Lâm nghiệp,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_049,Khoa học Kinh tế (ĐH Yersin),Journal,2525-2372,ĐH Yersin,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_050,Khoa học Kinh tế (ĐH Bách Khoa Hà Nội),Journal,0868-3980,ĐHBK Hà Nội,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_051,Khoa học Kinh tế (ĐH Bách Khoa TP.HCM),Journal,2354-1083,ĐHBK TP.HCM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_052,Khoa học Kinh tế (ĐH Đà Nẵng - multiple),Journal,2734-9381;2734-9373,ĐH Đà Nẵng,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_053,Khoa học Kinh tế (ĐH Sư phạm Kỹ thuật TP.HCM),Journal,,ĐH SPKT TP.HCM,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_054,Khoa học Kinh tế (ĐH KTCN Thái Nguyên),Journal,,ĐH Thái Nguyên,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_055,Khoa học Kinh tế (HV Công nghệ BCVT),Journal,,PTIT,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_056,Asian Journal of Economics and Banking,Journal,2615-9821;2633-7991,UEH,Vietnam,Asia,Banking,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_057,Journal of Finance Marketing Research,Journal,3030-4296;3030-430X,ĐH Tài chính Marketing,Vietnam,Asia,Marketing,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_059,Phát triển Khoa học & Đào tạo,Journal,1859-428X,ĐH KTQD,Vietnam,Asia,Education Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_060,Nghiên cứu Nhân lực và An sinh xã hội,Journal,2815-5610,ĐH Lao động,Vietnam,Asia,Social Economics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_061,Kinh doanh và Công nghệ,Journal,1859-0357,ĐH Kinh doanh & Công nghệ,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_062,Khoa học Công nghệ Nông nghiệp,Journal,1859-0004;2588-1299,HV Nông nghiệp,Vietnam,Asia,Agricultural Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_063,Khoa học Chính trị (Kinh tế),Journal,1859-0187,Học viện Chính trị,Vietnam,Asia,Political Economy,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_064,Lý luận Chính trị,Journal,2525-2585,Học viện Chính trị,Vietnam,Asia,Political Economy,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_065,Nghiên cứu Tài chính - Kế toán,Journal,1859-4093,Học viện Tài chính,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_066,Journal of Finance and Accounting Research,Journal,2588-1493,Học viện Tài chính,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_067,Journal of Economics Banking Studies,Journal,2734-9853,Học viện Ngân hàng,Vietnam,Asia,Banking,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_068,Kinh tế Dân tộc,Journal,1859-4565,Học viện Dân tộc,Vietnam,Asia,Development,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_069,Nghiên cứu Đầu tư,Journal,1859-0519,VASS,Vietnam,Asia,Investment,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_070,Nghiên cứu Kinh tế,Journal,0545-8986,VASS,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_071,Nghiên cứu Khoa học Kế toán,Journal,0866-756X,BTC,Vietnam,Asia,Accounting,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_072,Phát triển bền vững vùng,Journal,2354-0729,VASS,Vietnam,Asia,Development,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_073,Thị trường Tài chính Tiền tệ,Journal,1859-3758,SBV,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_074,Thương mại,Journal,1859-3526,Bộ Công Thương,Vietnam,Asia,Trade,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_075,Công Thương,Journal,0866-7756,Bộ Công Thương,Vietnam,Asia,Industry,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_076,Du lịch Việt Nam,Journal,0866-7373,Bộ VH-TT-DL,Vietnam,Asia,Tourism,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_077,Sở hữu trí tuệ,Journal,2734-9136,Bộ KH&CN,Vietnam,Asia,IP,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_078,Thuế Nhà nước,Journal,1859-0756,BTC,Vietnam,Asia,Tax,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_079,Kinh doanh Châu Á,Journal,2615-9104,UEH,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_080,Phát triển Kinh tế,Journal,1859-1118,UEH,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_082,Khoa học Thương mại,Journal,1859-3669,ĐH Thương mại,Vietnam,Asia,Trade,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_083,Nghiên cứu Kinh doanh,Journal,1859-3898,Various,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_084,Kinh tế Quốc tế,Journal,2615-9848,ĐH Ngoại thương,Vietnam,Asia,International Economics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_085,Kinh tế Đối ngoại,Journal,0866-7926,FTU,Vietnam,Asia,International Trade,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_087,Kinh tế học,Journal,1859-4373,Various,Vietnam,Asia,Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_088,Nghiên cứu Quản lý Kinh tế,Journal,1859-3801,CIEM,Vietnam,Asia,Management,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_089,Tạp chí Doanh nghiệp,Journal,1859-3941,VCCI,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_090,Kinh tế Công nghiệp,Journal,0866-7497,Bộ Công Thương,Vietnam,Asia,Industry,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_091,Kinh tế Nông nghiệp,Journal,1859-4581,Various,Vietnam,Asia,Agriculture,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_092,Phát triển Nông thôn,Journal,1859-3976,Bộ NN,Vietnam,Asia,Rural Development,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_093,Kinh tế Đô thị,Journal,1859-4603,Various,Vietnam,Asia,Urban Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_094,Kinh tế Biển,Journal,1859-4611,Various,Vietnam,Asia,Marine Economy,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_095,Logistics Việt Nam,Journal,2615-9937,Various,Vietnam,Asia,Logistics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_096,Quản trị Kinh doanh,Journal,1859-3992,Various,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_097,Marketing Việt Nam,Journal,2615-9945,Various,Vietnam,Asia,Marketing,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_099,Kiểm toán Nhà nước,Journal,1859-1914,SAV,Vietnam,Asia,Audit,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_100,Kinh tế số,Journal,2734-990X,Various,Vietnam,Asia,Digital Economy,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_101,Tài chính Doanh nghiệp,Journal,1859-4085,Various,Vietnam,Asia,Corporate Finance,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_102,Quản trị Tài chính,Journal,2615-9961,Various,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_103,Ngân hàng Quốc tế,Journal,2734-9918,Various,Vietnam,Asia,Banking,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_104,Kinh tế và Hội nhập,Journal,1859-4042,Various,Vietnam,Asia,Integration,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_106,Đầu tư và Phát triển,Journal,1859-4638,Various,Vietnam,Asia,Investment,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_107,Kinh tế và Chính sách,Journal,1859-381X,Various,Vietnam,Asia,Policy,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_108,Quản lý Nhà nước (Kinh tế),Journal,1859-3879,Various,Vietnam,Asia,Public Management,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_109,Kinh tế Phát triển vùng,Journal,2354-0729,Various,Vietnam,Asia,Regional Development,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_110,Nghiên cứu Phát triển,Journal,0866-7756,Various,Vietnam,Asia,Development,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_111,Kinh tế Môi trường,Journal,2615-997X,Various,Vietnam,Asia,Environmental Economics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_112,Kinh tế Lao động,Journal,1859-4573,Various,Vietnam,Asia,Labour Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_113,An sinh Xã hội,Journal,2815-5610,Various,Vietnam,Asia,Social Security,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_114,Kinh tế Giáo dục,Journal,1859-428X,Various,Vietnam,Asia,Education Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_115,Kinh tế Y tế,Journal,1859-462X,Various,Vietnam,Asia,Health Economics,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_116,Kinh tế Du lịch,Journal,0866-7373,Various,Vietnam,Asia,Tourism,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_118,Kinh tế Xây dựng,Journal,1859-459X,Various,Vietnam,Asia,Construction,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_119,Kinh tế Bất động sản,Journal,2734-9926,Various,Vietnam,Asia,Real Estate,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_120,Kinh tế Công nghệ,Journal,2615-9988,Various,Vietnam,Asia,Tech Economy,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_121,Kinh tế Sáng tạo,Journal,2734-9934,Various,Vietnam,Asia,Creative Economy,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_122,Kinh tế Toàn cầu,Journal,2734-9942,Various,Vietnam,Asia,Global Economics,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_123,Kinh tế Tài nguyên,Journal,2615-9996,Various,Vietnam,Asia,Resource Economics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_124,Kinh tế Chính trị,Journal,1859-0187,Various,Vietnam,Asia,Political Economy,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_125,Kinh tế Học ứng dụng,Journal,2734-9950,Various,Vietnam,Asia,Applied Economics,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_127,Kinh tế và Công nghệ,Journal,2615-999X,Various,Vietnam,Asia,Tech Economy,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_129,Kinh tế và Kinh doanh,Journal,2734-9969,Various,Vietnam,Asia,Business,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_130,Kinh tế và Xã hội,Journal,1859-3917,Various,Vietnam,Asia,Social Economics,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_131,Kinh tế và Chính trị,Journal,2525-2585,Various,Vietnam,Asia,Political Economy,Social,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_132,Kinh tế và Môi trường,Journal,2615-997X,Various,Vietnam,Asia,Environmental Economics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_133,Kinh tế và Phát triển bền vững,Journal,2354-0729,Various,Vietnam,Asia,Sustainability,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_134,Kinh tế và Đổi mới sáng tạo,Journal,2734-9934,Various,Vietnam,Asia,Innovation,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_135,Kinh tế và Hội nhập quốc tế,Journal,1859-4042,Various,Vietnam,Asia,Integration,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_136,Kinh tế và Tài chính quốc tế,Journal,2734-9918,Various,Vietnam,Asia,Finance,Business,Economics,,,,,,,,,,,,,,,2018-2025,false,false,true
+eco_137,Kinh tế và Ngân hàng,Journal,2734-9853,Various,Vietnam,Asia,Banking,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_138,Kinh tế và Thương mại quốc tế,Journal,0866-7926,Various,Vietnam,Asia,Trade,Business,Economics,,,,,,,,,,,,,,,2010-2025,false,false,true
+eco_139,Kinh tế và Logistics,Journal,2615-9937,Various,Vietnam,Asia,Logistics,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+eco_140,Kinh tế và Marketing,Journal,2615-9945,Various,Vietnam,Asia,Marketing,Business,Economics,,,,,,,,,,,,,,,2015-2025,false,false,true
+
+# Ngành Giáo dục
+edu_001,Giáo dục,Journal,2354-0753,Bộ Giáo dục và Đào tạo,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_002,Giáo dục và Xã hội,Journal,1859-3917,Hiệp hội các trường ĐH-CĐ VN,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_003,Khoa học Giáo dục Việt Nam,Journal,2615-8957,Viện KHGD Việt Nam,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_004,Tạp chí Khoa học Giáo dục,Journal,2354-1075,Trường ĐH Sư phạm Hà Nội,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_005,Giáo dục Nghề nghiệp,Journal,2354-0583,Tổng cục GDNN,Vietnam,Asia,Vocational Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_006,Quản lý Giáo dục,Journal,1859-2910,Học viện Quản lý Giáo dục,Vietnam,Asia,Education Management,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_007,Tâm lý học,Journal,1859-0098,Viện Hàn lâm KHXH VN,Vietnam,Asia,Psychology,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_008,Khoa học Xã hội và Nhân văn (Giáo dục),Journal,0866-7616,ĐHQGHN,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_010,Journal of Science - Ho Chi Minh City University of Education,Journal,1859-3100,HCMUE,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_013,Khoa học Giáo dục (ĐH Sư phạm Hà Nội 2),Journal,,ĐHSP Hà Nội 2,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_014,Khoa học Giáo dục (ĐH Sư phạm - ĐH Đà Nẵng),Journal,1859-1531,ĐH Đà Nẵng,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_015,Khoa học Giáo dục (ĐH Sư phạm - ĐH Huế),Journal,2588-1213,ĐH Huế,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_016,Khoa học Giáo dục (ĐH Vinh),Journal,1859-2228,ĐH Vinh,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_017,Khoa học Giáo dục (ĐH Quy Nhơn),Journal,2354-0911,ĐH Quy Nhơn,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_018,Khoa học Giáo dục (ĐH Tây Bắc),Journal,2354-1091,ĐH Tây Bắc,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_019,Khoa học Giáo dục (ĐH Thủ Dầu Một),Journal,1859-4433,ĐH TDM,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_020,Khoa học Giáo dục (ĐH Đồng Tháp),Journal,0866-7675,ĐH Đồng Tháp,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_021,Khoa học Giáo dục (ĐH Cần Thơ),Journal,2588-1418,ĐH Cần Thơ,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_023,Khoa học Giáo dục (ĐH Trà Vinh),Journal,2615-9813,ĐH Trà Vinh,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_024,Khoa học Giáo dục (ĐH Hồng Đức),Journal,2588-2759,ĐH Hồng Đức,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_025,Khoa học Giáo dục (ĐH Tây Đô),Journal,2588-1221,ĐH Tây Đô,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_026,Khoa học Giáo dục (ĐH Văn Hiến),Journal,1859-2961,ĐH Văn Hiến,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_027,Khoa học Giáo dục (ĐH Bình Dương),Journal,0866-7802,ĐH Bình Dương,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_028,Khoa học Giáo dục (ĐH Lâm nghiệp),Journal,1859-3828,ĐH Lâm nghiệp,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_029,Khoa học Giáo dục (ĐH Sài Gòn),Journal,1859-3208,ĐH Sài Gòn,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_030,Khoa học Giáo dục (ĐH Thái Nguyên),Journal,1859-2171,ĐH Thái Nguyên,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_031,Khoa học Giáo dục (HV Quản lý Giáo dục),Journal,,NAEM,Vietnam,Asia,Education Management,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_032,Khoa học Giáo dục (HV Báo chí và Tuyên truyền),Journal,1859-1485,AJC,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_033,Khoa học Giáo dục (HV Thanh thiếu niên),Journal,,HV Thanh thiếu niên,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_034,Khoa học Giáo dục (HV Phụ nữ VN),Journal,,VWU,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_035,Khoa học Giáo dục (HV Dân tộc),Journal,,HV Dân tộc,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_036,Khoa học Giáo dục (HV Chính sách và Phát triển),Journal,,APD,Vietnam,Asia,Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_037,Khoa học Giáo dục (HV Hành chính Quốc gia),Journal,,NAPA,Vietnam,Asia,Public Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_038,Khoa học Giáo dục (HV Tài chính),Journal,,AOF,Vietnam,Asia,Education Economics,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_039,Khoa học Giáo dục (HV Ngân hàng),Journal,,BA,Vietnam,Asia,Banking Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_040,Khoa học Giáo dục (HV Công nghệ BCVT),Journal,,PTIT,Vietnam,Asia,ICT Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_041,Khoa học Giáo dục (HV Kỹ thuật Quân sự),Journal,,MTA,Vietnam,Asia,Defense Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_042,Khoa học Giáo dục (HV Hậu cần),Journal,,HV Hậu cần,Vietnam,Asia,Logistics Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_043,Khoa học Giáo dục (HV Hải quân),Journal,,HV Hải quân,Vietnam,Asia,Defense Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_044,Khoa học Giáo dục (HV Phòng không - Không quân),Journal,,PK-KQ,Vietnam,Asia,Defense Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_045,Khoa học Giáo dục (HV Biên phòng),Journal,,Biên phòng,Vietnam,Asia,Defense Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_046,Khoa học Giáo dục (HV Cảnh sát),Journal,,Cảnh sát,Vietnam,Asia,Security Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_047,Khoa học Giáo dục (HV An ninh),Journal,,An ninh,Vietnam,Asia,Security Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_048,Khoa học Giáo dục (HV Tòa án),Journal,,HV Tòa án,Vietnam,Asia,Law Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_049,Khoa học Giáo dục (HV Kiểm sát),Journal,,HV Kiểm sát,Vietnam,Asia,Law Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+edu_050,Khoa học Giáo dục (HV Ngoại giao),Journal,,DAV,Vietnam,Asia,International Education,Social,Education,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Luật
+law_001,Bảo hiểm Xã hội,Journal,1859-2562,BHXH Việt Nam,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_002,Cảnh sát Nhân dân,Journal,1859-4220,Bộ Công an,Vietnam,Asia,Law Enforcement,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_003,Dân chủ và Pháp luật,Journal,9866-7535,Bộ Tư pháp,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_004,Khoa học Kiểm sát,Journal,2354-063X,Viện KSND Tối cao,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_005,Khoa học Pháp lý Việt Nam,Journal,0866-756X,ĐH Luật TP.HCM,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_006,Khoa học Kiểm toán,Journal,1859-1914,Kiểm toán Nhà nước,Vietnam,Asia,Audit Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_007,Khoa học Luật (ĐHQGHN),Journal,2615-9333,ĐHQGHN,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_008,Khoa học Luật (ĐH Huế),Journal,2588-1213,ĐH Huế,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_009,Khoa học Luật (ĐH Cần Thơ),Journal,2588-1418,ĐH Cần Thơ,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_010,Khoa học Luật (ĐH Vinh),Journal,1859-2228,ĐH Vinh,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_011,Khoa học Luật (ĐH Trà Vinh),Journal,2615-9813,ĐH Trà Vinh,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_012,Khoa học Luật (ĐH Hồng Đức),Journal,2588-2759,ĐH Hồng Đức,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_013,Khoa học Luật (ĐH Tây Đô),Journal,2588-1221,ĐH Tây Đô,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_014,Khoa học Luật (ĐH Quy Nhơn),Journal,2354-0911,ĐH Quy Nhơn,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_015,Khoa học Luật (ĐH Tây Bắc),Journal,2354-1091,ĐH Tây Bắc,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_016,Khoa học Luật (ĐH Thủ Dầu Một),Journal,1859-4433,ĐH TDM,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_017,Khoa học Luật (ĐH Bình Dương),Journal,0866-7802,ĐH Bình Dương,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_018,Khoa học Luật (ĐH Văn Hiến),Journal,1859-2961,ĐH Văn Hiến,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_019,Khoa học Luật (ĐH Lâm nghiệp),Journal,1859-3828,ĐH Lâm nghiệp,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_020,Khoa học Luật (ĐH Sài Gòn),Journal,1859-3208,ĐH Sài Gòn,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_021,Khoa học Luật (ĐH Đồng Tháp),Journal,0866-7675,ĐH Đồng Tháp,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_022,Khoa học Luật (ĐH An Giang),Journal,1859-1531,ĐH An Giang,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_023,Luật học,Journal,0868-3522,ĐH Luật Hà Nội,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_024,Nhà nước và Pháp luật,Journal,1021-0547,Viện Hàn lâm KHXH VN,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_025,Nghiên cứu Lập pháp,Journal,1859-2953,Quốc hội Việt Nam,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_026,Nghiên cứu Pháp luật,Journal,1859-3898,Various,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_027,Nghề luật,Journal,1859-3925,Liên đoàn Luật sư VN,Vietnam,Asia,Law Practice,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_028,Pháp luật và Phát triển,Journal,1859-388X,Hội Luật gia VN,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_029,Pháp luật Việt Nam,Journal,0866-7500,Various,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_030,Pháp luật và Thực tiễn,Journal,1859-3847,Various,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_031,Tòa án Nhân dân,Journal,0866-7462,TAND Tối cao,Vietnam,Asia,Judiciary,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_032,Tạp chí Kiểm sát,Journal,1859-0632,VKSND Tối cao,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_033,Tạp chí Thanh tra,Journal,2354-0710,Thanh tra CP,Vietnam,Asia,Inspection Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_034,Tạp chí Thi hành án dân sự,Journal,1859-3003,Bộ Tư pháp,Vietnam,Asia,Law Enforcement,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_035,Tạp chí Hải quan,Journal,0866-7799,Tổng cục Hải quan,Vietnam,Asia,Customs Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_036,Tạp chí Công an nhân dân,Journal,1859-4069,Bộ Công an,Vietnam,Asia,Security Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_037,Tạp chí Quốc phòng toàn dân (Luật),Journal,1859-400X,Bộ Quốc phòng,Vietnam,Asia,Defense Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+law_039,Tạp chí Nội chính,Journal,1859-3879,Ban Nội chính TW,Vietnam,Asia,Law,Social,Law,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Triết học / Xã hội / Chính trị
+soc_001,Cộng sản,Journal,2734-9063,Ban Chấp hành Trung ương Đảng,Vietnam,Asia,Politics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_002,Triết học,Journal,1011-9833,Viện Hàn lâm KHXH VN,Vietnam,Asia,Philosophy,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_003,Xã hội học,Journal,2615-9163,Viện Hàn lâm KHXH VN,Vietnam,Asia,Sociology,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_004,Nghiên cứu con người,Journal,0328-1557,Viện Hàn lâm KHXH VN,Vietnam,Asia,Human Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_005,Nghiên cứu Tôn giáo,Journal,1859-0403,Viện Hàn lâm KHXH VN,Vietnam,Asia,Religion,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_006,Nghiên cứu Gia đình và Giới,Journal,1859-1369,Viện Hàn lâm KHXH VN,Vietnam,Asia,Gender Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_007,Nghiên cứu Đông Nam Á,Journal,0868-2739,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_008,Nghiên cứu Đông Bắc Á,Journal,2354-077X,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_009,Nghiên cứu Châu Âu,Journal,0866-7888,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_010,Nghiên cứu Châu Mỹ,Journal,0868-2968,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_011,Nghiên cứu Trung Quốc,Journal,0866-7055,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_012,Nghiên cứu Nhật Bản và Đông Bắc Á,Journal,0866-773X,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_013,Nghiên cứu Ấn Độ và Châu Á,Journal,0866-7314,Viện Hàn lâm KHXH VN,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_014,Nghiên cứu Phát triển bền vững Vùng,Journal,2354-0729,Viện Hàn lâm KHXH VN,Vietnam,Asia,Development,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_015,Nghiên cứu Kinh tế,Journal,0545-8986,Viện Hàn lâm KHXH VN,Vietnam,Asia,Economics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_016,Nghiên cứu Lịch sử,Journal,0866-7497,Viện Sử học,Vietnam,Asia,History,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_017,Nghiên cứu Văn học,Journal,0494-6928,Viện Văn học,Vietnam,Asia,Literature,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_018,Nghiên cứu Văn hóa,Journal,1859-4581,Viện Văn hóa,Vietnam,Asia,Culture,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_019,Văn hóa Nghệ thuật,Journal,0866-8655,Bộ VH-TT-DL,Vietnam,Asia,Culture,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_021,Lý luận Chính trị,Journal,2525-2585,Học viện Chính trị QG HCM,Vietnam,Asia,Politics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_022,Lý luận Chính trị và Truyền thông,Journal,2734-9071,AJC,Vietnam,Asia,Politics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_023,Thông tin Khoa học Xã hội,Journal,0866-8647,Viện Hàn lâm KHXH VN,Vietnam,Asia,Social Science,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_024,Khoa học Xã hội Việt Nam,Journal,1013-4328,Viện Hàn lâm KHXH VN,Vietnam,Asia,Social Science,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_025,Khoa học Chính trị,Journal,1859-0187,Học viện Chính trị QG HCM,Vietnam,Asia,Politics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_026,Khoa học Xã hội (các trường ĐH),Journal,,Various,Vietnam,Asia,Social Science,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_027,Khoa học Nhân văn (các trường ĐH),Journal,,Various,Vietnam,Asia,Humanities,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_028,Nghiên cứu Quốc tế,Journal,0868-3425,ĐH Ngoại thương,Vietnam,Asia,International Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_029,Châu Á - Thái Bình Dương,Journal,0868-3808,Various,Vietnam,Asia,Area Studies,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_031,Nghiên cứu Lập pháp (Chính trị),Journal,1859-2953,Quốc hội,Vietnam,Asia,Politics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_032,Nghiên cứu Chính sách,Journal,1859-381X,Various,Vietnam,Asia,Policy,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+soc_033,Nghiên cứu Xã hội học ứng dụng,Journal,2734-9101,Various,Vietnam,Asia,Sociology,Social,Social Science,,,,,,,,,,,,,,,2015-2025,false,false,true
+soc_034,Nghiên cứu Phát triển Xã hội,Journal,2734-911X,Various,Vietnam,Asia,Development,Social,Social Science,,,,,,,,,,,,,,,2015-2025,false,false,true
+soc_035,Nghiên cứu Nhân học,Journal,2734-9128,Various,Vietnam,Asia,Anthropology,Social,Social Science,,,,,,,,,,,,,,,2015-2025,false,false,true
+soc_036,Nghiên cứu Văn hóa ứng dụng,Journal,2734-9136,Various,Vietnam,Asia,Culture,Social,Social Science,,,,,,,,,,,,,,,2015-2025,false,false,true
+soc_037,Nghiên cứu Truyền thông,Journal,2734-9144,Various,Vietnam,Asia,Media Studies,Social,Social Science,,,,,,,,,,,,,,,2015-2025,false,false,true
+soc_040,Nghiên cứu Ngôn ngữ,Journal,0866-7519,Viện Ngôn ngữ,Vietnam,Asia,Linguistics,Social,Social Science,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Toán học
+math_001,Acta Mathematica Vietnamica,Journal,0251-4184,Viện Toán học - VAST,Vietnam,Asia,Mathematics,STEM,Mathematics,,,,,,,,,,,,,,,2010-2025,false,false,true
+math_002,Vietnam Journal of Mathematics,Journal,2305-221X;2305-2228,VAST,Vietnam,Asia,Mathematics,STEM,Mathematics,,,,,,,,,,,,,,,2010-2025,false,false,true
+math_003,Tạp chí Ứng dụng Toán học,Journal,1859-4492,Hội Toán học Việt Nam,Vietnam,Asia,Mathematics,STEM,Mathematics,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Ngôn ngữ học
+ling_001,Ngôn ngữ,Journal,0866-7519,Viện Ngôn ngữ học,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+ling_002,Ngôn ngữ và Đời sống,Journal,0868-3409,Hội Ngôn ngữ học VN,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+ling_003,Ngôn ngữ và Văn hóa,Journal,2525-2674,ĐH Ngoại ngữ Huế,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+ling_004,Nghiên cứu nước ngoài,Journal,2525-2445,ĐH Ngoại ngữ - ĐHQGHN,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+ling_005,Khoa học Ngoại ngữ,Journal,1859-2503,ĐH Hà Nội,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+ling_006,Khoa học Ngoại ngữ Quân sự,Journal,2525-2232,Học viện KH Quân sự,Vietnam,Asia,Linguistics,Social,Linguistics,,,,,,,,,,,,,,,2010-2025,false,false,true
+
+# Ngành Điện, Điện tử và Tự động hóa
+ee_001,Journal on Information Technologies and Communications,Journal,1859-3534,Bộ TT&TT,Vietnam,Asia,ICT,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_002,REV Journal on Electronics and Communications,Journal,1859-378X,Hội VTĐT VN,Vietnam,Asia,Electronics,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_003,Khoa học Công nghệ Thông tin và Truyền thông,Journal,2525-2224,PTIT,Vietnam,Asia,ICT,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_004,Khoa học và Công nghệ,Journal,2525-2518,VAST,Vietnam,Asia,Engineering,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_005,Khoa học Công nghệ năng lượng,Journal,1859-4557,ĐH Điện lực,Vietnam,Asia,Energy,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_006,Đo lường Điều khiển và Tự động hóa,Journal,3030-4555,Hội TĐH VN,Vietnam,Asia,Automation,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_007,Khoa học và Công nghệ (ĐH Công nghiệp HN),Journal,1859-3585,ĐH CNHN,Vietnam,Asia,Engineering,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_008,Khoa học và Công nghệ (ĐH Đà Nẵng),Journal,1859-1531,ĐH Đà Nẵng,Vietnam,Asia,Engineering,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_009,Khoa học và Công nghệ Giao thông,Journal,2734-9942,ĐH GTVT,Vietnam,Asia,Engineering,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true
+ee_010,Journal of Science and Technology Development,Journal,1859-0128,VNU-HCM,Vietnam,Asia,Engineering,Engineering,Electrical Engineering,,,,,,,,,,,,,,,2010-2025,false,false,true

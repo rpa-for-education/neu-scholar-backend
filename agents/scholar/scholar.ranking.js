@@ -1,18 +1,14 @@
-// =========================================
-// 🔥 HYBRID RANKING SYSTEM (NO LLM - FINAL)
-// BM25-lite + Semantic + Intent + Recency
-// =========================================
+// scholar.ranking.js
 
-// ================= CONFIG =================
 const WEIGHTS = {
-  vector: 0.5,   // 🔥 tăng vì bỏ LLM
+  vector: 0.5,
   keyword: 0.25,
   intent: 0.15,
   recency: 0.07,
   quality: 0.03
 };
 
-// ================= NORMALIZE (FAST) =================
+// ================= NORMALIZE =================
 function normalize(text) {
   if (!text) return "";
 
@@ -38,7 +34,8 @@ function keywordScore(item, queryWords) {
     item.areas,
     item.cfp_text,
     item.city,
-    item.country
+    item.country,
+    ...(item.fields || [])
   ].join(" "));
 
   if (!text || !queryWords.length) return 0;
@@ -56,14 +53,13 @@ function keywordScore(item, queryWords) {
 function intentScore(item, analysis) {
   let score = 0;
 
-  // 🎯 FIX NEU (quan trọng)
   if (analysis?.location?.name === "NEU") {
     if ((item.organizer || "").toLowerCase().includes("kinh tế quốc dân")) {
       score += 1;
     }
   }
 
-  if (analysis?.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
+  if (analysis?.wantsCountryCode && item.country === analysis.wantsCountryCode) {
     score += 0.5;
   }
 
@@ -71,8 +67,9 @@ function intentScore(item, analysis) {
     const text = normalize([
       item.topics,
       item.categories,
-      item.areas
-    ].flat().join(" "));
+      item.areas,
+      ...(item.fields || [])
+    ].join(" "));
 
     if (text.includes(normalize(analysis.fieldHint))) {
       score += 0.5;
@@ -82,22 +79,36 @@ function intentScore(item, analysis) {
   return Math.min(score, 1);
 }
 
-// ================= RECENCY =================
+// ================= 🔥 FIX RECENCY =================
 function recencyScore(item) {
-  const dateStr = item.deadline || item.start_date;
-  if (!dateStr) return 0;
-
   const now = Date.now();
-  const d = new Date(dateStr).getTime();
 
-  const diff = (d - now) / (1000 * 60 * 60 * 24);
+  // ===== PRIORITY: deadline =====
+  if (item.deadline) {
+    const d = new Date(item.deadline).getTime();
+    if (!isNaN(d)) {
+      const diff = (d - now) / (1000 * 60 * 60 * 24);
 
-  if (diff < 0) return 0;
-  if (diff < 30) return 1;
-  if (diff < 90) return 0.7;
-  if (diff < 180) return 0.4;
+      if (diff < 0) return 0;        // ❌ đã qua hạn nộp
+      if (diff < 30) return 1;       // 🔥 sắp deadline
+      if (diff < 90) return 0.7;
+      return 0.4;
+    }
+  }
 
-  return 0.1;
+  // ===== FALLBACK: start_date =====
+  if (item.start_date) {
+    const d = new Date(item.start_date).getTime();
+    if (!isNaN(d)) {
+      const diff = (d - now) / (1000 * 60 * 60 * 24);
+
+      if (diff < 0) return 0;
+      if (diff < 30) return 0.4;     // 🔥 yếu hơn deadline
+      return 0.2;
+    }
+  }
+
+  return 0;
 }
 
 // ================= QUALITY =================
@@ -109,7 +120,7 @@ function qualityScore(item) {
 
 // ================= FINAL SCORE =================
 function computeScore(item, queryWords, analysis) {
-  const vector = item.score ?? item._score ?? 0.3;
+  const vector = item._score ?? item.score ?? 0;
 
   const keyword = keywordScore(item, queryWords);
   const intent = intentScore(item, analysis);
@@ -125,7 +136,7 @@ function computeScore(item, queryWords, analysis) {
   );
 }
 
-// ================= MAIN RANK =================
+// ================= MAIN =================
 export function rankItems(items, query, analysis = {}) {
   if (!items || items.length === 0) return [];
 

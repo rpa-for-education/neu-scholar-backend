@@ -1,48 +1,55 @@
-// agents/fund/fund.prompt.js
-
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
-Bạn là AI tư vấn quỹ nghiên cứu.
+Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 ⚠️ QUY TẮC BẮT BUỘC:
-- CHỈ được sử dụng dữ liệu trong phần === FUNDS ===
-- TUYỆT ĐỐI KHÔNG được sử dụng kiến thức bên ngoài
-- KHÔNG được tự tạo quỹ mới
-- Nếu dữ liệu không đủ → phải nói rõ
+- CHỈ được sử dụng dữ liệu trong === FUNDS ===
+- MỖI quỹ phải tham chiếu bằng ID [F1], [F2], ...
+- TUYỆT ĐỐI KHÔNG được tạo quỹ mới
+- KHÔNG được suy đoán ngoài dữ liệu
+- Nếu không đủ thông tin → trả lời: "không đủ dữ liệu"
 
 ---
 
-🎯 YÊU CẦU:
-- Tìm các quỹ PHÙ HỢP NHẤT với câu hỏi
-- Được phép suy luận:
-  "automation" ≈ AI, workflow, cloud, system, process
+🎯 NHIỆM VỤ:
+- Chọn các quỹ PHÙ HỢP NHẤT với câu hỏi
 - Ưu tiên:
-  + liên quan AI / automation
-  + funding lớn
-  + deadline hợp lý
+  1. Liên quan nội dung
+  2. Funding cao
+  3. Deadline hợp lý
+
+- Lưu ý:
+  + Danh sách đã được xếp hạng sơ bộ (F1 tốt hơn F2...)
+  + Chỉ cần chọn lại + giải thích
 
 ---
 
-📌 FORMAT TRẢ LỜI:
+📌 OUTPUT (BẮT BUỘC - KHÔNG THAY ĐỔI FORMAT):
 
-1. Danh sách quỹ phù hợp (bullet)
-- Tên quỹ
-- Agency
-- Vì sao phù hợp
+TOP_FUNDS:
+- [F?] Tên quỹ | Agency
+  Reason: ...
 
-2. Đề xuất quỹ tốt nhất
+- [F?] Tên quỹ | Agency
+  Reason: ...
+
+BEST_FUND:
+[F?] Tên quỹ
+Reason: ...
 
 ---
 
 `;
 
+  // ================= HISTORY =================
   if (history.length) {
     context += "\n=== HISTORY ===\n";
-    history.forEach((h) => {
+    history.slice(-3).forEach((h) => {
       context += `${h.role}: ${h.content}\n`;
     });
   }
 
+  // ================= FUNDS =================
   if (funds.length) {
     context += "\n=== FUNDS ===\n";
 
@@ -50,14 +57,15 @@ Bạn là AI tư vấn quỹ nghiên cứu.
       context += `
 [F${i + 1}]
 Title: ${f.title}
-Agency: ${f.agency}
-Deadline: ${f.deadline}
-Funding: ${f.amount}
-Summary: ${f.text?.slice(0, 500)}
+Agency: ${f.agency || "N/A"}
+Deadline: ${f.deadline || "N/A"}
+Funding: ${f.amount || "N/A"}
+Summary: ${(f.text || "").slice(0, 180)}
 `;
     });
   }
 
+  // ================= QUESTION =================
   context += `\n=== QUESTION ===\n${question}\n`;
 
   return context;

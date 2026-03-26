@@ -1,3 +1,4 @@
+// import_conference_neu_2026.js
 import fs from "fs";
 import crypto from "crypto";
 import { MongoClient } from "mongodb";
@@ -10,7 +11,7 @@ const MONGO_URI = process.env.MONGODB_URI;
 const DB_NAME = process.env.MONGODB_DB || "fitneu";
 const COLLECTION = process.env.MONGODB_COLLECTION || "conference";
 
-const FILE_PATH = "./services/hoi_thao_neu_2026.json";
+const FILE_PATH = "./services/data_hoi_thao_neu_2026.json";
 
 // ================= NORMALIZE =================
 function normalizeText(text) {
