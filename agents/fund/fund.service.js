@@ -1,5 +1,3 @@
-// agents/fund/fund.service.js
-
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 
@@ -14,7 +12,7 @@ function normalizeFunds(arr) {
       title: p.title || "N/A",
       agency: p.agency || "",
       deadline: p.deadline || "",
-      amount: Number(p.amount) || 0, // 🔥 fix type
+      amount: Number(p.amount) || 0,
       url: p.url || ""
     };
   });
@@ -68,36 +66,38 @@ function buildAnswer(funds, question) {
 
   const best = funds[0];
 
-  let txt = `🎯 **Gợi ý quỹ nghiên cứu phù hợp**\n\n`;
+  // 🔥 PHÂN TÍCH MỞ ĐẦU
+  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã phân tích và lựa chọn các nguồn tài trợ phù hợp dựa trên mức độ liên quan nội dung, quy mô kinh phí và tính khả thi về thời gian. `;
+  
+  txt += `Các quỹ bên dưới chủ yếu tập trung vào lĩnh vực liên quan, trong đó ưu tiên những chương trình có tính ứng dụng cao và khả năng triển khai thực tế. `;
+  
+  txt += `Một số nguồn tài trợ đến từ các tổ chức uy tín, giúp đảm bảo độ tin cậy và tiềm năng hỗ trợ nghiên cứu dài hạn. `;
+  
+  txt += `Bạn nên ưu tiên các quỹ có mức tài trợ tốt và còn thời hạn nộp hồ sơ phù hợp.\n\n`;
 
-  txt += `Dựa trên yêu cầu: *"${question}"*, hệ thống đề xuất các quỹ sau:\n\n`;
-
-  // 🔥 BEST
-  txt += `🔥 **Quỹ nổi bật nhất:**\n`;
-  txt += `👉 ${best.title}\n`;
-  txt += `- Cơ quan: ${best.agency || "N/A"}\n`;
-  txt += `- Kinh phí: ${formatMoney(best.amount)}\n`;
-  txt += `- 🔗 ${best.url || "N/A"}\n`;
+  // 🔥 BEST FUND
+  txt += `🔥 **Quỹ nổi bật nhất:**\n\n`;
+  txt += `🎓 **${best.title}**\n`;
+  txt += `🏢 Cơ quan: ${best.agency || "N/A"}\n`;
+  txt += `💰 Kinh phí: ${formatMoney(best.amount)}\n`;
+  txt += `🔎 Chi tiết: ${best.url || "N/A"}\n`;
   txt += `${buildReasoning(best, 0)}\n\n`;
 
-  // 🔥 LIST
-  txt += `---\n### 📊 Các quỹ liên quan khác:\n`;
-
-  funds.forEach((f, i) => {
-    txt += `
-[F${i + 1}] ${f.title}
-- Cơ quan: ${f.agency || "N/A"}
-- Kinh phí: ${formatMoney(f.amount)}
-- 🔗 ${f.url || "N/A"}
-${buildReasoning(f, i)}
-`;
+  // 🔥 DANH SÁCH KHÁC (không tiêu đề cứng)
+  funds.slice(1).forEach((f, i) => {
+    txt += `---\n`;
+    txt += `🎓 **${f.title}**\n`;
+    txt += `🏢 Cơ quan: ${f.agency || "N/A"}\n`;
+    txt += `💰 Kinh phí: ${formatMoney(f.amount)}\n`;
+    txt += `🔎 Chi tiết: ${f.url || "N/A"}\n`;
+    txt += `${buildReasoning(f, i + 1)}\n\n`;
   });
 
   // 🔥 KẾT LUẬN
-  txt += `\n---\n💡 **Gợi ý thêm cho giảng viên:**\n`;
-  txt += `- Ưu tiên các quỹ có funding lớn và agency uy tín\n`;
-  txt += `- Kiểm tra kỹ deadline và eligibility trước khi nộp\n`;
-  txt += `- Có thể mở rộng sang NSF, EU Horizon, quỹ quốc gia\n`;
+  txt += `---\n💡 **Gợi ý thêm cho giảng viên:**\n`;
+  txt += `- Ưu tiên các quỹ có mức tài trợ lớn và nguồn cấp uy tín\n`;
+  txt += `- Kiểm tra kỹ deadline và điều kiện tham gia (eligibility)\n`;
+  txt += `- Có thể mở rộng sang NSF, EU Horizon hoặc quỹ quốc gia\n`;
 
   return txt;
 }
