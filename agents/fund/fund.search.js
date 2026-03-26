@@ -1,6 +1,6 @@
-// fund.search.js
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
+import { getDb } from "../../db/mongo.js";
 
 const COLLECTION =
   process.env.QDRANT_COLLECTION_FUND || "fund_vectors";
@@ -9,7 +9,7 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v6";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
@@ -37,10 +37,7 @@ function setCache(map, key, value, maxSize = 500) {
     map.delete(firstKey);
   }
 
-  map.set(key, {
-    time: Date.now(),
-    value,
-  });
+  map.set(key, { time: Date.now(), value });
 }
 
 // ================= UTILS =================
@@ -49,6 +46,29 @@ function normalizeQuery(query) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+// 🔥 MULTILINGUAL
+function expandQuery(q) {
+  const map = {
+    "quỹ": "fund grant funding",
+    "nghiên cứu": "research science project",
+    "việt nam": "vietnam vietnamese nafosted",
+    "tài trợ": "grant funding sponsor",
+    "học bổng": "scholarship fellowship",
+    "công nghệ": "technology innovation",
+    "ai": "artificial intelligence",
+  };
+
+  let expanded = q;
+
+  for (const key in map) {
+    if (expanded.includes(key)) {
+      expanded += " " + map[key];
+    }
+  }
+
+  return expanded;
 }
 
 function cleanQueryForEmbed(q) {
@@ -74,98 +94,116 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= SAFE KEY =================
-function buildKey(r) {
-  return (
-    r.id ||
-    `${r.payload?.title || ""}_${r.payload?.agency || ""}_${r.payload?.deadline || ""}`
-  );
+// ================= KEYWORD SEARCH =================
+async function keywordSearch(query, limit) {
+  try {
+    const db = await getDb();
+
+    const docs = await db.collection("fund")
+      .find({ $text: { $search: query } })
+      .limit(limit)
+      .toArray();
+
+    return docs.map(d => ({
+      payload: {
+        title: d["OPPORTUNITY TITLE"],
+        agency: d["AGENCY NAME"],
+        text: d["FUNDING DESCRIPTION"],
+        deadline: d["ESTIMATED APPLICATION DUE DATE"],
+        amount: d["ESTIMATED TOTAL FUNDING"],
+        url: d["OPPORTUNITY URL"] || d["URL"]
+      },
+      score: 0.2
+    }));
+
+  } catch {
+    return [];
+  }
+}
+
+// ================= MERGE =================
+function mergeResults(vector, keyword) {
+  const map = new Map();
+
+  vector.forEach(r => {
+    const key = r.id || r.payload?.title;
+    if (!key) return;
+
+    map.set(key, { ...r });
+  });
+
+  keyword.forEach(r => {
+    const key = r.payload?.title;
+    if (!key) return;
+
+    if (map.has(key)) {
+      map.get(key).score += 0.15;
+    } else {
+      map.set(key, r);
+    }
+  });
+
+  return Array.from(map.values());
 }
 
 // ================= MAIN =================
 export async function searchFund(query, topk = 5) {
   try {
     const normalized = normalizeQuery(query);
+    if (!normalized) return [];
 
-    if (!normalized || normalized.length < 2) return [];
+    const expandedQuery = expandQuery(normalized);
 
     const limit = safeTopk(topk);
     const year = extractYear(normalized);
 
-    const cacheKey = `${CACHE_VERSION}:fund:${normalized}:${limit}:${year || "all"}`;
+    const cacheKey = `${CACHE_VERSION}:${expandedQuery}:${limit}:${year || "all"}`;
 
     const cached = getCache(CACHE, cacheKey, CACHE_TTL);
     if (cached) return cached;
 
     // ================= EMBED =================
-    const embedQuery = cleanQueryForEmbed(normalized);
-    if (!embedQuery) return [];
+    const embedQuery = cleanQueryForEmbed(expandedQuery);
 
     let vector = getCache(EMBED_CACHE, embedQuery, EMBED_TTL);
 
     if (!vector) {
       vector = await withTimeout(embed(embedQuery), 1200).catch(() => null);
-      if (!vector || !Array.isArray(vector)) return [];
+      if (!vector) return [];
 
       setCache(EMBED_CACHE, embedQuery, vector, MAX_EMBED_CACHE);
     }
 
-    // ================= SEARCH =================
-    let result = await withTimeout(
+    // ================= VECTOR =================
+    const vectorResults = await withTimeout(
       qdrantClient.search(COLLECTION, {
         vector,
-        limit: limit * 3, // 🔥 tăng recall
+        limit: limit * 3,
         with_payload: true,
-        with_vector: false,
-        score_threshold: 0.05, // 🔥 giảm threshold
-        // ❌ bỏ filter cứng
+        score_threshold: 0.05,
       }),
       TIMEOUT
     ).catch(() => []);
 
-    // ================= FALLBACK (QUAN TRỌNG) =================
-    if (!result || result.length === 0) {
-      result = await qdrantClient.search(COLLECTION, {
-        vector,
-        limit: limit * 3,
-        with_payload: true,
-        with_vector: false,
-      }).catch(() => []);
-    }
+    // ================= KEYWORD =================
+    const keywordResults = await keywordSearch(expandedQuery, limit);
 
-    // ================= NORMALIZE + DEDUP =================
-    const map = new Map();
+    // ================= MERGE =================
+    let merged = mergeResults(vectorResults, keywordResults);
 
-    for (const r of result || []) {
-      if (!r || !r.payload) continue;
+    if (!merged.length) return [];
 
-      const key = buildKey(r);
-      if (!key) continue;
-
-      if (!map.has(key)) {
-        map.set(key, {
-          ...r,
-          score: typeof r.score === "number" ? r.score : 0,
-        });
-      }
-    }
-
-    let finalResult = Array.from(map.values());
-
-    // ================= SOFT YEAR FILTER =================
+    // ================= YEAR FILTER =================
     if (year) {
-      const filtered = finalResult.filter(r => {
+      const filtered = merged.filter(r => {
         const d = new Date(r.payload?.deadline);
         return !isNaN(d) && d.getUTCFullYear() === year;
       });
 
-      // 🔥 nếu filter ra rỗng → giữ lại original
-      if (filtered.length) {
-        finalResult = filtered;
-      }
+      if (filtered.length) merged = filtered;
     }
 
-    finalResult = finalResult.slice(0, limit);
+    const finalResult = merged.slice(0, limit);
 
     setCache(CACHE, cacheKey, finalResult);
 

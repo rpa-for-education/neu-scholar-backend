@@ -1,5 +1,3 @@
-// agents/fund/fund.ranking.js
-
 // ================= REGEX =================
 const RE_BILLION = /\b(billion|bn)\b/;
 const RE_MILLION = /\b(million|mn)\b|\d+(\.\d+)?m\b/;
@@ -11,19 +9,14 @@ function parseAmount(amount) {
 
   const str = String(amount).toLowerCase().replace(/,/g, "").trim();
 
-  // 🔥 tránh false positive "month"
   if (/(month|day|year)/.test(str)) return 0;
-
-  const isBillion = RE_BILLION.test(str);
-  const isMillion = RE_MILLION.test(str);
-  const isThousand = RE_THOUSAND.test(str);
 
   const num = parseFloat(str.replace(/[^0-9.]/g, ""));
   if (!num) return 0;
 
-  if (isBillion) return num * 1e9;
-  if (isMillion) return num * 1e6;
-  if (isThousand) return num * 1e3;
+  if (RE_BILLION.test(str)) return num * 1e9;
+  if (RE_MILLION.test(str)) return num * 1e6;
+  if (RE_THOUSAND.test(str)) return num * 1e3;
 
   return num;
 }
@@ -33,7 +26,6 @@ function parseDeadline(deadline) {
   if (!deadline) return null;
 
   const str = String(deadline);
-
   const d = str.includes("T")
     ? new Date(str)
     : new Date(str + "T00:00:00Z");
@@ -53,7 +45,6 @@ function fundingScore(amount, amount_num) {
   return 0.3;
 }
 
-// 🔥 smooth + clamp
 function deadlineScore(deadline) {
   const d = parseDeadline(deadline);
   if (!d) return 0.3;
@@ -70,16 +61,33 @@ function deadlineScore(deadline) {
   else if (diffDays <= 90) score = 0.65 - (diffDays - 30) * 0.003;
   else score = 0.4;
 
-  // 🔥 clamp
   return Math.max(0, Math.min(1, score));
 }
 
-// ================= TEXT SCORE =================
+// ================= TEXT SCORE (FIX MULTILINGUAL) =================
 function textScore(text, query) {
   if (!text) return 0;
 
   const t = text.toLowerCase();
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+
+  // 🔥 expand VN → EN
+  const map = {
+    "quỹ": "fund",
+    "nghiên cứu": "research",
+    "việt nam": "vietnam",
+    "tài trợ": "grant",
+    "học bổng": "scholarship"
+  };
+
+  let expanded = query.toLowerCase();
+
+  for (const k in map) {
+    if (expanded.includes(k)) {
+      expanded += " " + map[k];
+    }
+  }
+
+  const words = expanded.split(/\s+/).filter(w => w.length > 3);
 
   if (!words.length) return 0;
 
@@ -91,7 +99,6 @@ function textScore(text, query) {
 
   const ratio = hit / words.length;
 
-  // 🔥 tránh overfit query ngắn
   return Math.sqrt(Math.min(ratio, 0.9));
 }
 
@@ -100,9 +107,9 @@ function getWeights(query) {
   const q = query.toLowerCase();
 
   let w = {
-    semantic: 0.5,
-    funding: 0.2,
-    deadline: 0.2,
+    semantic: 0.6,   // 🔥 tăng
+    funding: 0.15,
+    deadline: 0.15,
     text: 0.1
   };
 

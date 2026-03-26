@@ -1,4 +1,3 @@
-// fund.service.js
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 
@@ -11,7 +10,6 @@ function parseAmount(v) {
 
   const str = String(v).toLowerCase().replace(/,/g, "").trim();
 
-  // 🔥 detect unit trước
   const isBillion = /\b(billion|bn)\b/.test(str);
   const isMillion = /\b(million|mn)\b|\d+(\.\d+)?m\b/.test(str);
   const isThousand = /\b(thousand)\b|\d+(\.\d+)?k\b/.test(str);
@@ -34,7 +32,7 @@ function normalizeFunds(arr) {
     const amount_num = p.amount_num || parseAmount(p.amount);
 
     return {
-      title: p.title || "N/A",
+      title: p.title || "",   // 🔥 KHÔNG N/A
       agency: p.agency || "",
       deadline: p.deadline || "",
       amount: p.amount || "",
@@ -50,7 +48,7 @@ function normalizeFunds(arr) {
 function formatMoney(amount, amount_num) {
   const num = amount_num || parseAmount(amount);
 
-  if (!num) return amount || "Không rõ";
+  if (!num) return "";
 
   if (num >= 1e9) return (num / 1e9).toFixed(1) + " tỷ USD";
   if (num >= 1e6) return (num / 1e6).toFixed(1) + " triệu USD";
@@ -109,6 +107,36 @@ function stableSort(funds) {
   });
 }
 
+// ================= RENDER 1 FUND =================
+function renderFund(f, index) {
+  let txt = "";
+
+  // 🔥 title bắt buộc
+  if (f.title) {
+    txt += `🎓 **${f.title}**\n`;
+  }
+
+  if (f.agency) {
+    txt += `🏢 ${f.agency}\n`;
+  }
+
+  const money = formatMoney(f.amount, f.amount_num);
+  if (money) {
+    txt += `💰 ${money}\n`;
+  }
+
+  if (f.url) {
+    txt += `🔎 ${f.url}\n`;
+  }
+
+  const reason = buildReasoning(f, index);
+  if (reason) {
+    txt += `${reason}\n`;
+  }
+
+  return txt + "\n";
+}
+
 // ================= BUILD ANSWER =================
 function buildAnswer(funds, question) {
   if (!funds.length) {
@@ -117,24 +145,16 @@ function buildAnswer(funds, question) {
 
   const best = funds[0];
 
-  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất dựa trên mức độ liên quan (semantic), quy mô kinh phí và thời hạn.\n\n`;
+  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất dựa trên mức độ liên quan, kinh phí và thời hạn.\n\n`;
 
   // BEST
   txt += `🔥 **Quỹ phù hợp nhất:**\n\n`;
-  txt += `🎓 **${best.title}**\n`;
-  txt += `🏢 ${best.agency || "N/A"}\n`;
-  txt += `💰 ${formatMoney(best.amount, best.amount_num)}\n`;
-  txt += `🔎 ${best.url || "N/A"}\n`;
-  txt += `${buildReasoning(best, 0)}\n\n`;
+  txt += renderFund(best, 0);
 
   // OTHERS
   funds.slice(1).forEach((f, i) => {
     txt += `---\n`;
-    txt += `🎓 **${f.title}**\n`;
-    txt += `🏢 ${f.agency || "N/A"}\n`;
-    txt += `💰 ${formatMoney(f.amount, f.amount_num)}\n`;
-    txt += `🔎 ${f.url || "N/A"}\n`;
-    txt += `${buildReasoning(f, i + 1)}\n\n`;
+    txt += renderFund(f, i + 1);
   });
 
   txt += `---\n💡 **Gợi ý:**\n`;

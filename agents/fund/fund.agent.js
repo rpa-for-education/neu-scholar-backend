@@ -5,7 +5,7 @@ import { getDb } from "../../db/mongo.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v6";
 
 // ================= CACHE =================
 function getCache(key) {
@@ -29,6 +29,27 @@ function normalizeQuery(q) {
   return (q || "").trim().toLowerCase();
 }
 
+// 🔥 MULTILINGUAL FIX (QUAN TRỌNG)
+function expandQuery(q) {
+  const map = {
+    "quỹ": "fund grant funding",
+    "nghiên cứu": "research science project",
+    "việt nam": "vietnam vietnamese",
+    "tài trợ": "grant funding",
+    "học bổng": "scholarship fellowship"
+  };
+
+  let expanded = q;
+
+  for (const key in map) {
+    if (expanded.includes(key)) {
+      expanded += " " + map[key];
+    }
+  }
+
+  return expanded;
+}
+
 function safeTopk(k) {
   const n = Number(k);
   return n && n > 0 ? n : 5;
@@ -38,7 +59,7 @@ function safeScore(x) {
   return typeof x === "number" && !isNaN(x) ? x : 0;
 }
 
-// 🔥 FAST intent
+// ================= INTENT =================
 function detectIntentFast(query = "") {
   const yearMatch = query.match(/20\d{2}/);
 
@@ -47,41 +68,25 @@ function detectIntentFast(query = "") {
   };
 }
 
-// 🔥 keyword trigger
 function shouldUseKeyword(query) {
-  const words = query.split(/\s+/);
-
   return (
-    words.length >= 3 ||
-    /(nsf|horizon|grant|fund|budget)/.test(query)
+    query.split(/\s+/).length >= 2 // 🔥 giảm threshold
   );
 }
 
-// 🔥 adaptive retrieval size
-function getSearchMultiplier(query) {
-  const words = query.split(/\s+/);
-
-  if (words.length <= 2) return 4;   // query ngắn → cần recall cao
-  if (words.length <= 5) return 3;
-
-  return 2; // query dài → đã rõ intent
-}
-
-// ================= KEYWORD SEARCH =================
+// ================= KEYWORD SEARCH (FIX DATA VN) =================
 async function keywordSearch(query, limit = 10) {
   try {
     const db = await getDb();
 
+    // 🔥 fallback regex cho tiếng Việt
     const docs = await db.collection("fund")
-      .find({ $text: { $search: query } })
-      .project({
-        "OPPORTUNITY TITLE": 1,
-        "AGENCY NAME": 1,
-        "FUNDING DESCRIPTION": 1,
-        "ESTIMATED APPLICATION DUE DATE": 1,
-        "ESTIMATED TOTAL FUNDING": 1,
-        "OPPORTUNITY URL": 1,
-        "URL": 1
+      .find({
+        $or: [
+          { title: { $regex: query, $options: "i" } },
+          { agency: { $regex: query, $options: "i" } },
+          { text: { $regex: query, $options: "i" } }
+        ]
       })
       .limit(limit)
       .toArray();
@@ -89,14 +94,14 @@ async function keywordSearch(query, limit = 10) {
     return docs.map(d => ({
       id: d._id?.toString(),
       payload: {
-        title: d["OPPORTUNITY TITLE"],
-        agency: d["AGENCY NAME"],
-        text: d["FUNDING DESCRIPTION"],
-        deadline: d["ESTIMATED APPLICATION DUE DATE"],
-        amount: d["ESTIMATED TOTAL FUNDING"],
-        url: d["OPPORTUNITY URL"] || d["URL"]
+        title: d.title || d["OPPORTUNITY TITLE"],
+        agency: d.agency || d["AGENCY NAME"],
+        text: d.text || d["FUNDING DESCRIPTION"],
+        deadline: d.deadline || d["ESTIMATED APPLICATION DUE DATE"],
+        amount: d.amount || d["ESTIMATED TOTAL FUNDING"],
+        url: d.url || d["OPPORTUNITY URL"] || d["URL"]
       },
-      score: 0.2
+      score: 0.3 // 🔥 tăng weight keyword
     }));
 
   } catch (err) {
@@ -124,7 +129,9 @@ function mergeResults(vector, keyword) {
     if (!key) return;
 
     if (map.has(key)) {
-      map.get(key).score += 0.1;
+      map.get(key).score += 0.15; // 🔥 boost mạnh hơn
+    } else {
+      map.set(key, r); // 🔥 thêm mới luôn
     }
   });
 
@@ -135,11 +142,7 @@ function mergeResults(vector, keyword) {
 function parseDateSafe(d) {
   if (!d) return null;
 
-  const str = String(d);
-  const date = str.includes("T")
-    ? new Date(str)
-    : new Date(str + "T00:00:00Z");
-
+  const date = new Date(d);
   return isNaN(date) ? null : date;
 }
 
@@ -147,15 +150,12 @@ function filterResults(results, intent) {
   const now = Date.now();
 
   return results.filter(r => {
-    const p = r.payload || {};
-    const d = parseDateSafe(p.deadline);
+    const d = parseDateSafe(r.payload?.deadline);
 
-    if (d) {
-      if (d.getTime() < now) return false;
+    if (d && d.getTime() < now) return false;
 
-      if (intent.year && d.getUTCFullYear() !== intent.year) {
-        return false;
-      }
+    if (intent.year && d && d.getFullYear() !== intent.year) {
+      return false;
     }
 
     return true;
@@ -167,39 +167,29 @@ export async function runFundSearch(query, model_id, topk = 5) {
   const q = normalizeQuery(query);
   if (!q) return [];
 
+  const expanded = expandQuery(q); // 🔥 FIX KEY
+
   const k = safeTopk(topk);
   const intent = detectIntentFast(q);
 
-  const useKeyword = shouldUseKeyword(q);
-
-  const cacheKey = `${CACHE_VERSION}:${q}:${k}:${intent.year || "all"}:${useKeyword}`;
+  const cacheKey = `${CACHE_VERSION}:${expanded}:${k}`;
 
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
   try {
-    const multiplier = getSearchMultiplier(q);
-
-    const vectorResults = await searchFund(q, k * multiplier).catch(() => []);
-
-    // 🔥 nếu vector rất mạnh → skip keyword
-    if (vectorResults.length >= k && safeScore(vectorResults[0]?.score) > 0.85) {
-      const ranked = rankFunds(vectorResults, q).slice(0, k);
-      setCache(cacheKey, ranked);
-      return ranked;
-    }
+    // 🔥 vector dùng expanded query
+    const vectorResults = await searchFund(expanded, k * 3).catch(() => []);
 
     let keywordResults = [];
 
-    if (useKeyword) {
+    if (shouldUseKeyword(q)) {
       keywordResults = await keywordSearch(q, k);
     }
 
-    // 🔥 fallback nếu vector fail
+    // 🔥 fallback mạnh
     if (!vectorResults.length && keywordResults.length) {
-      const fallback = keywordResults.slice(0, k);
-      setCache(cacheKey, fallback);
-      return fallback;
+      return keywordResults.slice(0, k);
     }
 
     if (!vectorResults.length) return [];

@@ -37,29 +37,40 @@ function normalizeCountry(c) {
   const map = {
     vn: "vietnam",
     usa: "united states",
-    us: "united states"
+    us: "united states",
+    china: "china",
+    "trung quoc": "china"
   };
   const n = normalizeText(c);
   return map[n] || n;
 }
 
+// ================= 🔥 COUNTRY FILTER =================
+function filterByCountry(items, analysis) {
+  if (!analysis?.wantsCountryCode) return items;
+
+  const target = normalizeCountry(analysis.wantsCountryCode);
+
+  const filtered = items.filter(it => {
+    const c = normalizeCountry(it.country);
+    return c.includes(target);
+  });
+
+  // ⚠️ nếu không có kết quả thì KHÔNG fallback (tránh sai)
+  if (filtered.length === 0) return [];
+
+  return filtered;
+}
+
 // ================= URL =================
 function getConferenceUrl(c) {
-  let url =
+  return (
     c.cfp_link ||
     c.url ||
     c.link ||
     c.website ||
-    "";
-
-  if (!url && (c.title || c.name)) {
-    const q = encodeURIComponent(
-      `${c.title || c.name} ${c.acronym || ""} conference ${c.city || ""}`
-    );
-    url = `https://www.google.com/search?q=${q}`;
-  }
-
-  return url;
+    "" // ❌ bỏ google search
+  );
 }
 
 function getJournalUrl(j) {
@@ -111,16 +122,7 @@ function fieldMatch(item, fieldHint) {
     ].join(" ")
   );
 
-  let score = 0;
-
-  if (text.includes(field)) score += 1;
-
-  const tokens = field.split(" ");
-  for (const t of tokens) {
-    if (text.includes(t)) score += 0.5;
-  }
-
-  return score;
+  return text.includes(field);
 }
 
 // ================= EXPLAIN =================
@@ -134,11 +136,10 @@ function buildExplain(item, analysis) {
   if (deadline) {
     const diff = (deadline - now) / (1000 * 60 * 60 * 24);
 
-    if (diff > 0 && diff < 14) reasons.push("🔥 Sắp hết hạn nộp bài");
-    else if (diff > 0 && diff < 60) reasons.push("⏳ Còn hạn nộp bài");
-    else if (diff > 60) reasons.push("📢 Đang mở nhận bài");
-    else if (diff < 0 && diff > -30) reasons.push("⚠️ Vừa hết hạn");
-    else if (diff < -30) reasons.push("❌ Đã hết hạn");
+    if (diff > 0 && diff < 14) reasons.push("🔥 Sắp hết hạn");
+    else if (diff > 0 && diff < 60) reasons.push("⏳ Còn hạn");
+    else if (diff > 60) reasons.push("📢 Đang nhận bài");
+    else if (diff < 0) reasons.push("❌ Đã hết hạn");
   }
 
   if (start) {
@@ -146,98 +147,70 @@ function buildExplain(item, analysis) {
     if (diff > 0 && diff < 30) reasons.push("📅 Sắp diễn ra");
   }
 
-  if (analysis?.fieldHint && fieldMatch(item, analysis.fieldHint) > 0) {
+  if (analysis?.fieldHint && fieldMatch(item, analysis.fieldHint)) {
     reasons.push("🎯 Đúng lĩnh vực");
   }
 
   if (item.sjr_best_quartile === "Q1") {
-    reasons.push("🏆 Q1 (chất lượng cao)");
+    reasons.push("🏆 Q1");
   }
 
-  if (analysis?.wantsCountryCode) {
-    const itemCountry = normalizeCountry(item.country);
-    const target = normalizeCountry(analysis.wantsCountryCode);
+  // ❌ nếu chỉ có 1 reason yếu thì bỏ
+  if (reasons.length <= 1) return "";
 
-    if (itemCountry.includes(target)) {
-      reasons.push("🌍 Đúng khu vực");
-    }
-  }
-
-  if (!reasons.length) {
-    reasons.push("Phù hợp nội dung tìm kiếm");
-  }
-
-  return `💡 ${reasons.join(", ")}`;
+  return `💡 ${reasons.join(" • ")}`;
 }
 
 // ================= ANALYSIS =================
-function buildAnalysis(question, conferences, journals, analysis) {
+function buildAnalysis(question, conferences, journals) {
   const total = conferences.length + journals.length;
-  if (!total) return "";
+  if (!total) return "Không tìm thấy kết quả phù hợp.";
 
-  let text = `Dựa trên truy vấn "${question}", hệ thống đã lọc ra ${total} kết quả phù hợp nhất. `;
-
-  if (analysis?.fieldHint) {
-    text += "Các kết quả phù hợp với lĩnh vực chuyên môn. ";
-  }
-
-  const hasOpen = conferences.some(c => {
-    const d = safeTime(c.deadline);
-    return d && d > Date.now();
-  });
-
-  if (hasOpen) {
-    text += "Một số hội thảo vẫn đang nhận bài. ";
-  }
-
-  text += "Ưu tiên các kết quả gần deadline và độ phù hợp cao.";
-
-  return text;
+  return `Tìm thấy ${total} kết quả phù hợp với "${question}".`;
 }
 
 // ================= FORMAT =================
 function formatFinalAnswer(answer, conferences, journals, analysis) {
   let content = answer || "";
 
-  // ===== CONFERENCES =====
   if (conferences.length) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
     conferences.forEach((c, i) => {
-      const title = c.name || c.title;
       const url = getConferenceUrl(c);
-      const badge = getBadge(i);
+      const explain = buildExplain(c, analysis);
 
-      content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}** ${badge}\n`;
+      content += `### ${i + 1}. **${safe(c.name || c.title)}** ${getBadge(i)}\n`;
 
       const location = [c.city, c.country].filter(hasValue).join(", ");
       if (location) content += `- 📍 ${location}  \n`;
 
       if (hasValue(c.deadline)) {
-        content += `- ⏳ Deadline: ${safe(c.deadline)}  \n`;
+        content += `- ⏳ ${safe(c.deadline)}  \n`;
       }
 
       if (hasValue(c.start_date)) {
-        content += `- 📅 Event: ${safe(c.start_date)}  \n`;
+        content += `- 📅 ${safe(c.start_date)}  \n`;
       }
 
-      content += `- ${buildExplain(c, analysis)}  \n`;
+      if (explain) {
+        content += `- ${explain}  \n`;
+      }
 
-      if (hasValue(url)) {
-        content += `- 🌐 [Xem CFP / Website](${url})\n\n`;
+      if (url) {
+        content += `- 🌐 ${url}\n\n`;
       }
     });
   }
 
-  // ===== JOURNALS =====
   if (journals.length) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
     journals.forEach((j, i) => {
       const url = getJournalUrl(j);
-      const badge = getBadge(i);
+      const explain = buildExplain(j, analysis);
 
-      content += `### ${i + 1}. **[J${i + 1}] ${safe(j.title)}** ${badge}\n`;
+      content += `### ${i + 1}. **${safe(j.title)}** ${getBadge(i)}\n`;
 
       if (hasValue(j.publisher)) {
         content += `- 🏢 ${safe(j.publisher)}  \n`;
@@ -251,10 +224,12 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
         content += `- 🌍 ${safe(j.country)}  \n`;
       }
 
-      content += `- ${buildExplain(j, analysis)}  \n`;
+      if (explain) {
+        content += `- ${explain}  \n`;
+      }
 
-      if (hasValue(url)) {
-        content += `- 🌐 [Xem trên Scimago](${url})\n\n`;
+      if (url) {
+        content += `- 🌐 ${url}\n\n`;
       }
     });
   }
@@ -278,15 +253,18 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let conferences = dedupe(res.conferences || []);
     let journals = dedupe(res.journals || []);
 
+    // 🔥 FIX CORE
+    conferences = filterByCountry(conferences, analysis);
+    journals = filterByCountry(journals, analysis);
+
     conferences = smartFilter(rankItems(conferences, question, analysis)).slice(0, topk);
     journals = smartFilter(rankItems(journals, question, analysis)).slice(0, topk);
 
-    const intro = buildAnalysis(question, conferences, journals, analysis);
+    const intro = buildAnalysis(question, conferences, journals);
     const finalAnswer = formatFinalAnswer(intro, conferences, journals, analysis);
 
     return {
       answer: finalAnswer,
-      content_markdown: finalAnswer,
       conferences,
       journals,
       domain,
@@ -299,7 +277,6 @@ export async function runAgent(question, topk = FINAL_TOPK) {
 
     return {
       answer: "Hệ thống đang gặp lỗi.",
-      content_markdown: "Hệ thống đang gặp lỗi.",
       conferences: [],
       journals: [],
       domain: "error",

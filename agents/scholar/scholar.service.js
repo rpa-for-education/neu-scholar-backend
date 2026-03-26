@@ -40,17 +40,17 @@ export async function runScholarAgent(req, question, model_id, topk) {
         answer = `Tìm thấy ${journals.length} tạp chí phù hợp với "${question}".`;
       }
 
-      // 🔥 enrich insight (CFP logic chuẩn)
+      // 🔥 enrich insight
+      const now = Date.now();
+
       const hasOpenCFP = conferences.some(c => {
-        if (!c.deadline) return false;
-        const d = new Date(c.deadline);
-        return !isNaN(d) && d > new Date();
+        const d = safeTime(c.deadline);
+        return d && d > now;
       });
 
       const hasUpcomingEvent = conferences.some(c => {
-        if (!c.start_date) return false;
-        const d = new Date(c.start_date);
-        return !isNaN(d) && d > new Date();
+        const d = safeTime(c.start_date);
+        return d && d > now;
       });
 
       if (hasOpenCFP) {
@@ -69,11 +69,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
         c.url ||
         c.link ||
         c.website ||
-        (c.title || c.name
-          ? `https://www.google.com/search?q=${encodeURIComponent(
-              `${c.title || c.name} ${c.acronym || ""} conference ${c.city || ""}`
-            )}`
-          : "")
+        "" // ❌ KHÔNG dùng Google search nữa
       );
     }
 
@@ -81,21 +77,20 @@ export async function runScholarAgent(req, question, model_id, topk) {
       return j.url || j.scimago_link || "";
     }
 
-    // ================= 🔥 SAFE DATE =================
+    // ================= SAFE DATE =================
     function safeTime(dateStr) {
       if (!dateStr) return null;
       const t = new Date(dateStr).getTime();
       return isNaN(t) ? null : t;
     }
 
-    // ================= 🔥 CONFERENCE STATUS =================
+    // ================= STATUS =================
     function getConferenceStatus(c) {
       const now = Date.now();
 
       const deadline = safeTime(c.deadline);
       const start = safeTime(c.start_date);
 
-      // ===== SUBMISSION =====
       if (deadline) {
         const diff = (deadline - now) / (1000 * 60 * 60 * 24);
 
@@ -103,7 +98,6 @@ export async function runScholarAgent(req, question, model_id, topk) {
         if (diff > 0) return "submission_soon";
       }
 
-      // ===== AFTER DEADLINE =====
       if (deadline && deadline < now) {
         if (start) {
           const diffStart = (start - now) / (1000 * 60 * 60 * 24);
@@ -111,11 +105,9 @@ export async function runScholarAgent(req, question, model_id, topk) {
           if (diffStart > 0) return "upcoming_event";
           return "past_event";
         }
-
         return "submission_closed";
       }
 
-      // ===== NO DEADLINE =====
       if (!deadline && start) {
         const diff = (start - now) / (1000 * 60 * 60 * 24);
 
@@ -133,31 +125,33 @@ export async function runScholarAgent(req, question, model_id, topk) {
         type: "conference",
         title: c.name || c.title,
         url: buildConferenceUrl(c),
-        metadata: {
-          country: c.country,
-          city: c.city,
 
-          // 🔥 FIX CORE
-          deadline: c.deadline || null,
-          start_date: c.start_date || null,
+        metadata: {
+          ...(c.country && { country: c.country }),
+          ...(c.city && { city: c.city }),
+
+          ...(c.deadline && { deadline: c.deadline }),
+          ...(c.start_date && { start_date: c.start_date }),
+
           conference_status: getConferenceStatus(c),
 
-          // 🔥 useful cho FE
-          fields: c.fields || [],
+          ...(c.fields?.length && { fields: c.fields }),
           score: c.finalScore ?? 0
         }
       })),
+
       ...journals.map((j, i) => ({
         id: `J${i + 1}`,
         type: "journal",
         title: j.title,
         url: buildJournalUrl(j),
-        metadata: {
-          quartile: j.sjr_best_quartile,
-          publisher: j.publisher,
-          country: j.country,
 
-          fields: j.fields || [],
+        metadata: {
+          ...(j.sjr_best_quartile && { quartile: j.sjr_best_quartile }),
+          ...(j.publisher && { publisher: j.publisher }),
+          ...(j.country && { country: j.country }),
+
+          ...(j.fields?.length && { fields: j.fields }),
           score: j.finalScore ?? 0
         }
       }))
