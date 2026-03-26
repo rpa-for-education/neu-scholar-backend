@@ -1,4 +1,5 @@
 import fs from "fs";
+import crypto from "crypto";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 
@@ -11,139 +12,153 @@ const COLLECTION = process.env.MONGODB_COLLECTION || "conference";
 
 const FILE_PATH = "./services/hoi_thao_neu_2026.json";
 
-// ================= SAFE KEY =================
-function safeKey(item) {
-  if (!item._key || typeof item._key !== "string" || item._key.trim() === "") {
-    return "gen_" + item.name?.slice(0, 30) + "_" + Date.now();
+// ================= NORMALIZE =================
+function normalizeText(text) {
+  return text
+    ?.toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ================= YEAR =================
+function extractYear(text) {
+  const match = text?.match(/\b20\d{2}\b/);
+  return match ? parseInt(match[0]) : 2026;
+}
+
+// ================= SERIES =================
+function extractSeries(acronym, name) {
+  if (acronym) return acronym.replace(/\d{4}/, "").trim();
+  return name.split(" ").slice(0, 3).join(" ").toUpperCase();
+}
+
+// ================= KEY =================
+function generateKey(item) {
+  const base = `${item.normalized_name}_${item.year}_${item.normalized_organizer}`;
+  return crypto.createHash("md5").update(base).digest("hex");
+}
+
+// ================= TOPIC DICTIONARY =================
+const TOPIC_KEYWORDS = {
+  ai: ["ai", "artificial intelligence", "machine learning"],
+  economics: ["economics", "economic", "finance"],
+  management: ["management", "business"],
+  education: ["education", "learning"],
+  data: ["data", "big data"],
+  technology: ["technology", "it"],
+  innovation: ["innovation", "startup"],
+};
+
+// ================= EXTRACT TOPICS =================
+function extractTopics(text) {
+  const normalized = normalizeText(text);
+  const found = [];
+
+  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+    if (keywords.some(k => normalized.includes(k))) {
+      found.push(topic);
+    }
   }
-  return item._key;
+
+  return found;
 }
 
 // ================= MAP =================
-function mapToSchema(item) {
+function mapToDoc(item) {
   const now = new Date().toISOString();
 
+  const normalized_name = normalizeText(item.name);
+  const normalized_organizer = normalizeText(item.organizer);
+
+  const year = extractYear(item.name || item.acronym);
+  const series = extractSeries(item.acronym, item.name);
+
+  const baseOrg = item.organizer || "";
+  const organizer_full = `${baseOrg} - Đại học Kinh tế Quốc dân`;
+
+  // 🔥 EXTRACT TOPICS
+  const topics = extractTopics(item.name);
+
+  const typeText =
+    item.type === "Quốc tế"
+      ? "hội thảo quốc tế"
+      : "hội thảo quốc gia";
+
+  const topicText =
+    topics.length > 0
+      ? `Các chủ đề bao gồm ${topics.join(", ")}.`
+      : "";
+
+  // 🔥 CFP TEXT CHUẨN AI
+  const cfp_text = `${item.name}${
+    item.acronym ? ` (${item.acronym})` : ""
+  } là ${typeText} được tổ chức bởi ${organizer_full} tại Đại học Kinh tế Quốc dân, Hà Nội, Việt Nam vào tháng ${item.month} năm ${year}. ${topicText}`;
+
+  const _key = generateKey({
+    normalized_name,
+    normalized_organizer,
+    year,
+  });
+
   return {
-    _key: safeKey(item),
+    _key,
+
     name: item.name,
     acronym: item.acronym || null,
 
-    created_time: now,
-    modified_time: now,
-    updated_time: now,
-    enriched_time: null,
+    normalized_name,
+    normalized_organizer,
 
-    id_conference: null,
-    status: "raw",
-    crawl_source: "pdf_neu_2026",
+    series,
+    year,
+
+    type: item.type,
+    organizer: baseOrg,
+    organizer_full,
+
+    institution: "Đại học Kinh tế Quốc dân",
+    institution_code: "NEU",
+
+    month: item.month,
 
     location: "Vietnam",
     city: "Hanoi",
     country: "Vietnam",
-    country_code: "VN",
-    continent: "Asia",
 
-    start_date: null,
-    deadline: null,
-    month: item.month,
+    status: "neu_2026",
+    crawl_source: "neu_pdf",
 
-    type: item.type,
-    organizer: item.organizer,
+    // 🔥 IMPORTANT
+    cfp_text,
+    cfp_length: cfp_text.length,
+    topics,
 
-    cfp_text: null,
-    cfp_length: 0,
-
-    topics: [],
     keywords: [],
     vector: [],
 
-    url: null,
-    submission_link: null,
+    updated_time: now,
   };
-}
-
-// ================= CLEAN DB =================
-async function cleanDatabase(col) {
-  console.log("🧹 Cleaning database...");
-
-  // 1. Fix _key null/missing
-  await col.updateMany(
-    {},
-    [
-      {
-        $set: {
-          _key: {
-            $cond: [
-              {
-                $or: [
-                  { $eq: ["$_key", null] },
-                  { $not: ["$_key"] },
-                  { $eq: [{ $type: "$_key" }, "missing"] }
-                ]
-              },
-              { $concat: ["fix_", { $toString: "$_id" }] },
-              "$_key"
-            ]
-          }
-        }
-      }
-    ]
-  );
-
-  // 2. Remove duplicate _key
-  const duplicates = await col.aggregate([
-    {
-      $group: {
-        _id: "$_key",
-        ids: { $push: "$_id" },
-        count: { $sum: 1 }
-      }
-    },
-    {
-      $match: { count: { $gt: 1 } }
-    }
-  ]).toArray();
-
-  for (const doc of duplicates) {
-    const idsToDelete = doc.ids.slice(1);
-    await col.deleteMany({ _id: { $in: idsToDelete } });
-  }
-
-  // 3. Remove invalid records
-  await col.deleteMany({
-    $or: [
-      { name: null },
-      { name: "" }
-    ]
-  });
-
-  console.log("✅ Database cleaned");
 }
 
 // ================= INDEX =================
 async function setupIndexes(col) {
-  console.log("⚙️ Creating indexes...");
+  const indexes = await col.indexes();
 
-  await col.createIndex(
-    { _key: 1 },
-    {
-      unique: true,
-      partialFilterExpression: {
-        _key: { $type: "string" }
-      }
-    }
-  );
+  if (!indexes.some(i => i.key?._key === 1)) {
+    await col.createIndex({ _key: 1 }, { unique: true });
+  }
 
-  await col.createIndex({ month: 1, type: 1 });
-  await col.createIndex({ organizer: 1 });
-  await col.createIndex({ status: 1 });
+  if (!indexes.some(i => i.key?.series === 1)) {
+    await col.createIndex({ series: 1, year: 1 });
+  }
 
-  await col.createIndex({
-    name: "text",
-    organizer: "text",
-  });
+  if (!indexes.some(i => i.key?.institution_code === 1)) {
+    await col.createIndex({ institution_code: 1 });
+  }
 
-  console.log("✅ Index created");
+  console.log("✅ Index ready");
 }
 
 // ================= MAIN =================
@@ -154,47 +169,53 @@ async function run() {
     console.log("🚀 Connecting MongoDB...");
     await client.connect();
 
-    const db = client.db(DB_NAME);
-    const col = db.collection(COLLECTION);
+    const col = client.db(DB_NAME).collection(COLLECTION);
 
-    // 🔥 CLEAN DB TRƯỚC
-    await cleanDatabase(col);
+    await setupIndexes(col);
 
-    console.log("📂 Reading JSON...");
     const raw = JSON.parse(fs.readFileSync(FILE_PATH, "utf-8"));
 
-    console.log(`📊 Total: ${raw.length}`);
+    const bulkOps = [];
+    const now = new Date().toISOString();
 
-    // ================= IMPORT =================
-    const valid = raw.filter(item => item.name);
+    for (const item of raw) {
+      if (!item.name) continue;
 
-    const bulkOps = valid.map((item) => {
-      const mapped = mapToSchema(item);
+      const doc = mapToDoc(item);
 
-      return {
+      bulkOps.push({
         updateOne: {
-          filter: { _key: mapped._key },
-          update: { $set: mapped },
+          filter: {
+            normalized_name: doc.normalized_name,
+            year: doc.year,
+          },
+          update: {
+            $set: {
+              ...doc,
+              updated_time: now,
+            },
+            $setOnInsert: {
+              created_time: now,
+            },
+            $addToSet: {
+              sources: doc.crawl_source,
+            },
+          },
           upsert: true,
         },
-      };
-    });
+      });
+    }
 
-    console.log("⚡ Importing...");
     const result = await col.bulkWrite(bulkOps, { ordered: false });
 
-    console.log("✅ DONE!");
-    console.log("📌 Inserted:", result.upsertedCount);
+    console.log("🎯 DONE");
+    console.log("🆕 Inserted:", result.upsertedCount);
     console.log("🔄 Updated:", result.modifiedCount);
-
-    // 🔥 INDEX CUỐI CÙNG
-    await setupIndexes(col);
 
   } catch (err) {
     console.error("❌ ERROR:", err);
   } finally {
     await client.close();
-    console.log("🔌 MongoDB closed");
   }
 }
 

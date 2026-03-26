@@ -1,12 +1,10 @@
-// agents/fund/fund.agent.js
-
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
 import { getDb } from "../../db/mongo.js";
-import { rewriteQuery, detectIntent } from "./fund.query.js";
 
+// ================= CONFIG =================
 const CACHE = new Map();
-const TTL = 1000 * 60 * 5;
+const TTL = 1000 * 60 * 3;
 
 // ================= CACHE =================
 function getCache(key) {
@@ -35,38 +33,28 @@ function safeTopk(k) {
   return n && n > 0 ? n : 5;
 }
 
-// 🔥 FIX QUAN TRỌNG: escape regex Mongo
-function escapeRegex(text = "") {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// 🔥 FAST intent (NO LLM)
+function detectIntentFast(query = "") {
+  const yearMatch = query.match(/20\d{2}/);
+
+  return {
+    year: yearMatch ? Number(yearMatch[0]) : null,
+    domain: [],
+    priority: "relevance"
+  };
 }
 
-function extractTokens(query = "") {
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !/^\d+$/.test(w))
-    .map(w => escapeRegex(w)); // 🔥 FIX
-}
-
-// ================= KEYWORD SEARCH =================
+// ================= KEYWORD SEARCH (FAST) =================
 async function keywordSearch(query, limit = 10) {
   try {
     const db = await getDb();
 
-    const tokens = extractTokens(query);
-
-    if (!tokens.length) return [];
-
-    const docs = await db.collection("fund").find({
-      $or: tokens.map(t => ({
-        "FUNDING DESCRIPTION": {
-          $regex: t,
-          $options: "i"
-        }
-      }))
-    })
-    .limit(limit)
-    .toArray();
+    const docs = await db.collection("fund")
+      .find({
+        $text: { $search: query }
+      })
+      .limit(limit)
+      .toArray();
 
     return docs.map(d => ({
       payload: {
@@ -77,7 +65,7 @@ async function keywordSearch(query, limit = 10) {
         amount: d["ESTIMATED TOTAL FUNDING"],
         url: d["OPPORTUNITY URL"] || d["URL"]
       },
-      score: 0.5
+      score: 0.4
     }));
 
   } catch (err) {
@@ -94,8 +82,10 @@ function mergeResults(vector, keyword) {
     const key = r.payload?.title;
     if (!key) return;
 
-    if (!map.has(key) || r.score > map.get(key).score) {
+    if (!map.has(key)) {
       map.set(key, r);
+    } else {
+      map.get(key).score += 0.2;
     }
   });
 
@@ -109,7 +99,6 @@ function filterResults(results, intent) {
   return results.filter(r => {
     const p = r.payload || {};
 
-    // 👉 lọc deadline
     if (p.deadline) {
       const d = new Date(p.deadline);
 
@@ -136,26 +125,32 @@ export async function runFundSearch(query, model_id, topk = 5) {
   if (cached) return cached;
 
   try {
-    // 🔥 rewrite + intent
-    const rewritten = await rewriteQuery(q, model_id);
-    const intent = await detectIntent(q, model_id);
+    const intent = detectIntentFast(q);
 
-    // 🔥 hybrid search
+    // ⚡ chạy song song
+    const vectorPromise = searchFund(q, k * 2).catch(() => []);
+    const keywordPromise = keywordSearch(q, k * 2);
+
     const [vectorResults, keywordResults] = await Promise.all([
-      searchFund(rewritten, k * 3),
-      keywordSearch(rewritten, k * 3)
+      vectorPromise,
+      keywordPromise
     ]);
 
-    const merged = mergeResults(vectorResults, keywordResults);
+    // ⚡ early return nếu keyword đủ tốt
+    if (keywordResults.length >= k) {
+      setCache(cacheKey, keywordResults.slice(0, k));
+      return keywordResults.slice(0, k);
+    }
+
+    let merged = mergeResults(vectorResults, keywordResults);
 
     if (!merged.length) return [];
 
-    const filtered = filterResults(merged, intent);
+    merged = filterResults(merged, intent);
 
-    if (!filtered.length) return [];
+    if (!merged.length) return [];
 
-    // 🔥 academic ranking
-    const ranked = rankFunds(filtered, rewritten);
+    const ranked = rankFunds(merged, q);
 
     const finalResults = ranked.slice(0, k);
 

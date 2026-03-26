@@ -1,15 +1,14 @@
+// fund.search.js - Tìm kiếm quỹ đầu tư bằng vector embedding
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
 
-// ================= CONFIG =================
 const COLLECTION =
   process.env.QDRANT_COLLECTION_FUND || "fund_vectors";
 
-const CACHE_TTL = 1000 * 60 * 5; // 5 phút
-const MAX_RETRIES = 1;
-const TIMEOUT = 2500; // 🔥 chống treo
+const CACHE_TTL = 1000 * 60 * 5;
+const TIMEOUT = 1200; // 🔥 giảm mạnh
+const MAX_RETRIES = 0;
 
-// ================= CACHE =================
 const CACHE = new Map();
 
 function getCache(key) {
@@ -31,7 +30,6 @@ function setCache(key, value) {
   });
 }
 
-// ================= UTILS =================
 function normalizeQuery(query) {
   return (query || "").trim().toLowerCase();
 }
@@ -41,7 +39,6 @@ function safeTopk(topk) {
   return n && n > 0 ? n : 5;
 }
 
-// ================= 🔥 TIMEOUT WRAPPER =================
 function withTimeout(promise, ms = TIMEOUT) {
   return Promise.race([
     promise,
@@ -59,59 +56,31 @@ export async function searchFund(query, topk = 5) {
 
     const cacheKey = `fund:vector:${normalized}:${limit}`;
 
-    // ================= CACHE HIT =================
     const cached = getCache(cacheKey);
-    if (cached) {
-      console.log("⚡ FUND CACHE HIT");
-      return cached;
-    }
+    if (cached) return cached;
 
-    // ================= EMBEDDING =================
-    const vector = await withTimeout(embed(normalized), 2000);
+    // 🔥 embed nhanh hơn
+    const vector = await withTimeout(embed(normalized), 1000).catch(() => null);
 
-    if (!vector) {
-      console.warn("⚠️ No embedding → skip");
-      return [];
-    }
+    if (!vector) return [];
 
-    let lastError;
+    const result = await withTimeout(
+      qdrantClient.search(COLLECTION, {
+        vector,
+        limit,
+        with_payload: true,
+      }),
+      TIMEOUT
+    ).catch(() => []);
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await withTimeout(
-          qdrantClient.search(COLLECTION, {
-            vector,
-            limit,
-            with_payload: true,
-          }),
-          TIMEOUT
-        );
+    const finalResult = result || [];
 
-        const finalResult = result || [];
+    setCache(cacheKey, finalResult);
 
-        // ================= CACHE SAVE =================
-        setCache(cacheKey, finalResult);
-
-        return finalResult;
-
-      } catch (err) {
-        lastError = err;
-
-        console.warn(
-          `⚠️ Qdrant search attempt ${attempt + 1} failed:`,
-          err.message
-        );
-      }
-    }
-
-    console.error("❌ Qdrant search failed:", lastError?.message);
-
-    // ================= FALLBACK =================
-    return [];
+    return finalResult;
 
   } catch (err) {
     console.error("❌ searchFund error:", err.message);
-
     return [];
   }
 }
