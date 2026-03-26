@@ -26,10 +26,10 @@ export const SCHOLAR_METADATA = {
   domains: ["conference", "journal"],
 
   sample_prompts: [
-    "Hãy cho tôi các hội thảo uy tín liên quan đến RPA năm 2026",
-    "Các hội thảo quốc tế tại Trung Quốc năm 2026",
-    "Tạp chí phù hợp với hệ thống thông tin quản lý",
-    "Danh sách journal về kinh tế bền vững"
+    "Danh sách 5 hội thảo uy tín liên quan đến Trí tuệ nhân tạo, Học máy,...?",
+    "Một số hội thảo nổi bật được tổ chức tại Đại học Kinh tế quốc dân năm 2026?",
+    "Tạp chí phù hợp liên quan tới ngành Hệ thống thông tin quản lý?",
+    "Một số tạp chí nổi bật ngành Ngôn ngữ học?"
   ],
 
   provided_data_types: [

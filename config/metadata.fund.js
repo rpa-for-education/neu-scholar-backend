@@ -27,10 +27,10 @@ export const FUND_METADATA = {
   domains: ["funding", "grant"],
 
   sample_prompts: [
-    "Các quỹ tài trợ về AI còn hạn nộp năm 2026",
-    "Quỹ tài trợ liên quan tới đổi mới và sáng tạo khởi nghiệp",
-    "Quỹ tài trợ phù hợp cho nghiên cứu sinh ngành Marketing",
-    "Danh sách quỹ tài trợ về Phát triển bền vững"
+    "Quỹ tài trợ liên quan tới đổi mới và sáng tạo khởi nghiệp năm 2026?",
+    "Quỹ tài trợ cho nghiên cứu sinh ngành Hệ thống thông tin quản lý năm 2026?",
+    "Danh sách quỹ tài trợ cho các trường đại học khối ngành kinh tế năm 2026?",
+    "Danh sách một số quỹ tài trợ phù hợp với lĩnh vực Toán kinh tế năm 2026?"
   ],
 
   provided_data_types: [
