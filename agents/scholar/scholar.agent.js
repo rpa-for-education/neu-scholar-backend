@@ -72,14 +72,13 @@ function sortByScore(items) {
   return items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
-// ================= SMART SELECT =================
+// ================= SELECT =================
 function smartSelect(items, topk) {
   const result = [];
   const used = new Set();
 
   for (const it of items) {
     const key = normalizeKey(it);
-
     if (used.has(key)) continue;
 
     result.push(it);
@@ -91,16 +90,22 @@ function smartSelect(items, topk) {
   return result;
 }
 
+// ================= 🔥 BADGE =================
+function getBadge(index) {
+  if (index === 0) return "🥇 Top phù hợp nhất";
+  if (index === 1) return "🔥 Nổi bật";
+  if (index === 2) return "⭐ Đáng cân nhắc";
+  return "";
+}
+
 // ================= 🔥 EXPLAIN =================
 function buildExplain(item, analysis) {
   const reasons = [];
 
-  // 🎯 country match
   if (analysis?.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
-    reasons.push("phù hợp khu vực yêu cầu");
+    reasons.push("Phù hợp khu vực yêu cầu");
   }
 
-  // 🎯 field match
   if (analysis?.fieldHint) {
     const text = [
       item.topics,
@@ -110,29 +115,47 @@ function buildExplain(item, analysis) {
     ].join(" ").toLowerCase();
 
     if (text.includes(analysis.fieldHint.toLowerCase())) {
-      reasons.push("liên quan trực tiếp lĩnh vực");
+      reasons.push("Liên quan trực tiếp lĩnh vực");
     }
   }
 
-  // 🎯 deadline gần
   if (item.deadline) {
     const diff = (new Date(item.deadline) - new Date()) / (1000 * 60 * 60 * 24);
     if (diff > 0 && diff < 60) {
-      reasons.push("deadline sắp tới");
+      reasons.push("Deadline sắp tới");
     }
   }
 
-  // 🎯 journal chất lượng
   if (item.sjr_best_quartile === "Q1") {
-    reasons.push("tạp chí chất lượng cao (Q1)");
+    reasons.push("Tạp chí chất lượng cao (Q1)");
   }
 
-  // 🎯 fallback
   if (!reasons.length) {
-    reasons.push("phù hợp nội dung tìm kiếm");
+    reasons.push("Phù hợp nội dung tìm kiếm");
   }
 
   return `💡 ${reasons.join(", ")}`;
+}
+
+// ================= 🔥 ANALYSIS (NEW) =================
+function buildAnalysis(question, conferences, journals, analysis) {
+  const total = conferences.length + journals.length;
+
+  if (!total) return "";
+
+  let text = `Dựa trên truy vấn "${question}", hệ thống đã phân tích và lọc ra ${total} kết quả phù hợp nhất. `;
+
+  if (analysis?.wantsCountryCode) {
+    text += "Các kết quả có xu hướng tập trung theo khu vực bạn quan tâm, giúp tăng tính liên quan thực tiễn. ";
+  }
+
+  if (analysis?.fieldHint) {
+    text += "Nội dung các hội thảo/tạp chí chủ yếu xoay quanh lĩnh vực chuyên môn được đề cập, đảm bảo độ phù hợp học thuật. ";
+  }
+
+  text += "Ngoài ra, một số lựa chọn nổi bật có deadline gần hoặc thuộc nhóm chất lượng cao, phù hợp để ưu tiên xem xét.";
+
+  return text;
 }
 
 // ================= FORMAT =================
@@ -144,27 +167,19 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
 
     conferences.forEach((c, i) => {
       const title = c.name || c.title;
+      const url = getConferenceUrl(c);
+      const badge = getBadge(i);
 
-      content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}**  
-- 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  
-`;
+      content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}** ${badge}\n`;
+
+      content += `- 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  \n`;
 
       if (c.deadline) {
         content += `- 📅 ${safe(c.deadline)}  \n`;
       }
 
-      // 🔥 explain
       content += `- ${buildExplain(c, analysis)}  \n`;
-    });
-
-    content += `\n## 🔗 Link hội thảo\n\n`;
-
-    conferences.forEach((c, i) => {
-      const title = c.name || c.title;
-      const url = getConferenceUrl(c);
-
-      content += `- **[C${i + 1}] ${safe(title)}**  
-  👉 ${url ? `[🌐 Xem CFP / Website](${url})` : "⚠️ Chưa có link"}\n\n`;
+      content += `- 🌐 ${url ? `[Xem CFP / Website](${url})` : "⚠️ Chưa có link"}\n\n`;
     });
   }
 
@@ -172,56 +187,21 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
     journals.forEach((j, i) => {
-      content += `### ${i + 1}. **[J${i + 1}] ${safe(j.title)}**  
-- 🏢 ${safe(j.publisher)}  
-- 🏆 ${safe(j.sjr_best_quartile)}  
-- 🌍 ${safe(j.country)}  
-`;
-
-      // 🔥 explain
-      content += `- ${buildExplain(j, analysis)}  \n`;
-    });
-
-    content += `\n## 🔗 Link tạp chí\n\n`;
-
-    journals.forEach((j, i) => {
       const url = getJournalUrl(j);
+      const badge = getBadge(i);
 
-      content += `- **[J${i + 1}] ${safe(j.title)}**  
-  👉 ${url ? `[Xem trên Scimago](${url})` : "Không có link"}\n\n`;
+      content += `### ${i + 1}. **[J${i + 1}] ${safe(j.title)}** ${badge}\n`;
+
+      content += `- 🏢 ${safe(j.publisher)}  \n`;
+      content += `- 🏆 ${safe(j.sjr_best_quartile)}  \n`;
+      content += `- 🌍 ${safe(j.country)}  \n`;
+
+      content += `- ${buildExplain(j, analysis)}  \n`;
+      content += `- 🌐 ${url ? `[Xem trên Scimago](${url})` : "⚠️ Không có link"}\n\n`;
     });
   }
 
   return content;
-}
-
-// ================= SUMMARY =================
-function buildSmartSummary(question, conferences, journals, analysis) {
-  const total = conferences.length + journals.length;
-
-  if (!total) return "Không tìm thấy dữ liệu phù hợp.";
-
-  let intro = "";
-
-  if (conferences.length && journals.length) {
-    intro = "Dựa trên yêu cầu của bạn, hệ thống đã phân tích và chọn ra các hội thảo và tạp chí phù hợp.";
-  } else if (conferences.length) {
-    intro = "Dựa trên yêu cầu của bạn, dưới đây là các hội thảo phù hợp.";
-  } else {
-    intro = "Dựa trên yêu cầu của bạn, dưới đây là các tạp chí phù hợp.";
-  }
-
-  let reasoning = "";
-
-  if (analysis?.wantsCountryCode) {
-    reasoning += " Kết quả được ưu tiên theo khu vực bạn quan tâm.";
-  }
-
-  if (analysis?.fieldHint) {
-    reasoning += " Các kết quả tập trung vào lĩnh vực chuyên môn liên quan.";
-  }
-
-  return `${intro}${reasoning}`;
 }
 
 // ================= MAIN =================
@@ -243,8 +223,10 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     conferences = smartSelect(sortByScore(conferences), topk);
     journals = smartSelect(sortByScore(journals), topk);
 
-    const answer = buildSmartSummary(question, conferences, journals, analysis);
-    const finalAnswer = formatFinalAnswer(answer, conferences, journals, analysis);
+    // 🔥 NEW: analysis paragraph
+    const intro = buildAnalysis(question, conferences, journals, analysis);
+
+    const finalAnswer = formatFinalAnswer(intro, conferences, journals, analysis);
 
     return {
       answer: finalAnswer,
