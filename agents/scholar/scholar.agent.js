@@ -22,7 +22,9 @@ function getConferenceUrl(c) {
     "";
 
   if (!url && (c.title || c.name)) {
-    const q = encodeURIComponent((c.title || c.name) + " conference");
+    const q = encodeURIComponent(
+      `${c.title || c.name} ${c.acronym || ""} conference ${c.city || ""}`
+    );
     url = `https://www.google.com/search?q=${q}`;
   }
 
@@ -42,6 +44,8 @@ function normalizeKey(it) {
     ""
   )
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\d{4}/g, "")
     .replace(/[^\w\s]/g, "")
     .trim();
@@ -63,6 +67,11 @@ function dedupe(items) {
   return [...map.values()];
 }
 
+// ================= SORT =================
+function sortByScore(items) {
+  return items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
+
 // ================= SMART SELECT =================
 function smartSelect(items, topk) {
   const result = [];
@@ -82,8 +91,52 @@ function smartSelect(items, topk) {
   return result;
 }
 
+// ================= 🔥 EXPLAIN =================
+function buildExplain(item, analysis) {
+  const reasons = [];
+
+  // 🎯 country match
+  if (analysis?.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
+    reasons.push("phù hợp khu vực yêu cầu");
+  }
+
+  // 🎯 field match
+  if (analysis?.fieldHint) {
+    const text = [
+      item.topics,
+      item.categories,
+      item.areas,
+      item.cfp_text
+    ].join(" ").toLowerCase();
+
+    if (text.includes(analysis.fieldHint.toLowerCase())) {
+      reasons.push("liên quan trực tiếp lĩnh vực");
+    }
+  }
+
+  // 🎯 deadline gần
+  if (item.deadline) {
+    const diff = (new Date(item.deadline) - new Date()) / (1000 * 60 * 60 * 24);
+    if (diff > 0 && diff < 60) {
+      reasons.push("deadline sắp tới");
+    }
+  }
+
+  // 🎯 journal chất lượng
+  if (item.sjr_best_quartile === "Q1") {
+    reasons.push("tạp chí chất lượng cao (Q1)");
+  }
+
+  // 🎯 fallback
+  if (!reasons.length) {
+    reasons.push("phù hợp nội dung tìm kiếm");
+  }
+
+  return `💡 ${reasons.join(", ")}`;
+}
+
 // ================= FORMAT =================
-function formatFinalAnswer(answer, conferences, journals) {
+function formatFinalAnswer(answer, conferences, journals, analysis) {
   let content = answer || "";
 
   if (conferences.length) {
@@ -94,8 +147,14 @@ function formatFinalAnswer(answer, conferences, journals) {
 
       content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}**  
 - 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  
-- 📅 ${safe(c.deadline) || "N/A"}  
 `;
+
+      if (c.deadline) {
+        content += `- 📅 ${safe(c.deadline)}  \n`;
+      }
+
+      // 🔥 explain
+      content += `- ${buildExplain(c, analysis)}  \n`;
     });
 
     content += `\n## 🔗 Link hội thảo\n\n`;
@@ -118,6 +177,9 @@ function formatFinalAnswer(answer, conferences, journals) {
 - 🏆 ${safe(j.sjr_best_quartile)}  
 - 🌍 ${safe(j.country)}  
 `;
+
+      // 🔥 explain
+      content += `- ${buildExplain(j, analysis)}  \n`;
     });
 
     content += `\n## 🔗 Link tạp chí\n\n`;
@@ -134,12 +196,32 @@ function formatFinalAnswer(answer, conferences, journals) {
 }
 
 // ================= SUMMARY =================
-function buildFastSummary(question, conferences, journals) {
+function buildSmartSummary(question, conferences, journals, analysis) {
   const total = conferences.length + journals.length;
 
   if (!total) return "Không tìm thấy dữ liệu phù hợp.";
 
-  return `Dưới đây là ${total} kết quả phù hợp với "${question}".`;
+  let intro = "";
+
+  if (conferences.length && journals.length) {
+    intro = "Dựa trên yêu cầu của bạn, hệ thống đã phân tích và chọn ra các hội thảo và tạp chí phù hợp.";
+  } else if (conferences.length) {
+    intro = "Dựa trên yêu cầu của bạn, dưới đây là các hội thảo phù hợp.";
+  } else {
+    intro = "Dựa trên yêu cầu của bạn, dưới đây là các tạp chí phù hợp.";
+  }
+
+  let reasoning = "";
+
+  if (analysis?.wantsCountryCode) {
+    reasoning += " Kết quả được ưu tiên theo khu vực bạn quan tâm.";
+  }
+
+  if (analysis?.fieldHint) {
+    reasoning += " Các kết quả tập trung vào lĩnh vực chuyên môn liên quan.";
+  }
+
+  return `${intro}${reasoning}`;
 }
 
 // ================= MAIN =================
@@ -158,16 +240,11 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let conferences = dedupe(res.conferences || []);
     let journals = dedupe(res.journals || []);
 
-    console.log("📊 BEFORE:", conferences.length, journals.length);
+    conferences = smartSelect(sortByScore(conferences), topk);
+    journals = smartSelect(sortByScore(journals), topk);
 
-    // 🔥 KHÔNG rank lại — dùng reasoningScore từ backend
-    conferences = smartSelect(conferences, topk);
-    journals = smartSelect(journals, topk);
-
-    console.log("📊 FINAL:", conferences.length, journals.length);
-
-    const answer = buildFastSummary(question, conferences, journals);
-    const finalAnswer = formatFinalAnswer(answer, conferences, journals);
+    const answer = buildSmartSummary(question, conferences, journals, analysis);
+    const finalAnswer = formatFinalAnswer(answer, conferences, journals, analysis);
 
     return {
       answer: finalAnswer,
