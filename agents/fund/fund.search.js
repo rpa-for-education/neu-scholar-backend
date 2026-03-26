@@ -9,7 +9,7 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
@@ -25,7 +25,6 @@ function getCache(map, key, ttl) {
     return null;
   }
 
-  // 🔥 LRU
   map.delete(key);
   map.set(key, item);
 
@@ -75,37 +74,6 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= FILTER =================
-function buildFilter(year) {
-  const now = Date.now();
-
-  if (year) {
-    const start = new Date(`${year}-01-01`).getTime();
-    const end = new Date(`${year}-12-31`).getTime();
-
-    return {
-      must: [
-        {
-          key: "deadline_ts",
-          range: {
-            gte: Math.max(now, start),
-            lte: end,
-          },
-        },
-      ],
-    };
-  }
-
-  return {
-    must: [
-      {
-        key: "deadline_ts",
-        range: { gte: now },
-      },
-    ],
-  };
-}
-
 // ================= SAFE KEY =================
 function buildKey(r) {
   return (
@@ -119,7 +87,6 @@ export async function searchFund(query, topk = 5) {
   try {
     const normalized = normalizeQuery(query);
 
-    // 🔥 guard query rác
     if (!normalized || normalized.length < 2) return [];
 
     const limit = safeTopk(topk);
@@ -132,8 +99,6 @@ export async function searchFund(query, topk = 5) {
 
     // ================= EMBED =================
     const embedQuery = cleanQueryForEmbed(normalized);
-
-    // 🔥 tránh embed rỗng (VD: chỉ có "2025")
     if (!embedQuery) return [];
 
     let vector = getCache(EMBED_CACHE, embedQuery, EMBED_TTL);
@@ -145,20 +110,28 @@ export async function searchFund(query, topk = 5) {
       setCache(EMBED_CACHE, embedQuery, vector, MAX_EMBED_CACHE);
     }
 
-    const filter = buildFilter(year);
-
     // ================= SEARCH =================
-    const result = await withTimeout(
+    let result = await withTimeout(
       qdrantClient.search(COLLECTION, {
         vector,
-        limit: limit * 2,
+        limit: limit * 3, // 🔥 tăng recall
         with_payload: true,
         with_vector: false,
-        score_threshold: 0.2,
-        filter,
+        score_threshold: 0.05, // 🔥 giảm threshold
+        // ❌ bỏ filter cứng
       }),
       TIMEOUT
     ).catch(() => []);
+
+    // ================= FALLBACK (QUAN TRỌNG) =================
+    if (!result || result.length === 0) {
+      result = await qdrantClient.search(COLLECTION, {
+        vector,
+        limit: limit * 3,
+        with_payload: true,
+        with_vector: false,
+      }).catch(() => []);
+    }
 
     // ================= NORMALIZE + DEDUP =================
     const map = new Map();
@@ -177,7 +150,22 @@ export async function searchFund(query, topk = 5) {
       }
     }
 
-    const finalResult = Array.from(map.values()).slice(0, limit);
+    let finalResult = Array.from(map.values());
+
+    // ================= SOFT YEAR FILTER =================
+    if (year) {
+      const filtered = finalResult.filter(r => {
+        const d = new Date(r.payload?.deadline);
+        return !isNaN(d) && d.getUTCFullYear() === year;
+      });
+
+      // 🔥 nếu filter ra rỗng → giữ lại original
+      if (filtered.length) {
+        finalResult = filtered;
+      }
+    }
+
+    finalResult = finalResult.slice(0, limit);
 
     setCache(CACHE, cacheKey, finalResult);
 

@@ -14,6 +14,14 @@ function safe(x) {
   return String(x);
 }
 
+// ================= CHECK VALUE =================
+function hasValue(v) {
+  if (v === null || v === undefined) return false;
+  if (typeof v === "string" && v.trim() === "") return false;
+  if (Array.isArray(v) && v.length === 0) return false;
+  return true;
+}
+
 // ================= NORMALIZE =================
 function normalizeText(str) {
   return (str || "")
@@ -90,7 +98,7 @@ function getBadge(index) {
   return "";
 }
 
-// ================= 🔥 FIELD MATCH =================
+// ================= FIELD MATCH =================
 function fieldMatch(item, fieldHint) {
   const field = normalizeText(fieldHint);
 
@@ -115,7 +123,7 @@ function fieldMatch(item, fieldHint) {
   return score;
 }
 
-// ================= 🔥 EXPLAIN =================
+// ================= EXPLAIN =================
 function buildExplain(item, analysis) {
   const reasons = [];
   const now = Date.now();
@@ -123,46 +131,29 @@ function buildExplain(item, analysis) {
   const deadline = safeTime(item.deadline);
   const start = safeTime(item.start_date);
 
-  // ===== DEADLINE =====
   if (deadline) {
     const diff = (deadline - now) / (1000 * 60 * 60 * 24);
 
-    if (diff > 0 && diff < 14) {
-      reasons.push("🔥 Sắp hết hạn nộp bài");
-    } else if (diff > 0 && diff < 60) {
-      reasons.push("⏳ Còn hạn nộp bài");
-    } else if (diff > 60) {
-      reasons.push("📢 Đang mở nhận bài");
-    } else if (diff < 0 && diff > -30) {
-      reasons.push("⚠️ Vừa hết hạn");
-    } else if (diff < -30) {
-      reasons.push("❌ Đã hết hạn");
-    }
+    if (diff > 0 && diff < 14) reasons.push("🔥 Sắp hết hạn nộp bài");
+    else if (diff > 0 && diff < 60) reasons.push("⏳ Còn hạn nộp bài");
+    else if (diff > 60) reasons.push("📢 Đang mở nhận bài");
+    else if (diff < 0 && diff > -30) reasons.push("⚠️ Vừa hết hạn");
+    else if (diff < -30) reasons.push("❌ Đã hết hạn");
   }
 
-  // ===== EVENT =====
   if (start) {
     const diff = (start - now) / (1000 * 60 * 60 * 24);
-
-    if (diff > 0 && diff < 30) {
-      reasons.push("📅 Sắp diễn ra");
-    }
+    if (diff > 0 && diff < 30) reasons.push("📅 Sắp diễn ra");
   }
 
-  // ===== FIELD =====
-  if (analysis?.fieldHint) {
-    const score = fieldMatch(item, analysis.fieldHint);
-    if (score > 0) {
-      reasons.push("🎯 Đúng lĩnh vực");
-    }
+  if (analysis?.fieldHint && fieldMatch(item, analysis.fieldHint) > 0) {
+    reasons.push("🎯 Đúng lĩnh vực");
   }
 
-  // ===== QUALITY =====
   if (item.sjr_best_quartile === "Q1") {
     reasons.push("🏆 Q1 (chất lượng cao)");
   }
 
-  // ===== COUNTRY =====
   if (analysis?.wantsCountryCode) {
     const itemCountry = normalizeCountry(item.country);
     const target = normalizeCountry(analysis.wantsCountryCode);
@@ -208,6 +199,7 @@ function buildAnalysis(question, conferences, journals, analysis) {
 function formatFinalAnswer(answer, conferences, journals, analysis) {
   let content = answer || "";
 
+  // ===== CONFERENCES =====
   if (conferences.length) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
@@ -217,21 +209,27 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
       const badge = getBadge(i);
 
       content += `### ${i + 1}. **[C${i + 1}] ${safe(title)}** ${badge}\n`;
-      content += `- 📍 ${[c.city, c.country].filter(Boolean).join(", ") || "N/A"}  \n`;
 
-      if (c.deadline) {
+      const location = [c.city, c.country].filter(hasValue).join(", ");
+      if (location) content += `- 📍 ${location}  \n`;
+
+      if (hasValue(c.deadline)) {
         content += `- ⏳ Deadline: ${safe(c.deadline)}  \n`;
       }
 
-      if (c.start_date) {
+      if (hasValue(c.start_date)) {
         content += `- 📅 Event: ${safe(c.start_date)}  \n`;
       }
 
       content += `- ${buildExplain(c, analysis)}  \n`;
-      content += `- 🌐 ${url ? `[Xem CFP / Website](${url})` : "⚠️ Chưa có link"}\n\n`;
+
+      if (hasValue(url)) {
+        content += `- 🌐 [Xem CFP / Website](${url})\n\n`;
+      }
     });
   }
 
+  // ===== JOURNALS =====
   if (journals.length) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
@@ -240,12 +238,24 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
       const badge = getBadge(i);
 
       content += `### ${i + 1}. **[J${i + 1}] ${safe(j.title)}** ${badge}\n`;
-      content += `- 🏢 ${safe(j.publisher)}  \n`;
-      content += `- 🏆 ${safe(j.sjr_best_quartile)}  \n`;
-      content += `- 🌍 ${safe(j.country)}  \n`;
+
+      if (hasValue(j.publisher)) {
+        content += `- 🏢 ${safe(j.publisher)}  \n`;
+      }
+
+      if (hasValue(j.sjr_best_quartile)) {
+        content += `- 🏆 ${safe(j.sjr_best_quartile)}  \n`;
+      }
+
+      if (hasValue(j.country)) {
+        content += `- 🌍 ${safe(j.country)}  \n`;
+      }
 
       content += `- ${buildExplain(j, analysis)}  \n`;
-      content += `- 🌐 ${url ? `[Xem trên Scimago](${url})` : "⚠️ Không có link"}\n\n`;
+
+      if (hasValue(url)) {
+        content += `- 🌐 [Xem trên Scimago](${url})\n\n`;
+      }
     });
   }
 
