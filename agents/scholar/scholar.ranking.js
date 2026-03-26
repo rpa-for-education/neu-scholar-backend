@@ -1,28 +1,23 @@
 // =========================================
-// 🔥 HYBRID RANKING SYSTEM (FINAL)
+// 🔥 HYBRID RANKING SYSTEM (NO LLM - FINAL)
 // BM25-lite + Semantic + Intent + Recency
-// + SAFE LLM RERANK (NO DATA LOSS)
 // =========================================
-
-import { callLLM } from "../shared/llm.js";
 
 // ================= CONFIG =================
 const WEIGHTS = {
-  vector: 0.4,
+  vector: 0.5,   // 🔥 tăng vì bỏ LLM
   keyword: 0.25,
-  intent: 0.2,
-  recency: 0.1,
-  quality: 0.05
+  intent: 0.15,
+  recency: 0.07,
+  quality: 0.03
 };
 
-// ================= NORMALIZE =================
+// ================= NORMALIZE (FAST) =================
 function normalize(text) {
   if (!text) return "";
 
   return text
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -41,7 +36,7 @@ function keywordScore(item, queryWords) {
     item.topics,
     item.categories,
     item.areas,
-    item.cfp_text,   // 🔥 quan trọng nhất
+    item.cfp_text,
     item.city,
     item.country
   ].join(" "));
@@ -61,19 +56,17 @@ function keywordScore(item, queryWords) {
 function intentScore(item, analysis) {
   let score = 0;
 
-  // 🎯 NEU boost
-  if (analysis?.isNEU) {
+  // 🎯 FIX NEU (quan trọng)
+  if (analysis?.location?.name === "NEU") {
     if ((item.organizer || "").toLowerCase().includes("kinh tế quốc dân")) {
       score += 1;
     }
   }
 
-  // 🎯 country
   if (analysis?.wantsCountryCode && item.country_code === analysis.wantsCountryCode) {
     score += 0.5;
   }
 
-  // 🎯 field
   if (analysis?.fieldHint) {
     const text = normalize([
       item.topics,
@@ -94,8 +87,8 @@ function recencyScore(item) {
   const dateStr = item.deadline || item.start_date;
   if (!dateStr) return 0;
 
-  const now = new Date();
-  const d = new Date(dateStr);
+  const now = Date.now();
+  const d = new Date(dateStr).getTime();
 
   const diff = (d - now) / (1000 * 60 * 60 * 24);
 
@@ -152,7 +145,6 @@ export function smartFilter(items) {
 
   const topScore = items[0]?.finalScore || 0;
 
-  // 🔥 tránh giữ quá nhiều item
   const threshold = Math.max(topScore * 0.4, 0.15);
 
   const filtered = items.filter(it => it.finalScore >= threshold);
@@ -160,68 +152,4 @@ export function smartFilter(items) {
   if (!filtered.length) return items.slice(0, 5);
 
   return filtered;
-}
-
-// =========================================
-// 🔥 SAFE LLM RERANK (KHÔNG BAO GIỜ MẤT DATA)
-// =========================================
-
-function buildRerankPrompt(question, items) {
-  let text = `Bạn là AI chọn lọc học thuật.
-
-Chọn ra 5 mục phù hợp nhất với câu hỏi.
-
-Chỉ trả về danh sách index (không giải thích).
-Format: 0,2,4,...
-
-Câu hỏi: ${question}
-
-Danh sách:
-`;
-
-  items.forEach((it, i) => {
-    const title = it.name || it.title;
-    const extra = it.topics || it.categories || "";
-
-    text += `[${i}] ${title} | ${extra}\n`;
-  });
-
-  return text;
-}
-
-function parseIndexes(output, max) {
-  if (!output) return [];
-
-  return output
-    .split(/[, \n]/)
-    .map(x => parseInt(x))
-    .filter(x => !isNaN(x) && x >= 0 && x < max);
-}
-
-// ================= MAIN RERANK =================
-export async function rerankWithLLM(items, question, topk = 5) {
-  if (!items.length) return [];
-
-  try {
-    const slice = items.slice(0, 10);
-
-    const prompt = buildRerankPrompt(question, slice);
-
-    const res = await callLLM(prompt);
-    const text = res?.answer || "";
-
-    const indexes = parseIndexes(text, slice.length);
-
-    // 🔥 fallback nếu LLM fail
-    if (!indexes.length) {
-      console.warn("⚠️ rerank empty → fallback");
-      return slice.slice(0, topk);
-    }
-
-    return indexes.map(i => slice[i]).slice(0, topk);
-
-  } catch (err) {
-    console.warn("⚠️ rerank fail:", err.message);
-    return items.slice(0, topk);
-  }
 }

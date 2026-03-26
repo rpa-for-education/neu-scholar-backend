@@ -1,15 +1,11 @@
 import { runAgent } from "./scholar.agent.js";
-import { callLLM } from "../shared/llm.js";
-import { getSessionHistory, addToHistory } from "../../middlewares/session.js";
-import { buildScholarPrompt } from "./scholar.prompt.js";
+import { addToHistory } from "../../middlewares/session.js";
 
 export async function runScholarAgent(req, question, model_id, topk) {
   const start = Date.now();
 
   try {
-    const history = getSessionHistory(req) || [];
-
-    // 🔍 Step 1: search
+    // ================= SEARCH =================
     const result = await runAgent(question, topk);
 
     const conferences = result?.conferences || [];
@@ -17,49 +13,58 @@ export async function runScholarAgent(req, question, model_id, topk) {
 
     console.log("📊 SEARCH:", conferences.length, journals.length);
 
-    // ❌ Không có dữ liệu → STOP luôn
+    // ================= NO DATA =================
     if (!conferences.length && !journals.length) {
       return {
         answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
         conferences: [],
         journals: [],
-        sources: [], // 🔥 FIX
+        sources: [],
         domain: "empty",
         responseTimeMs: Date.now() - start
       };
     }
 
-    // 🧠 Step 2: build prompt
-    const prompt = buildScholarPrompt(
-      question,
-      conferences,
-      journals,
-      history
-    );
+    // ================= 🔥 SMART ANSWER =================
+    const total = conferences.length + journals.length;
 
-    // 🤖 Step 3: call LLM
-    let answer = "";
+    let answer = result?.answer || "";
 
-    try {
-      const llm = await callLLM(prompt, model_id);
-      answer = llm?.answer || llm?.response || "";
-    } catch (err) {
-      console.error("❌ LLM error:", err.message);
+    if (!answer || answer.length < 10) {
+      if (conferences.length && journals.length) {
+        answer = `Tìm thấy ${total} kết quả phù hợp gồm hội thảo và tạp chí liên quan đến "${question}".`;
+      } else if (conferences.length) {
+        answer = `Tìm thấy ${conferences.length} hội thảo phù hợp với "${question}".`;
+      } else {
+        answer = `Tìm thấy ${journals.length} tạp chí phù hợp với "${question}".`;
+      }
     }
 
-    // 🔥 fallback nếu LLM fail
-    if (!answer || answer.trim().length < 10) {
-      answer =
-        "Tôi đã tìm thấy một số hội thảo/tạp chí liên quan. Bạn có thể tham khảo danh sách bên dưới.";
+    // ================= URL HELPER =================
+    function buildConferenceUrl(c) {
+      return (
+        c.url ||
+        c.link ||
+        c.website ||
+        (c.title || c.name
+          ? `https://www.google.com/search?q=${encodeURIComponent(
+              `${c.title || c.name} ${c.acronym || ""} conference ${c.city || ""}`
+            )}`
+          : "")
+      );
     }
 
-    // 🔥 BUILD SOURCES (QUAN TRỌNG NHẤT)
+    function buildJournalUrl(j) {
+      return j.url || j.scimago_link || "";
+    }
+
+    // ================= BUILD SOURCES =================
     const sources = [
       ...conferences.map((c, i) => ({
         id: `C${i + 1}`,
         type: "conference",
-        title: c.title,
-        url: c.url,
+        title: c.name || c.title,
+        url: buildConferenceUrl(c),
         metadata: {
           country: c.country,
           city: c.city,
@@ -70,7 +75,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
         id: `J${i + 1}`,
         type: "journal",
         title: j.title,
-        url: j.url,
+        url: buildJournalUrl(j),
         metadata: {
           quartile: j.sjr_best_quartile,
           publisher: j.publisher,
@@ -80,7 +85,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
 
     console.log("📦 SOURCES:", sources.length);
 
-    // 💾 lưu history
+    // ================= SAVE HISTORY =================
     try {
       addToHistory(req, question, answer);
     } catch {
@@ -91,7 +96,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
       answer,
       conferences,
       journals,
-      sources, // 🔥 FIX QUAN TRỌNG
+      sources,
       domain: result?.domain || "general",
       responseTimeMs: Date.now() - start
     };
@@ -103,7 +108,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
       answer: "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
       conferences: [],
       journals: [],
-      sources: [], // 🔥 FIX
+      sources: [],
       domain: "error",
       responseTimeMs: Date.now() - start
     };

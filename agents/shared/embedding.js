@@ -1,15 +1,14 @@
 // ./shared/embedding.js
 
-const TIMEOUT = 2500; // 🔥 giảm mạnh
+const TIMEOUT = 2500;
 const MAX_RETRIES = 1;
 const CACHE_TTL = 1000 * 60 * 30; // 30 phút
 
 // ================= CACHE =================
 const CACHE = new Map();
-
-// 🔥 NEW: in-flight dedupe
 const INFLIGHT = new Map();
 
+// ================= CACHE =================
 function getCache(key) {
   const item = CACHE.get(key);
   if (!item) return null;
@@ -44,36 +43,50 @@ function getMode() {
 }
 
 // ================= BUILD REQUEST =================
-function buildRequest(text) {
+function buildRequest(input) {
   const base = process.env.OLLAMA_BASE_URL;
   const model = process.env.OLLAMA_EMBEDDING_MODEL;
-
   const mode = getMode();
+
+  // 🔥 batch support
+  const isBatch = Array.isArray(input);
 
   if (mode === "auto") {
     if (base.includes("/ollama")) {
       return {
         url: `${base}/api/embed`,
-        body: { model, input: text },
+        body: {
+          model,
+          input: isBatch ? input : input,
+        },
       };
     }
 
     return {
       url: `${base}/api/embeddings`,
-      body: { model, prompt: text },
+      body: {
+        model,
+        prompt: isBatch ? input.join("\n") : input,
+      },
     };
   }
 
   if (mode === "proxy") {
     return {
       url: `${base}/api/embed`,
-      body: { model, input: text },
+      body: {
+        model,
+        input: isBatch ? input : input,
+      },
     };
   }
 
   return {
     url: `${base}/api/embeddings`,
-    body: { model, prompt: text },
+    body: {
+      model,
+      prompt: isBatch ? input.join("\n") : input,
+    },
   };
 }
 
@@ -87,18 +100,16 @@ function parseEmbedding(data) {
   );
 }
 
-// ================= MAIN =================
+// ================= SINGLE EMBED =================
 export async function embed(text) {
   if (!text || !text.trim()) return null;
 
   const normalized = normalizeText(text);
   const cacheKey = `embed:${normalized}`;
 
-  // ================= CACHE HIT =================
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
-  // ================= 🔥 INFLIGHT DEDUPE =================
   if (INFLIGHT.has(cacheKey)) {
     return INFLIGHT.get(cacheKey);
   }
@@ -133,7 +144,6 @@ export async function embed(text) {
           throw new Error("Invalid embedding");
         }
 
-        // ================= SAVE CACHE =================
         setCache(cacheKey, vector);
 
         return vector;
@@ -147,7 +157,7 @@ export async function embed(text) {
         );
 
         if (attempt < MAX_RETRIES) {
-          await sleep(200); // 🔥 retry nhanh
+          await sleep(200);
         }
       }
     }
@@ -157,13 +167,78 @@ export async function embed(text) {
     return null;
   })();
 
-  // lưu inflight
   INFLIGHT.set(cacheKey, task);
 
   try {
-    const result = await task;
-    return result;
+    return await task;
   } finally {
     INFLIGHT.delete(cacheKey);
   }
+}
+
+// ================= 🚀 BATCH EMBED =================
+export async function embedBatch(texts = []) {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+
+  const normalizedList = texts
+    .map(normalizeText)
+    .filter(Boolean);
+
+  const results = new Array(normalizedList.length);
+  const toFetch = [];
+  const mapIndex = [];
+
+  // ================= CACHE CHECK =================
+  normalizedList.forEach((text, i) => {
+    const cacheKey = `embed:${text}`;
+    const cached = getCache(cacheKey);
+
+    if (cached) {
+      results[i] = cached;
+    } else {
+      toFetch.push(text);
+      mapIndex.push(i);
+    }
+  });
+
+  if (!toFetch.length) return results;
+
+  try {
+    const { url, body } = buildRequest(toFetch);
+
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), TIMEOUT);
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(id);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    const embeddings =
+      data?.embeddings ||
+      data?.data?.map(d => d.embedding) ||
+      [];
+
+    embeddings.forEach((vec, idx) => {
+      const i = mapIndex[idx];
+      const text = normalizedList[i];
+
+      results[i] = vec;
+
+      setCache(`embed:${text}`, vec);
+    });
+
+  } catch (err) {
+    console.error("❌ batch embed failed:", err.message);
+  }
+
+  return results;
 }

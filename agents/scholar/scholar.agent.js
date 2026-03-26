@@ -1,9 +1,5 @@
 import { searchConferenceJournalByVector } from "./scholar.search.js";
-import { callLLM } from "../shared/llm.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
-
-// 🔥 dùng ranking đã gộp
-import { rankItems, smartFilter, rerankWithLLM } from "./scholar.ranking.js";
 
 const MAX_CANDIDATES = 15;
 const FINAL_TOPK = 5;
@@ -16,7 +12,7 @@ function safe(x) {
   return String(x);
 }
 
-// ================= 🔥 URL FIX FULL =================
+// ================= URL =================
 function getConferenceUrl(c) {
   let url =
     c.url ||
@@ -25,7 +21,6 @@ function getConferenceUrl(c) {
     c.cfp_link ||
     "";
 
-  // 🔥 fallback nếu không có link
   if (!url && (c.title || c.name)) {
     const q = encodeURIComponent((c.title || c.name) + " conference");
     url = `https://www.google.com/search?q=${q}`;
@@ -38,18 +33,26 @@ function getJournalUrl(j) {
   return j.scimago_link || j.url || "";
 }
 
-// ================= 🔥 FIXED DEDUPE =================
+// ================= NORMALIZE =================
+function normalizeKey(it) {
+  return (
+    it.title ||
+    it.name ||
+    it.acronym ||
+    ""
+  )
+    .toLowerCase()
+    .replace(/\d{4}/g, "")
+    .replace(/[^\w\s]/g, "")
+    .trim();
+}
+
+// ================= DEDUPE =================
 function dedupe(items) {
   const map = new Map();
 
   for (const it of items) {
-    const key = (
-      it.title ||
-      it.name ||
-      it.acronym ||
-      ""
-    ).toLowerCase();
-
+    const key = normalizeKey(it);
     if (!key) continue;
 
     if (!map.has(key)) {
@@ -60,29 +63,29 @@ function dedupe(items) {
   return [...map.values()];
 }
 
-// ================= SAFE RERANK =================
-async function safeRerank(items, question, topk) {
-  try {
-    const r = await rerankWithLLM(items, question, topk);
+// ================= SMART SELECT =================
+function smartSelect(items, topk) {
+  const result = [];
+  const used = new Set();
 
-    if (!r || !r.length) {
-      console.warn("⚠️ rerank empty → fallback");
-      return items.slice(0, topk);
-    }
+  for (const it of items) {
+    const key = normalizeKey(it);
 
-    return r;
+    if (used.has(key)) continue;
 
-  } catch (err) {
-    console.warn("⚠️ rerank fail → fallback:", err.message);
-    return items.slice(0, topk);
+    result.push(it);
+    used.add(key);
+
+    if (result.length >= topk) break;
   }
+
+  return result;
 }
 
 // ================= FORMAT =================
 function formatFinalAnswer(answer, conferences, journals) {
   let content = answer || "";
 
-  // ===== CONFERENCE =====
   if (conferences.length) {
     content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
 
@@ -106,7 +109,6 @@ function formatFinalAnswer(answer, conferences, journals) {
     });
   }
 
-  // ===== JOURNAL =====
   if (journals.length) {
     content += `\n## 📚 Tạp chí liên quan\n\n`;
 
@@ -131,6 +133,15 @@ function formatFinalAnswer(answer, conferences, journals) {
   return content;
 }
 
+// ================= SUMMARY =================
+function buildFastSummary(question, conferences, journals) {
+  const total = conferences.length + journals.length;
+
+  if (!total) return "Không tìm thấy dữ liệu phù hợp.";
+
+  return `Dưới đây là ${total} kết quả phù hợp với "${question}".`;
+}
+
 // ================= MAIN =================
 export async function runAgent(question, topk = FINAL_TOPK) {
   const start = Date.now();
@@ -139,7 +150,6 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
 
-    // 🔍 SEARCH
     const res = await searchConferenceJournalByVector({
       question,
       topk: MAX_CANDIDATES,
@@ -148,48 +158,16 @@ export async function runAgent(question, topk = FINAL_TOPK) {
     let conferences = dedupe(res.conferences || []);
     let journals = dedupe(res.journals || []);
 
-    console.log("📊 BEFORE RANK:", conferences.length, journals.length);
+    console.log("📊 BEFORE:", conferences.length, journals.length);
 
-    // ===== RANK =====
-    conferences = smartFilter(rankItems(conferences, question, analysis));
-    journals = smartFilter(rankItems(journals, question, analysis));
+    // 🔥 KHÔNG rank lại — dùng reasoningScore từ backend
+    conferences = smartSelect(conferences, topk);
+    journals = smartSelect(journals, topk);
 
-    console.log("📊 AFTER RANK:", conferences.length, journals.length);
+    console.log("📊 FINAL:", conferences.length, journals.length);
 
-    // ===== SAFE RERANK =====
-    conferences = await safeRerank(conferences, question, topk);
-    journals = await safeRerank(journals, question, topk);
-
-    console.log("📊 AFTER RERANK:", conferences.length, journals.length);
-
-    // ================= 🔥 LLM SUMMARY (NÂNG CẤP) =================
-    let answer = "";
-
-    try {
-      const llm = await callLLM(`
-Bạn là trợ lý học thuật.
-
-Hãy trả lời NGẮN GỌN nhưng CÓ GIÁ TRỊ:
-- 2–4 câu
-- Nêu rõ lĩnh vực hội thảo
-- Có thông tin cụ thể (quốc gia, xu hướng)
-- KHÔNG nói chung chung
-
-Câu hỏi: ${question}
-      `);
-
-      answer = llm?.answer || "";
-    } catch {
-      console.warn("⚠️ summary fail");
-    }
-
-    if (!answer || answer.length > 500) {
-      answer = "Dưới đây là các hội thảo và tạp chí phù hợp với yêu cầu của bạn.";
-    }
-
+    const answer = buildFastSummary(question, conferences, journals);
     const finalAnswer = formatFinalAnswer(answer, conferences, journals);
-
-    console.log("✅ FINAL ANSWER OK");
 
     return {
       answer: finalAnswer,

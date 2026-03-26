@@ -5,18 +5,16 @@ import {
   analyzeQuestion
 } from "./agentReasoning.js";
 
+import { embedBatch } from "../shared/embedding.js";
+
 import "dotenv/config";
 
 // ================= CONFIG =================
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
-const EMBED_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:8b";
+const MAX_LIMIT = 20;
 
 // ================= CACHE =================
-const EMBED_CACHE = new Map();
 const QUERY_CACHE = new Map();
-
-const EMBED_TTL = 1000 * 60 * 60; // 1h
-const QUERY_TTL = 1000 * 60 * 5;  // 5 min
+const QUERY_TTL = 1000 * 60 * 5;
 
 // ================= CLEAN =================
 function cleanQuery(q) {
@@ -37,38 +35,6 @@ function normalizeSemantic(q) {
     .replace(/hội thảo/g, "conference")
     .replace(/quốc tế/g, "international")
     .replace(/tạp chí/g, "journal");
-}
-
-// ================= EMBED (CÓ CACHE) =================
-async function embed(text) {
-  const key = text.toLowerCase();
-
-  const cached = EMBED_CACHE.get(key);
-  if (cached && Date.now() - cached.time < EMBED_TTL) {
-    return cached.value;
-  }
-
-  try {
-    const res = await axios.post(`${OLLAMA_BASE}/api/embed`, {
-      model: EMBED_MODEL,
-      input: text,
-    });
-
-    const vec = res.data?.embeddings?.[0];
-
-    if (vec) {
-      EMBED_CACHE.set(key, {
-        value: vec,
-        time: Date.now()
-      });
-    }
-
-    return vec;
-
-  } catch (err) {
-    console.error("❌ embed error:", err.message);
-    return null;
-  }
 }
 
 // ================= DEDUPE =================
@@ -114,7 +80,7 @@ export async function searchConferenceJournalByVector({
   try {
     console.log("🧠 Query:", question);
 
-    // ================= QUERY CACHE =================
+    // ================= CACHE =================
     const cacheKey = question.toLowerCase();
 
     const cached = QUERY_CACHE.get(cacheKey);
@@ -138,35 +104,33 @@ export async function searchConferenceJournalByVector({
 
     const queries = [question, cleaned, semantic];
 
+    // ================= 🚀 BATCH EMBEDDING =================
+    const vectors = await embedBatch(queries);
+
     let results = [];
 
-    // ================= 🚀 PARALLEL SEARCH =================
+    // ================= SEARCH =================
     const tasks = [];
 
     for (const col of collections) {
-      for (const q of queries) {
+      for (let i = 0; i < vectors.length; i++) {
+        const vector = vectors[i];
+        if (!vector) continue;
+
         tasks.push(
-          (async () => {
-            const vector = await embed(q);
-            if (!vector) return [];
-
-            try {
-              const res = await qdrant.search(col, {
-                vector,
-                limit: topk * 3, // 🔥 giảm load
-                with_payload: true,
-              });
-
-              return res.map(r => ({
-                ...r.payload,
-                _score: r.score
-              }));
-
-            } catch (err) {
-              console.warn(`⚠️ skip ${col}:`, err.message);
-              return [];
-            }
-          })()
+          qdrant.search(col, {
+            vector,
+            limit: Math.min(topk * 3, MAX_LIMIT),
+            with_payload: true,
+          }).then(res =>
+            res.map(r => ({
+              ...r.payload,
+              _score: r.score
+            }))
+          ).catch(err => {
+            console.warn(`⚠️ skip ${col}:`, err.message);
+            return [];
+          })
         );
       }
     }
@@ -176,7 +140,6 @@ export async function searchConferenceJournalByVector({
 
     console.log("📊 Raw results:", results.length);
 
-    // ================= NO DATA =================
     if (!results.length) {
       return {
         domain,
@@ -240,7 +203,6 @@ export async function searchConferenceJournalByVector({
       journals: finalJournals,
     };
 
-    // ================= SAVE CACHE =================
     QUERY_CACHE.set(cacheKey, {
       value: finalResult,
       time: Date.now()
