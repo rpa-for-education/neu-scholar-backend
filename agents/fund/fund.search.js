@@ -1,3 +1,5 @@
+// fund.search.js - FINAL FIX (NO MISS RESULT)
+
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
 import { getDb } from "../../db/mongo.js";
@@ -9,7 +11,7 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v6";
+const CACHE_VERSION = "v9";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
@@ -48,16 +50,12 @@ function normalizeQuery(query) {
     .replace(/\s+/g, " ");
 }
 
-// 🔥 MULTILINGUAL
 function expandQuery(q) {
   const map = {
-    "quỹ": "fund grant funding",
+    "quỹ": "fund grant funding nafosted",
     "nghiên cứu": "research science project",
-    "việt nam": "vietnam vietnamese nafosted",
-    "tài trợ": "grant funding sponsor",
-    "học bổng": "scholarship fellowship",
-    "công nghệ": "technology innovation",
-    "ai": "artificial intelligence",
+    "việt nam": "vietnam nafosted",
+    "nafosted": "nafosted vietnam foundation science",
   };
 
   let expanded = q;
@@ -76,8 +74,7 @@ function cleanQueryForEmbed(q) {
 }
 
 function safeTopk(topk) {
-  const n = Number(topk);
-  return n && n > 0 ? n : 5;
+  return Number(topk) || 5;
 }
 
 function extractYear(query) {
@@ -99,22 +96,52 @@ async function keywordSearch(query, limit) {
   try {
     const db = await getDb();
 
+    const words = query.split(/\s+/).filter(Boolean);
+
     const docs = await db.collection("fund")
-      .find({ $text: { $search: query } })
-      .limit(limit)
+      .find({
+        $or: words.map(w => ({
+          $or: [
+            { "OPPORTUNITY TITLE": { $regex: w, $options: "i" } },
+            { "AGENCY NAME": { $regex: w, $options: "i" } },
+            { "FUNDING DESCRIPTION": { $regex: w, $options: "i" } }
+          ]
+        }))
+      })
+      .limit(limit * 3)
       .toArray();
 
-    return docs.map(d => ({
-      payload: {
-        title: d["OPPORTUNITY TITLE"],
-        agency: d["AGENCY NAME"],
-        text: d["FUNDING DESCRIPTION"],
-        deadline: d["ESTIMATED APPLICATION DUE DATE"],
-        amount: d["ESTIMATED TOTAL FUNDING"],
-        url: d["OPPORTUNITY URL"] || d["URL"]
-      },
-      score: 0.2
-    }));
+    const scored = docs.map(d => {
+      const text = (
+        (d["OPPORTUNITY TITLE"] || "") +
+        " " +
+        (d["AGENCY NAME"] || "") +
+        " " +
+        (d["FUNDING DESCRIPTION"] || "")
+      ).toLowerCase();
+
+      let hit = 0;
+
+      for (const w of words) {
+        if (text.includes(w)) hit++;
+      }
+
+      return {
+        payload: {
+          title: d["OPPORTUNITY TITLE"],
+          agency: d["AGENCY NAME"],
+          text: d["FUNDING DESCRIPTION"],
+          deadline: d["ESTIMATED APPLICATION DUE DATE"],
+          amount: d["ESTIMATED TOTAL FUNDING"],
+          url: d["OPPORTUNITY URL"] || d["URL"]
+        },
+        score: 0.2 + hit * 0.15
+      };
+    });
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
 
   } catch {
     return [];
@@ -128,7 +155,6 @@ function mergeResults(vector, keyword) {
   vector.forEach(r => {
     const key = r.id || r.payload?.title;
     if (!key) return;
-
     map.set(key, { ...r });
   });
 
@@ -137,7 +163,7 @@ function mergeResults(vector, keyword) {
     if (!key) return;
 
     if (map.has(key)) {
-      map.get(key).score += 0.15;
+      map.get(key).score += 0.2;
     } else {
       map.set(key, r);
     }
@@ -162,38 +188,47 @@ export async function searchFund(query, topk = 5) {
     const cached = getCache(CACHE, cacheKey, CACHE_TTL);
     if (cached) return cached;
 
-    // ================= EMBED =================
     const embedQuery = cleanQueryForEmbed(expandedQuery);
 
     let vector = getCache(EMBED_CACHE, embedQuery, EMBED_TTL);
 
     if (!vector) {
       vector = await withTimeout(embed(embedQuery), 1200).catch(() => null);
-      if (!vector) return [];
 
-      setCache(EMBED_CACHE, embedQuery, vector, MAX_EMBED_CACHE);
+      if (vector) {
+        setCache(EMBED_CACHE, embedQuery, vector, MAX_EMBED_CACHE);
+      }
     }
 
-    // ================= VECTOR =================
-    const vectorResults = await withTimeout(
-      qdrantClient.search(COLLECTION, {
-        vector,
-        limit: limit * 3,
-        with_payload: true,
-        score_threshold: 0.05,
-      }),
-      TIMEOUT
-    ).catch(() => []);
+    let vectorResults = [];
 
-    // ================= KEYWORD =================
-    const keywordResults = await keywordSearch(expandedQuery, limit);
+    if (vector) {
+      vectorResults = await withTimeout(
+        qdrantClient.search(COLLECTION, {
+          vector,
+          limit: limit * 3,
+          with_payload: true,
+          score_threshold: 0.05,
+        }),
+        TIMEOUT
+      ).catch(() => []);
+    }
 
-    // ================= MERGE =================
+    // 🔥 FIX QUAN TRỌNG
+    const keywordResults = await keywordSearch(normalized, limit * 2);
+
     let merged = mergeResults(vectorResults, keywordResults);
+
+    // 🔥 đảm bảo đủ kết quả
+    if (merged.length < limit && keywordResults.length) {
+      const extra = keywordResults.filter(
+        k => !merged.some(m => m.payload?.title === k.payload?.title)
+      );
+      merged.push(...extra.slice(0, limit));
+    }
 
     if (!merged.length) return [];
 
-    // ================= YEAR FILTER =================
     if (year) {
       const filtered = merged.filter(r => {
         const d = new Date(r.payload?.deadline);

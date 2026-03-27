@@ -1,3 +1,4 @@
+// fund.rerank.js - Rerank kết quả quỹ nghiên cứu khoa học bằng LLM
 import { callLLM } from "../shared/llm.js";
 
 const MAX_INPUT = 8;

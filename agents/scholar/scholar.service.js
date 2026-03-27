@@ -1,4 +1,5 @@
-// scholar.service.js
+// scholar.service.js (ENHANCED ANSWER)
+
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 
@@ -26,12 +27,14 @@ export async function runScholarAgent(req, question, model_id, topk) {
       };
     }
 
-    // ================= 🔥 SMART ANSWER =================
     const total = conferences.length + journals.length;
 
     let answer = result?.answer || "";
 
-    if (!answer || answer.length < 10) {
+    // ================= 🔥 SMART ANSWER =================
+    if (!answer || answer.length < 20) {
+
+      // ================= BASIC =================
       if (conferences.length && journals.length) {
         answer = `Tìm thấy ${total} kết quả gồm hội thảo và tạp chí liên quan đến "${question}".`;
       } else if (conferences.length) {
@@ -40,36 +43,62 @@ export async function runScholarAgent(req, question, model_id, topk) {
         answer = `Tìm thấy ${journals.length} tạp chí phù hợp với "${question}".`;
       }
 
-      // 🔥 enrich insight
+      // ================= 🔥 INSIGHT (PRO LEVEL) =================
       const now = Date.now();
 
-      const hasOpenCFP = conferences.some(c => {
+      const openCFP = conferences.filter(c => {
         const d = safeTime(c.deadline);
         return d && d > now;
       });
 
-      const hasUpcomingEvent = conferences.some(c => {
+      const upcoming = conferences.filter(c => {
         const d = safeTime(c.start_date);
         return d && d > now;
       });
 
-      if (hasOpenCFP) {
-        answer += " Một số hội thảo vẫn còn hạn nộp bài.";
+      const topScore =
+        Math.max(
+          ...conferences.map(c => c.finalScore || 0),
+          ...journals.map(j => j.finalScore || 0)
+        ) || 0;
+
+      // 🔥 Insight block
+      let insight = [];
+
+      if (topScore > 0.75) {
+        insight.push("Các kết quả có mức độ liên quan cao.");
+      } else if (topScore > 0.5) {
+        insight.push("Kết quả có mức độ liên quan khá.");
+      } else {
+        insight.push("Kết quả mang tính tham khảo.");
       }
 
-      if (hasUpcomingEvent) {
-        answer += " Có hội thảo sắp diễn ra.";
+      if (openCFP.length) {
+        insight.push(`${openCFP.length} hội thảo vẫn đang mở nhận bài.`);
+      }
+
+      if (upcoming.length) {
+        insight.push(`${upcoming.length} hội thảo sắp diễn ra.`);
+      }
+
+      // 🔥 thêm 1 insight ranking
+      if (conferences.length > 3) {
+        insight.push("Danh sách đã được ưu tiên theo độ phù hợp.");
+      }
+
+      if (insight.length) {
+        answer += "\n\n👉 " + insight.join(" ");
       }
     }
 
-    // ================= URL HELPER =================
+    // ================= URL =================
     function buildConferenceUrl(c) {
       return (
         c.cfp_link ||
         c.url ||
         c.link ||
         c.website ||
-        "" // ❌ KHÔNG dùng Google search nữa
+        ""
       );
     }
 
@@ -129,12 +158,9 @@ export async function runScholarAgent(req, question, model_id, topk) {
         metadata: {
           ...(c.country && { country: c.country }),
           ...(c.city && { city: c.city }),
-
           ...(c.deadline && { deadline: c.deadline }),
           ...(c.start_date && { start_date: c.start_date }),
-
           conference_status: getConferenceStatus(c),
-
           ...(c.fields?.length && { fields: c.fields }),
           score: c.finalScore ?? 0
         }
@@ -150,7 +176,6 @@ export async function runScholarAgent(req, question, model_id, topk) {
           ...(j.sjr_best_quartile && { quartile: j.sjr_best_quartile }),
           ...(j.publisher && { publisher: j.publisher }),
           ...(j.country && { country: j.country }),
-
           ...(j.fields?.length && { fields: j.fields }),
           score: j.finalScore ?? 0
         }
@@ -159,7 +184,7 @@ export async function runScholarAgent(req, question, model_id, topk) {
 
     console.log("📦 SOURCES:", sources.length);
 
-    // ================= SAVE HISTORY =================
+    // ================= HISTORY =================
     try {
       addToHistory(req, question, answer);
     } catch {

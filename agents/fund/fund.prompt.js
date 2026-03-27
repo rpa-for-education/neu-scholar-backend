@@ -1,3 +1,5 @@
+// fund.prompt.js - ENHANCED PROMPT (SAFE + STRONG CONTROL)
+
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
 Bạn là chuyên gia tư vấn quỹ nghiên cứu.
@@ -13,14 +15,25 @@ Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 🎯 NHIỆM VỤ:
 - Chọn các quỹ PHÙ HỢP NHẤT với câu hỏi
-- Ưu tiên:
-  1. Liên quan nội dung
+- Ưu tiên theo thứ tự:
+  1. Mức độ liên quan nội dung (QUAN TRỌNG NHẤT)
   2. Funding cao
-  3. Deadline hợp lý
+  3. Deadline hợp lý (còn hạn hoặc gần hạn)
 
-- Lưu ý:
-  + Danh sách đã được xếp hạng sơ bộ (F1 tốt hơn F2...)
-  + Chỉ cần chọn lại + giải thích
+- ⚠️ QUAN TRỌNG:
+  + Danh sách đã được xếp hạng sẵn (F1 tốt hơn F2, F2 tốt hơn F3...)
+  + CHỈ thay đổi thứ tự nếu có lý do RẤT RÕ RÀNG
+  + Nếu các quỹ tương đương → giữ nguyên thứ tự ban đầu
+
+---
+
+📌 CÁCH VIẾT Reason:
+- Ngắn gọn (1 dòng)
+- Không lặp lại thông tin đã có
+- Tập trung vào:
+  + độ phù hợp
+  + funding
+  + deadline
 
 ---
 

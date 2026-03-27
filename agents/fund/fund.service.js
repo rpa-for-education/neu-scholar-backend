@@ -1,3 +1,5 @@
+// fund.service.js - ENHANCED (GIỮ LOGIC + UX PRO)
+
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 
@@ -32,7 +34,7 @@ function normalizeFunds(arr) {
     const amount_num = p.amount_num || parseAmount(p.amount);
 
     return {
-      title: p.title || "",   // 🔥 KHÔNG N/A
+      title: p.title || "",
       agency: p.agency || "",
       deadline: p.deadline || "",
       amount: p.amount || "",
@@ -107,34 +109,53 @@ function stableSort(funds) {
   });
 }
 
-// ================= RENDER 1 FUND =================
+// ================= RENDER =================
 function renderFund(f, index) {
   let txt = "";
 
-  // 🔥 title bắt buộc
-  if (f.title) {
-    txt += `🎓 **${f.title}**\n`;
-  }
-
-  if (f.agency) {
-    txt += `🏢 ${f.agency}\n`;
-  }
+  if (f.title) txt += `🎓 **${f.title}**\n`;
+  if (f.agency) txt += `🏢 ${f.agency}\n`;
 
   const money = formatMoney(f.amount, f.amount_num);
-  if (money) {
-    txt += `💰 ${money}\n`;
-  }
+  if (money) txt += `💰 ${money}\n`;
 
-  if (f.url) {
-    txt += `🔎 ${f.url}\n`;
-  }
+  if (f.url) txt += `🔎 ${f.url}\n`;
 
   const reason = buildReasoning(f, index);
-  if (reason) {
-    txt += `${reason}\n`;
-  }
+  if (reason) txt += `${reason}\n`;
 
   return txt + "\n";
+}
+
+// ================= 🔥 INSIGHT =================
+function buildInsight(funds) {
+  const now = Date.now();
+
+  const highFunding = funds.filter(f => (f.amount_num || 0) >= 1e7);
+  const nearDeadline = funds.filter(f => {
+    const d = new Date(f.deadline);
+    return !isNaN(d) && (d.getTime() - now) / (1000 * 60 * 60 * 24) <= 30;
+  });
+
+  const topScore = Math.max(...funds.map(f => f.score || 0));
+
+  let insights = [];
+
+  if (topScore > 0.75) {
+    insights.push("Các quỹ có mức độ phù hợp cao.");
+  } else if (topScore > 0.5) {
+    insights.push("Các quỹ có mức độ phù hợp khá.");
+  }
+
+  if (highFunding.length) {
+    insights.push(`${highFunding.length} quỹ có mức tài trợ lớn.`);
+  }
+
+  if (nearDeadline.length) {
+    insights.push(`${nearDeadline.length} quỹ sắp đến hạn nộp.`);
+  }
+
+  return insights.length ? "👉 " + insights.join(" ") : "";
 }
 
 // ================= BUILD ANSWER =================
@@ -146,6 +167,12 @@ function buildAnswer(funds, question) {
   const best = funds[0];
 
   let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất dựa trên mức độ liên quan, kinh phí và thời hạn.\n\n`;
+
+  // 🔥 INSIGHT
+  const insight = buildInsight(funds);
+  if (insight) {
+    txt += insight + "\n\n";
+  }
 
   // BEST
   txt += `🔥 **Quỹ phù hợp nhất:**\n\n`;
@@ -180,6 +207,13 @@ export async function runFundAgent(req, question, model_id, topk = 5) {
     let funds = normalizeFunds(raw);
 
     funds = stableSort(funds);
+
+    // 🔥 đảm bảo đủ kết quả
+    if (funds.length < 3 && raw.length > funds.length) {
+      const extra = normalizeFunds(raw).slice(funds.length, 3);
+      funds.push(...extra);
+    }
+
     funds = funds.slice(0, MAX_RETURN);
 
     const answer = buildAnswer(funds, question);

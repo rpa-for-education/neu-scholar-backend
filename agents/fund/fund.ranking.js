@@ -1,3 +1,5 @@
+// fund.ranking.js - Xếp hạng kết quả quỹ nghiên cứu khoa học (FINAL FIX)
+
 // ================= REGEX =================
 const RE_BILLION = /\b(billion|bn)\b/;
 const RE_MILLION = /\b(million|mn)\b|\d+(\.\d+)?m\b/;
@@ -64,11 +66,12 @@ function deadlineScore(deadline) {
   return Math.max(0, Math.min(1, score));
 }
 
-// ================= TEXT SCORE (FIX MULTILINGUAL) =================
+// ================= TEXT SCORE =================
 function textScore(text, query) {
   if (!text) return 0;
 
   const t = text.toLowerCase();
+  const q = query.toLowerCase();
 
   // 🔥 expand VN → EN
   const map = {
@@ -76,10 +79,11 @@ function textScore(text, query) {
     "nghiên cứu": "research",
     "việt nam": "vietnam",
     "tài trợ": "grant",
-    "học bổng": "scholarship"
+    "học bổng": "scholarship",
+    "nafosted": "nafosted"
   };
 
-  let expanded = query.toLowerCase();
+  let expanded = q;
 
   for (const k in map) {
     if (expanded.includes(k)) {
@@ -97,7 +101,21 @@ function textScore(text, query) {
     if (t.includes(w)) hit++;
   }
 
-  const ratio = hit / words.length;
+  let ratio = hit / words.length;
+
+  // 🔥 SOFT BOOST: chỉ khi query có liên quan VN / Nafosted
+  if (
+    q.includes("nafosted") ||
+    q.includes("việt") ||
+    q.includes("vietnam")
+  ) {
+    if (
+      t.includes("nafosted") ||
+      t.includes("vietnam")
+    ) {
+      ratio += 0.15; // boost nhẹ thôi
+    }
+  }
 
   return Math.sqrt(Math.min(ratio, 0.9));
 }
@@ -107,7 +125,7 @@ function getWeights(query) {
   const q = query.toLowerCase();
 
   let w = {
-    semantic: 0.6,   // 🔥 tăng
+    semantic: 0.6,
     funding: 0.15,
     deadline: 0.15,
     text: 0.1
