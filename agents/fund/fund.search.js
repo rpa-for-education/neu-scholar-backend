@@ -1,4 +1,4 @@
-// fund.search.js - FINAL FIX (NO MISS RESULT)
+// fund.search.js - FINAL SYNC (AUTO NORMALIZE + STABLE SEARCH)
 
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
@@ -11,11 +11,23 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v9";
+const CACHE_VERSION = "v10";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
 const MAX_EMBED_CACHE = 200;
+
+// ================= 🔥 NORMALIZE =================
+function normalizeFundDoc(d) {
+  return {
+    title: d.title || d["OPPORTUNITY TITLE"] || "",
+    agency: d.agency || d["AGENCY NAME"] || "",
+    text: d.text || d["FUNDING DESCRIPTION"] || "",
+    deadline: d.deadline || d["ESTIMATED APPLICATION DUE DATE"] || "",
+    amount: d.amount || d["ESTIMATED TOTAL FUNDING"] || "",
+    url: d.url || d["OPPORTUNITY URL"] || d["URL"] || ""
+  };
+}
 
 // ================= CACHE =================
 function getCache(map, key, ttl) {
@@ -91,17 +103,19 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= KEYWORD SEARCH =================
+// ================= 🔥 KEYWORD SEARCH =================
 async function keywordSearch(query, limit) {
   try {
     const db = await getDb();
-
     const words = query.split(/\s+/).filter(Boolean);
 
     const docs = await db.collection("fund")
       .find({
         $or: words.map(w => ({
           $or: [
+            { title: { $regex: w, $options: "i" } },
+            { agency: { $regex: w, $options: "i" } },
+            { text: { $regex: w, $options: "i" } },
             { "OPPORTUNITY TITLE": { $regex: w, $options: "i" } },
             { "AGENCY NAME": { $regex: w, $options: "i" } },
             { "FUNDING DESCRIPTION": { $regex: w, $options: "i" } }
@@ -112,12 +126,14 @@ async function keywordSearch(query, limit) {
       .toArray();
 
     const scored = docs.map(d => {
+      const norm = normalizeFundDoc(d);
+
       const text = (
-        (d["OPPORTUNITY TITLE"] || "") +
+        norm.title +
         " " +
-        (d["AGENCY NAME"] || "") +
+        norm.agency +
         " " +
-        (d["FUNDING DESCRIPTION"] || "")
+        norm.text
       ).toLowerCase();
 
       let hit = 0;
@@ -127,14 +143,7 @@ async function keywordSearch(query, limit) {
       }
 
       return {
-        payload: {
-          title: d["OPPORTUNITY TITLE"],
-          agency: d["AGENCY NAME"],
-          text: d["FUNDING DESCRIPTION"],
-          deadline: d["ESTIMATED APPLICATION DUE DATE"],
-          amount: d["ESTIMATED TOTAL FUNDING"],
-          url: d["OPPORTUNITY URL"] || d["URL"]
-        },
+        payload: norm,
         score: 0.2 + hit * 0.15
       };
     });
@@ -153,9 +162,11 @@ function mergeResults(vector, keyword) {
   const map = new Map();
 
   vector.forEach(r => {
-    const key = r.id || r.payload?.title;
+    const norm = normalizeFundDoc(r.payload || r);
+    const key = r.id || norm.title;
     if (!key) return;
-    map.set(key, { ...r });
+
+    map.set(key, { ...r, payload: norm });
   });
 
   keyword.forEach(r => {
@@ -214,12 +225,10 @@ export async function searchFund(query, topk = 5) {
       ).catch(() => []);
     }
 
-    // 🔥 FIX QUAN TRỌNG
     const keywordResults = await keywordSearch(normalized, limit * 2);
 
     let merged = mergeResults(vectorResults, keywordResults);
 
-    // 🔥 đảm bảo đủ kết quả
     if (merged.length < limit && keywordResults.length) {
       const extra = keywordResults.filter(
         k => !merged.some(m => m.payload?.title === k.payload?.title)

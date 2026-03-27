@@ -1,4 +1,4 @@
-// fund.service.js - ENHANCED (GIỮ LOGIC + UX PRO)
+// fund.service.js - FINAL PRO (SMART BEST + BETTER UX)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -40,10 +40,26 @@ function normalizeFunds(arr) {
       amount: p.amount || "",
       amount_num,
       url: p.url || "",
+      text: p.text || "",
       score: Math.max(0, Math.min(1, Number(r.finalScore ?? r.score ?? 0))),
       _idx: idx
     };
   });
+}
+
+// ================= 🔥 INTENT MATCH =================
+function relevanceScore(fund, query) {
+  const t = (fund.title + " " + fund.text).toLowerCase();
+  const q = query.toLowerCase();
+
+  let score = 0;
+
+  if (q.includes("nafosted") && t.includes("nafosted")) score += 2;
+  if (q.includes("việt") || q.includes("vietnam")) {
+    if (t.includes("vietnam")) score += 1;
+  }
+
+  return score;
 }
 
 // ================= FORMAT MONEY =================
@@ -74,11 +90,14 @@ function getDeadlineInfo(deadline) {
   return "";
 }
 
-// ================= REASONING =================
-function buildReasoning(fund, index) {
+// ================= 🔥 REASONING =================
+function buildReasoning(fund, index, query) {
   const reasons = [];
 
   if (index === 0) reasons.push("phù hợp tổng thể tốt nhất");
+
+  const rel = relevanceScore(fund, query);
+  if (rel > 0) reasons.push("phù hợp trực tiếp với yêu cầu");
 
   if ((fund.amount_num || 0) >= 1e7) {
     reasons.push("mức tài trợ cao");
@@ -86,10 +105,6 @@ function buildReasoning(fund, index) {
 
   const deadlineInfo = getDeadlineInfo(fund.deadline);
   if (deadlineInfo) reasons.push(deadlineInfo);
-
-  if ((fund.agency || "").toLowerCase().includes("nsf")) {
-    reasons.push("nguồn tài trợ uy tín (NSF)");
-  }
 
   return reasons.length
     ? "👉 Lý do: " + reasons.join(", ")
@@ -100,17 +115,28 @@ function buildReasoning(fund, index) {
 function stableSort(funds) {
   return [...funds].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-
     if ((b.amount_num || 0) !== (a.amount_num || 0)) {
       return (b.amount_num || 0) - (a.amount_num || 0);
     }
-
     return a._idx - b._idx;
   });
 }
 
+// ================= 🔥 BEST PICK =================
+function pickBestFund(funds, query) {
+  const sorted = [...funds].sort((a, b) => {
+    const ra = relevanceScore(a, query);
+    const rb = relevanceScore(b, query);
+
+    if (rb !== ra) return rb - ra;
+    return b.score - a.score;
+  });
+
+  return sorted[0];
+}
+
 // ================= RENDER =================
-function renderFund(f, index) {
+function renderFund(f, index, query) {
   let txt = "";
 
   if (f.title) txt += `🎓 **${f.title}**\n`;
@@ -121,41 +147,23 @@ function renderFund(f, index) {
 
   if (f.url) txt += `🔎 ${f.url}\n`;
 
-  const reason = buildReasoning(f, index);
+  const reason = buildReasoning(f, index, query);
   if (reason) txt += `${reason}\n`;
 
   return txt + "\n";
 }
 
-// ================= 🔥 INSIGHT =================
+// ================= INSIGHT =================
 function buildInsight(funds) {
-  const now = Date.now();
-
   const highFunding = funds.filter(f => (f.amount_num || 0) >= 1e7);
-  const nearDeadline = funds.filter(f => {
-    const d = new Date(f.deadline);
-    return !isNaN(d) && (d.getTime() - now) / (1000 * 60 * 60 * 24) <= 30;
-  });
-
-  const topScore = Math.max(...funds.map(f => f.score || 0));
 
   let insights = [];
 
-  if (topScore > 0.75) {
-    insights.push("Các quỹ có mức độ phù hợp cao.");
-  } else if (topScore > 0.5) {
-    insights.push("Các quỹ có mức độ phù hợp khá.");
-  }
-
   if (highFunding.length) {
-    insights.push(`${highFunding.length} quỹ có mức tài trợ lớn.`);
+    insights.push(`${highFunding.length} quỹ có mức tài trợ cao`);
   }
 
-  if (nearDeadline.length) {
-    insights.push(`${nearDeadline.length} quỹ sắp đến hạn nộp.`);
-  }
-
-  return insights.length ? "👉 " + insights.join(" ") : "";
+  return insights.length ? "👉 " + insights.join(". ") : "";
 }
 
 // ================= BUILD ANSWER =================
@@ -164,30 +172,22 @@ function buildAnswer(funds, question) {
     return "Không tìm thấy quỹ phù hợp với yêu cầu của bạn.";
   }
 
-  const best = funds[0];
+  const best = pickBestFund(funds, question);
 
-  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất dựa trên mức độ liên quan, kinh phí và thời hạn.\n\n`;
+  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất.\n\n`;
 
-  // 🔥 INSIGHT
   const insight = buildInsight(funds);
-  if (insight) {
-    txt += insight + "\n\n";
-  }
+  if (insight) txt += insight + "\n\n";
 
-  // BEST
   txt += `🔥 **Quỹ phù hợp nhất:**\n\n`;
-  txt += renderFund(best, 0);
+  txt += renderFund(best, 0, question);
 
-  // OTHERS
-  funds.slice(1).forEach((f, i) => {
-    txt += `---\n`;
-    txt += renderFund(f, i + 1);
-  });
-
-  txt += `---\n💡 **Gợi ý:**\n`;
-  txt += `- Ưu tiên quỹ có funding cao & deadline phù hợp\n`;
-  txt += `- Kiểm tra eligibility trước khi apply\n`;
-  txt += `- Có thể mở rộng sang NSF, EU Horizon\n`;
+  funds
+    .filter(f => f !== best)
+    .forEach((f, i) => {
+      txt += `---\n`;
+      txt += renderFund(f, i + 1, question);
+    });
 
   return txt;
 }
@@ -205,35 +205,20 @@ export async function runFundAgent(req, question, model_id, topk = 5) {
     }
 
     let funds = normalizeFunds(raw);
-
     funds = stableSort(funds);
-
-    // 🔥 đảm bảo đủ kết quả
-    if (funds.length < 3 && raw.length > funds.length) {
-      const extra = normalizeFunds(raw).slice(funds.length, 3);
-      funds.push(...extra);
-    }
-
     funds = funds.slice(0, MAX_RETURN);
 
     const answer = buildAnswer(funds, question);
 
     try {
       addToHistory(req, question, answer);
-    } catch {
-      console.warn("⚠️ history fail");
-    }
+    } catch {}
 
-    return {
-      answer,
-      funds
-    };
+    return { answer, funds };
 
   } catch (err) {
-    console.error("❌ fund agent error:", err.message);
-
     return {
-      answer: "Hệ thống đang gặp lỗi khi tìm quỹ.",
+      answer: "Hệ thống đang gặp lỗi.",
       funds: []
     };
   }

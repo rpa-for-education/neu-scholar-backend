@@ -1,4 +1,4 @@
-// fund.ranking.js - Xếp hạng kết quả quỹ nghiên cứu khoa học (FINAL FIX)
+// fund.ranking.js - FINAL PRO (RELEVANCE + VN BOOST + STABLE RANK)
 
 // ================= REGEX =================
 const RE_BILLION = /\b(billion|bn)\b/;
@@ -73,7 +73,6 @@ function textScore(text, query) {
   const t = text.toLowerCase();
   const q = query.toLowerCase();
 
-  // 🔥 expand VN → EN
   const map = {
     "quỹ": "fund",
     "nghiên cứu": "research",
@@ -103,21 +102,26 @@ function textScore(text, query) {
 
   let ratio = hit / words.length;
 
-  // 🔥 SOFT BOOST: chỉ khi query có liên quan VN / Nafosted
+  // 🔥 BOOST VN / NAFOSTED
   if (
     q.includes("nafosted") ||
     q.includes("việt") ||
     q.includes("vietnam")
   ) {
-    if (
-      t.includes("nafosted") ||
-      t.includes("vietnam")
-    ) {
-      ratio += 0.15; // boost nhẹ thôi
+    if (t.includes("nafosted")) {
+      ratio += 0.25; // 🔥 boost mạnh hơn
+    } else if (t.includes("vietnam")) {
+      ratio += 0.15;
     }
   }
 
-  return Math.sqrt(Math.min(ratio, 0.9));
+  return Math.sqrt(Math.min(ratio, 1));
+}
+
+// ================= 🔥 RELEVANCE GATE =================
+function isRelevant(tScore, vScore) {
+  // phải có ít nhất 1 trong 2
+  return tScore > 0.1 || vScore > 0.3;
 }
 
 // ================= WEIGHTS =================
@@ -125,10 +129,10 @@ function getWeights(query) {
   const q = query.toLowerCase();
 
   let w = {
-    semantic: 0.6,
+    semantic: 0.55,   // 🔥 giảm nhẹ
     funding: 0.15,
     deadline: 0.15,
-    text: 0.1
+    text: 0.15        // 🔥 tăng text
   };
 
   if (/(fund|budget|grant|money)/.test(q)) {
@@ -174,6 +178,11 @@ export function rankFunds(results, query) {
       const tScore = safe(textScore(p.text, query), 0);
       const vScore = Math.max(0, Math.min(1, safe(r.score, 0)));
 
+      // 🔥 FILTER relevance
+      if (!isRelevant(tScore, vScore)) {
+        return null;
+      }
+
       let finalScore =
         weights.semantic * vScore +
         weights.funding * fScore +
@@ -195,6 +204,7 @@ export function rankFunds(results, query) {
         _idx: idx
       };
     })
+    .filter(Boolean) // 🔥 remove rác
     .sort((a, b) => {
       if (b.finalScore !== a.finalScore) {
         return b.finalScore - a.finalScore;

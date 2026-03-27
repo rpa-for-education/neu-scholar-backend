@@ -1,4 +1,4 @@
-// fund.agent.js - DEBUG PIPELINE (FULL TRACE)
+// fund.agent.js - FINAL (AUTO NORMALIZE + DEBUG + FIX FULL)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -7,9 +7,8 @@ import { getDb } from "../../db/mongo.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v10";
+const CACHE_VERSION = "v11";
 
-// 🔥 bật/tắt debug tại đây
 const DEBUG = true;
 
 // ================= CACHE =================
@@ -27,6 +26,18 @@ function getCache(key) {
 
 function setCache(key, value) {
   CACHE.set(key, { time: Date.now(), value });
+}
+
+// ================= 🔥 NORMALIZE (QUAN TRỌNG NHẤT) =================
+function normalizeFundDoc(d) {
+  return {
+    title: d.title || d["OPPORTUNITY TITLE"] || "",
+    agency: d.agency || d["AGENCY NAME"] || "",
+    text: d.text || d["FUNDING DESCRIPTION"] || "",
+    deadline: d.deadline || d["ESTIMATED APPLICATION DUE DATE"] || "",
+    amount: d.amount || d["ESTIMATED TOTAL FUNDING"] || "",
+    url: d.url || d["OPPORTUNITY URL"] || d["URL"] || ""
+  };
 }
 
 // ================= UTILS =================
@@ -54,12 +65,7 @@ function expandQuery(q) {
 }
 
 function safeTopk(k) {
-  const n = Number(k);
-  return n && n > 0 ? n : 5;
-}
-
-function safeScore(x) {
-  return typeof x === "number" && !isNaN(x) ? x : 0;
+  return Number(k) || 5;
 }
 
 // ================= DEBUG =================
@@ -74,7 +80,7 @@ function logStep(step, data) {
     data.slice(0, 5).forEach((r, i) => {
       console.log(
         `[${i + 1}]`,
-        r.payload?.title || r.title,
+        r.payload?.title,
         "| score:",
         (r.score ?? r.finalScore ?? 0).toFixed(3)
       );
@@ -82,12 +88,6 @@ function logStep(step, data) {
   } else {
     console.log(data);
   }
-}
-
-// ================= INTENT =================
-function detectIntentFast(query = "") {
-  const yearMatch = query.match(/20\d{2}/);
-  return { year: yearMatch ? Number(yearMatch[0]) : null };
 }
 
 // ================= KEYWORD SEARCH =================
@@ -102,7 +102,10 @@ async function keywordSearch(query, limit = 10) {
           $or: [
             { title: { $regex: w, $options: "i" } },
             { agency: { $regex: w, $options: "i" } },
-            { text: { $regex: w, $options: "i" } }
+            { text: { $regex: w, $options: "i" } },
+            { "OPPORTUNITY TITLE": { $regex: w, $options: "i" } },
+            { "AGENCY NAME": { $regex: w, $options: "i" } },
+            { "FUNDING DESCRIPTION": { $regex: w, $options: "i" } }
           ]
         }))
       })
@@ -110,12 +113,14 @@ async function keywordSearch(query, limit = 10) {
       .toArray();
 
     const scored = docs.map(d => {
+      const norm = normalizeFundDoc(d);
+
       const text = (
-        (d.title || "") +
+        norm.title +
         " " +
-        (d.agency || "") +
+        norm.agency +
         " " +
-        (d.text || "")
+        norm.text
       ).toLowerCase();
 
       let hit = 0;
@@ -126,7 +131,7 @@ async function keywordSearch(query, limit = 10) {
 
       return {
         id: d._id?.toString(),
-        payload: d,
+        payload: norm,
         score: 0.2 + hit * 0.15
       };
     });
@@ -150,9 +155,12 @@ function mergeResults(vector, keyword) {
   const map = new Map();
 
   vector.forEach(r => {
-    const key = r.id || r.payload?.title;
+    const norm = normalizeFundDoc(r.payload || r);
+
+    const key = r.id || norm.title;
     if (!key) return;
-    map.set(key, { ...r });
+
+    map.set(key, { ...r, payload: norm });
   });
 
   keyword.forEach(r => {
@@ -180,23 +188,16 @@ function parseDateSafe(d) {
   return isNaN(date) ? null : date;
 }
 
-function filterResults(results, intent) {
+function filterResults(results) {
   const now = Date.now();
 
   const filtered = results.filter(r => {
     const d = parseDateSafe(r.payload?.deadline);
 
-    if (d && d.getTime() < now - 1000 * 60 * 60 * 24 * 180) {
+    // 🔥 chỉ drop nếu quá 2 năm
+    if (d && d.getTime() < now - 1000 * 60 * 60 * 24 * 365 * 2) {
       if (DEBUG) console.log("❌ drop expired:", r.payload?.title);
       return false;
-    }
-
-    if (intent.year) {
-      if (!d) return true;
-      if (d.getFullYear() !== intent.year) {
-        if (DEBUG) console.log("❌ drop year:", r.payload?.title);
-        return false;
-      }
     }
 
     return true;
@@ -214,7 +215,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
   const expanded = expandQuery(q);
   const k = safeTopk(topk);
-  const intent = detectIntentFast(q);
 
   logStep("QUERY", { q, expanded });
 
@@ -226,7 +226,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
     const vectorResults = await searchFund(expanded, k * 3).catch(() => []);
     logStep("VECTOR", vectorResults);
 
-    // 🔥 FIX QUAN TRỌNG
     const keywordResults = await keywordSearch(q, k * 2);
 
     let merged = mergeResults(vectorResults, keywordResults);
@@ -238,11 +237,10 @@ export async function runFundSearch(query, model_id, topk = 5) {
       merged.push(...extra.slice(0, k));
     }
 
-    merged = filterResults(merged, intent);
+    merged = filterResults(merged);
 
     if (!merged.length) {
-      console.log("❌ NO RESULT AFTER FILTER");
-      return [];
+      return keywordResults.slice(0, k);
     }
 
     const ranked = rankFunds(merged, q);

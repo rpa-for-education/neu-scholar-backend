@@ -1,4 +1,4 @@
-// fund.stream.js - ENHANCED (STREAM MƯỢT + UX PRO)
+// fund.stream.js - FINAL PRO (SMOOTH + STRUCTURED STREAM)
 
 import fetch from "node-fetch";
 import { runFundAgent } from "./fund.service.js";
@@ -6,24 +6,20 @@ import { runFundAgent } from "./fund.service.js";
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 
 // ================= SAFE WRITE =================
-function writeSSE(res, data) {
+function writeSSE(res, data, type = "message") {
   if (res.writableEnded || res.destroyed) return true;
 
-  const safe = String(data).replace(/\n/g, " ");
-  return res.write(`data: ${safe}\n\n`);
+  const payload = JSON.stringify({
+    type,
+    data
+  });
+
+  return res.write(`data: ${payload}\n\n`);
 }
 
-// ================= SPLIT CHUNK (MƯỢT HƠN) =================
-function splitText(text, size = 30) {
-  const chunks = [];
-  let i = 0;
-
-  while (i < text.length) {
-    chunks.push(text.slice(i, i + size));
-    i += size;
-  }
-
-  return chunks;
+// ================= SPLIT WORD =================
+function splitWords(text) {
+  return text.split(/\s+/);
 }
 
 // ================= BUILD PROMPT =================
@@ -32,19 +28,24 @@ function buildExplainPrompt(question, funds) {
 Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 ⚠️ KHÔNG được tạo thêm quỹ mới.
+⚠️ CHỈ được nói về các quỹ sau:
 
-CÂU HỎI:
-${question}
-
-DANH SÁCH:
 ${funds.map((f, i) => `
 [${i + 1}] ${f.title} - ${f.agency}
 `).join("\n")}
 
+---
+
+Câu hỏi:
+${question}
+
+---
+
 Yêu cầu:
-- Giải thích ngắn gọn vì sao quỹ #1 tốt nhất
+- Giải thích vì sao quỹ #1 phù hợp nhất
 - So sánh nhanh các quỹ còn lại
 - Viết 3-4 dòng
+- KHÔNG bịa thêm thông tin
 `;
 }
 
@@ -95,51 +96,38 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     });
 
     // ================= PROGRESS =================
-    writeSSE(res, "🔍 Đang tìm quỹ...");
-    await new Promise(r => setTimeout(r, 200));
+    writeSSE(res, "🔍 Đang tìm quỹ...", "progress");
 
-    writeSSE(res, "📊 Đang phân tích & xếp hạng...");
-    
-    // ================= SERVICE =================
     const result = await runFundAgent(req, question, model_id, topk);
 
     if (!result.funds.length) {
-      writeSSE(res, "❌ Không tìm thấy quỹ phù hợp");
-      writeSSE(res, "[DONE]");
+      writeSSE(res, "❌ Không tìm thấy quỹ phù hợp", "error");
+      writeSSE(res, "[DONE]", "done");
       return res.end();
     }
 
-    await new Promise(r => setTimeout(r, 200));
+    writeSSE(res, "📊 Đã phân tích xong", "progress");
 
     // ================= STREAM RESULT =================
-    writeSSE(res, "💰 Kết quả:\n");
+    writeSSE(res, "💰 Kết quả:", "header");
 
-    const chunks = splitText(result.answer, 35);
+    const words = splitWords(result.answer);
 
-    for (const chunk of chunks) {
+    for (const word of words) {
       if (isClosed) break;
 
-      const ok = writeSSE(res, chunk);
-
-      if (ok === false) {
-        await new Promise(resolve => {
-          if (res.writableEnded || res.destroyed) return resolve();
-          res.once("drain", resolve);
-        });
-      }
-
-      await new Promise(r => setTimeout(r, 10));
+      writeSSE(res, word + " ", "chunk");
+      await new Promise(r => setTimeout(r, 8));
     }
 
-    // ================= LLM EXPLAIN (NON-BLOCKING STYLE) =================
-    writeSSE(res, "\n\n🤖 Phân tích thêm:\n");
+    // ================= EXPLAIN =================
+    writeSSE(res, "\n\n🤖 Phân tích thêm:", "header");
 
     let explain = "";
 
     try {
       const prompt = buildExplainPrompt(question, result.funds);
 
-      // 🔥 timeout LLM (tránh treo)
       explain = await Promise.race([
         callLLM(prompt),
         new Promise(resolve => setTimeout(() => resolve(""), 3000))
@@ -147,27 +135,28 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     } catch {}
 
     if (explain) {
-      const explainChunks = splitText(explain, 40);
+      const words = splitWords(explain);
 
-      for (const chunk of explainChunks) {
+      for (const word of words) {
         if (isClosed) break;
-        writeSSE(res, chunk);
-        await new Promise(r => setTimeout(r, 15));
+
+        writeSSE(res, word + " ", "chunk");
+        await new Promise(r => setTimeout(r, 10));
       }
     } else {
-      writeSSE(res, "Không có phân tích thêm.");
+      writeSSE(res, "Không có phân tích thêm.", "chunk");
     }
 
     // ================= DONE =================
-    writeSSE(res, "[DONE]");
+    writeSSE(res, "[DONE]", "done");
     res.end();
 
   } catch (err) {
     console.error("❌ stream error:", err.message);
 
     if (!res.writableEnded) {
-      writeSSE(res, "❌ Lỗi hệ thống");
-      writeSSE(res, "[DONE]");
+      writeSSE(res, "❌ Lỗi hệ thống", "error");
+      writeSSE(res, "[DONE]", "done");
       res.end();
     }
   } finally {
