@@ -1,3 +1,4 @@
+// syncAllQdrant.js - Sync all data to Qdrant with improved embedding and payload
 import { MongoClient } from "mongodb";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import axios from "axios";
@@ -67,16 +68,15 @@ async function ensureCollection(name, size) {
 }
 
 //
-// ===================== TEXT BUILD (TỐI ƯU NHẤT) =====================
+// ===================== TEXT BUILD =====================
 //
 
-// 🔥 JOURNAL (cực quan trọng)
+// 🔥 JOURNAL (giữ nguyên)
 function buildJournalText(doc) {
   return norm([
     "journal",
     doc.title,
 
-    // semantic boost
     ...(doc.fields || []),
     doc.categories,
     doc.areas,
@@ -84,23 +84,30 @@ function buildJournalText(doc) {
     doc.publisher,
     doc.country,
 
-    // ranking context
     doc.sjr ? `sjr ${doc.sjr}` : "",
     doc.sjr_best_quartile ? `quartile ${doc.sjr_best_quartile}` : "",
 
-    // synonym
     "research journal academic publication"
   ].join(" "));
 }
 
-// 🔥 FUND
+// 🔥 FUND (FIX NAFOSTED + VN BOOST)
 function buildFundText(doc) {
   return norm([
     "research grant funding",
 
+    // ===== CORE =====
     doc.opportunity_title,
+
+    // 🔥 FIX QUAN TRỌNG
+    doc.agency_code,        // NAFOSTED
     doc.agency_name,
 
+    // 🔥 BOOST NGỮ CẢNH VN
+    doc.country,
+    "vietnam nafosted grant research funding",
+
+    // ===== CONTEXT =====
     doc.category,
     doc.funding_categories,
 
@@ -109,13 +116,15 @@ function buildFundText(doc) {
     doc.applicant_types,
     doc.funding_instruments,
 
-    doc.country,
+    // ===== EXTRA SIGNAL =====
+    doc.opportunity_number,
+    doc.opportunity_id,
 
     "grant funding scholarship research support"
   ].join(" "));
 }
 
-// 🔥 CONFERENCE
+// 🔥 CONFERENCE (giữ nguyên)
 function buildConferenceText(doc) {
   return norm([
     "academic conference call for papers cfp",
@@ -134,7 +143,7 @@ function buildConferenceText(doc) {
 }
 
 //
-// ===================== PAYLOAD (FILTER + UI) =====================
+// ===================== PAYLOAD =====================
 //
 
 function journalPayload(doc) {
@@ -158,6 +167,7 @@ function journalPayload(doc) {
   };
 }
 
+// 🔥 FIX nhẹ payload (country fallback)
 function fundPayload(doc) {
   return {
     type: "fund",
@@ -170,7 +180,7 @@ function fundPayload(doc) {
 
     category: doc.category,
 
-    country: doc.country,
+    country: doc.country || "Vietnam",
 
     url: doc.url,
   };
@@ -242,7 +252,6 @@ async function sync({ mongoCol, qdrantCol, buildText, buildPayload }) {
       payload: buildPayload(doc),
     }));
 
-    // chunk upsert
     for (let i = 0; i < points.length; i += UPSERT_BATCH) {
       const slice = points.slice(i, i + UPSERT_BATCH);
       await qdrant.upsert(qdrantCol, { points: slice });
