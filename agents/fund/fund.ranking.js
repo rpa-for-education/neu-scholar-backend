@@ -1,215 +1,178 @@
-// fund.agent.js - FINAL FIX (STABLE + KHÔNG PHÁ LOGIC)
+// fund.ranking.js - FINAL CLEAN (NO SELF-IMPORT, STABLE)
 
-import { searchFund } from "./fund.search.js";
-import { rankFunds } from "./fund.ranking.js";
-import { getDb } from "../../db/mongo.js";
-import { rerankFunds } from "./fund.rerank.js";
+// ================= REGEX =================
+const RE_BILLION = /\b(billion|bn)\b/;
+const RE_MILLION = /\b(million|mn)\b|\d+(\.\d+)?m\b/;
+const RE_THOUSAND = /\b(thousand)\b|\d+(\.\d+)?k\b/;
 
-// ================= CONFIG =================
-const CACHE = new Map();
-const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v10";
+// ================= PARSE AMOUNT =================
+function parseAmount(amount) {
+  if (!amount) return 0;
 
-// ================= CACHE =================
-function getCache(key) {
-  const item = CACHE.get(key);
-  if (!item) return null;
+  const str = String(amount).toLowerCase().replace(/,/g, "").trim();
 
-  if (Date.now() - item.time > TTL) {
-    CACHE.delete(key);
-    return null;
-  }
+  if (/(month|day|year)/.test(str)) return 0;
 
-  return item.value;
+  const num = parseFloat(str.replace(/[^0-9.]/g, ""));
+  if (!num) return 0;
+
+  if (RE_BILLION.test(str)) return num * 1e9;
+  if (RE_MILLION.test(str)) return num * 1e6;
+  if (RE_THOUSAND.test(str)) return num * 1e3;
+
+  return num;
 }
 
-function setCache(key, value) {
-  CACHE.set(key, { time: Date.now(), value });
+// ================= DEADLINE =================
+function parseDeadline(deadline) {
+  if (!deadline) return null;
+
+  const str = String(deadline);
+  const d = str.includes("T")
+    ? new Date(str)
+    : new Date(str + "T00:00:00Z");
+
+  return isNaN(d) ? null : d;
 }
 
-// ================= UTILS =================
-function normalizeQuery(q) {
-  return (q || "").trim().toLowerCase();
+// ================= SCORING =================
+function fundingScore(amount, amount_num) {
+  const val = amount_num || parseAmount(amount);
+
+  if (val >= 1e9) return 1;
+  if (val >= 1e8) return 0.9;
+  if (val >= 1e7) return 0.7;
+  if (val >= 1e6) return 0.5;
+
+  return 0.3;
 }
 
-function expandQuery(q) {
+function deadlineScore(deadline) {
+  const d = parseDeadline(deadline);
+  if (!d) return 0.3;
+
+  const now = Date.now();
+  const diffDays = (d.getTime() - now) / (1000 * 60 * 60 * 24);
+
+  if (diffDays < 0) return 0;
+
+  let score;
+
+  if (diffDays <= 7) score = 1;
+  else if (diffDays <= 30) score = 0.85 - (diffDays - 7) * 0.01;
+  else if (diffDays <= 90) score = 0.65 - (diffDays - 30) * 0.003;
+  else score = 0.4;
+
+  return Math.max(0, Math.min(1, score));
+}
+
+// ================= TEXT SCORE =================
+function textScore(text, query) {
+  if (!text) return 0;
+
+  const t = text.toLowerCase();
+  const q = query.toLowerCase();
+
+  const map = {
+    "quỹ": "fund",
+    "nghiên cứu": "research",
+    "việt nam": "vietnam",
+    "tài trợ": "grant",
+    "học bổng": "scholarship",
+    "nafosted": "nafosted"
+  };
+
   let expanded = q;
 
-  if (q.includes("quỹ")) expanded += " fund grant funding";
-  if (q.includes("nghiên cứu")) expanded += " research science";
-  if (q.includes("nafosted")) expanded += " nafosted vietnam foundation";
-  if (q.includes("việt")) expanded += " vietnam";
-
-  return expanded;
-}
-
-function safeTopk(k) {
-  const n = Number(k);
-  return n && n > 0 ? n : 5;
-}
-
-// ================= 🔥 EXPLAIN =================
-function explainFund(item, query) {
-  const q = query.toLowerCase();
-  const t = (item.payload?.text || "").toLowerCase();
-
-  const reasons = [];
-
-  if (item.explain?.semantic > 0.6) {
-    reasons.push("liên quan nội dung tốt");
-  }
-
-  if (item.explain?.funding > 0.6) {
-    reasons.push("mức tài trợ cao");
-  }
-
-  if (item.explain?.deadline > 0.7) {
-    reasons.push("deadline gần");
-  }
-
-  if (q.includes("nafosted") &&
-    (t.includes("nafosted") || t.includes("khoa học và công nghệ quốc gia"))
-  ) {
-    reasons.push("đúng quỹ Nafosted");
-  }
-
-  if ((q.includes("việt") || q.includes("vietnam")) && t.includes("vietnam")) {
-    reasons.push("liên quan Việt Nam");
-  }
-
-  if (!reasons.length) {
-    reasons.push("phù hợp tương đối với yêu cầu");
-  }
-
-  return reasons.join(", ");
-}
-
-// ================= MERGE (FIX NHẸ) =================
-function mergeResults(vector, keyword) {
-  const map = new Map();
-
-  vector.forEach(r => {
-    const key = r.id || r.payload?.title;
-    if (!key) return;
-    map.set(key, r);
-  });
-
-  keyword.forEach(r => {
-    const key = r.payload?.title;
-    if (!key) return;
-
-    if (!map.has(key)) {
-      map.set(key, r); // 🔥 KHÔNG override vector nữa
+  for (const k in map) {
+    if (expanded.includes(k)) {
+      expanded += " " + map[k];
     }
-  });
+  }
 
-  return Array.from(map.values());
+  const words = expanded.split(/\s+/).filter(w => w.length > 3);
+
+  if (!words.length) return 0;
+
+  let hit = 0;
+
+  for (const w of words) {
+    if (t.includes(w)) hit++;
+  }
+
+  let ratio = hit / words.length;
+
+  if (
+    q.includes("nafosted") ||
+    q.includes("việt") ||
+    q.includes("vietnam")
+  ) {
+    if (
+      t.includes("nafosted") ||
+      t.includes("vietnam")
+    ) {
+      ratio += 0.15;
+    }
+  }
+
+  return Math.sqrt(Math.min(ratio, 0.9));
+}
+
+// ================= SAFE =================
+function safe(x, fallback = 0) {
+  return typeof x === "number" && !isNaN(x) ? x : fallback;
 }
 
 // ================= MAIN =================
-export async function runFundSearch(query, model_id, topk = 5) {
-  const q = normalizeQuery(query);
-  if (!q) return [];
+export function rankFunds(results, query) {
+  const weights = {
+    semantic: 0.6,
+    funding: 0.15,
+    deadline: 0.15,
+    text: 0.1
+  };
 
-  const expanded = expandQuery(q);
-  const k = safeTopk(topk);
+  return results
+    .map((r, idx) => {
+      const p = r.payload || {};
 
-  const cacheKey = `${CACHE_VERSION}:${expanded}:${k}`;
-  const cached = getCache(cacheKey);
-  if (cached) return cached;
+      const amount_num = p.amount_num || parseAmount(p.amount);
 
-  try {
-    // ================= SEARCH =================
-    let vectorResults = await searchFund(expanded, k * 3).catch(() => []);
+      const fScore = safe(fundingScore(p.amount, amount_num), 0.3);
+      const dScore = safe(deadlineScore(p.deadline), 0.3);
+      const tScore = safe(textScore(p.text, query), 0);
+      const vScore = Math.max(0, Math.min(1, safe(r.score, 0)));
 
-    // 🔥 FIX 1: normalize score
-    vectorResults = vectorResults.map(r => ({
-      ...r,
-      score: Math.max(0, Math.min(1, r.score || 0))
-    }));
+      let finalScore =
+        weights.semantic * vScore +
+        weights.funding * fScore +
+        weights.deadline * dScore +
+        weights.text * tScore;
 
-    let merged = mergeResults(vectorResults, []);
+      finalScore = Math.max(0, Math.min(1, finalScore));
 
-    if (!merged.length) return [];
-
-    let ranked = rankFunds(merged, q);
-
-    // ================= FILTER =================
-    let filtered = ranked;
-
-    if (q.includes("nafosted") || q.includes("việt") || q.includes("vietnam")) {
-      const tmp = ranked.filter(r => {
-        const t = (r.payload?.text || "").toLowerCase();
-
-        return (
-          t.includes("nafosted") ||
-          t.includes("khoa học") ||
-          t.includes("vietnam") ||
-          t.includes("việt")
-        );
-      });
-
-      if (tmp.length >= 2) filtered = tmp;
-    }
-
-    // ================= BOOST =================
-    filtered = filtered.sort((a, b) => {
-      const ta = (a.payload?.text || "").toLowerCase();
-      const tb = (b.payload?.text || "").toLowerCase();
-      const ql = q.toLowerCase();
-
-      const boost = (t) => {
-        let s = 0;
-
-        if (ql.includes("nafosted")) {
-          if (
-            t.includes("nafosted") ||
-            t.includes("khoa học và công nghệ quốc gia")
-          ) s += 3;
-        }
-
-        if (ql.includes("việt") || ql.includes("vietnam")) {
-          if (t.includes("vietnam")) s += 1;
-        }
-
-        return s;
+      return {
+        ...r,
+        finalScore,
+        amount_num,
+        explain: {
+          semantic: vScore,
+          funding: fScore,
+          deadline: dScore,
+          text: tScore
+        },
+        _idx: idx
       };
-
-      return (b.finalScore + boost(tb)) - (a.finalScore + boost(ta));
-    });
-
-    // ================= LLM RERANK =================
-    let finalResults = filtered.slice(0, k);
-
-    try {
-      const reranked = await rerankFunds(q, finalResults, model_id);
-
-      if (reranked?.length) {
-        const remain = finalResults.filter(f => !reranked.includes(f));
-        finalResults = [...reranked, ...remain].slice(0, k);
+    })
+    .sort((a, b) => {
+      if (b.finalScore !== a.finalScore) {
+        return b.finalScore - a.finalScore;
       }
-    } catch (err) {
-      console.warn("⚠️ rerank skip:", err.message);
-    }
 
-    // 🔥 FIX 2: đảm bảo đủ topk
-    if (finalResults.length < k) {
-      const remain = ranked.filter(r => !finalResults.includes(r));
-      finalResults = [...finalResults, ...remain.slice(0, k - finalResults.length)];
-    }
+      if ((b.amount_num || 0) !== (a.amount_num || 0)) {
+        return (b.amount_num || 0) - (a.amount_num || 0);
+      }
 
-    // ================= EXPLAIN =================
-    finalResults = finalResults.map(r => ({
-      ...r,
-      explainText: explainFund(r, q)
-    }));
-
-    setCache(cacheKey, finalResults);
-
-    return finalResults;
-
-  } catch (err) {
-    console.error("❌ fund agent error:", err.message);
-    return [];
-  }
+      return a._idx - b._idx;
+    });
 }
