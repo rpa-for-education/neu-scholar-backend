@@ -1,4 +1,4 @@
-// fund.agent.js - FINAL FIX (STABLE + KHÔNG PHÁ LOGIC)
+// fund.agent.js - FINAL UPGRADE (GEO + TIME + SMART BOOST)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -8,7 +8,7 @@ import { rerankFunds } from "./fund.rerank.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v10";
+const CACHE_VERSION = "v11"; // 🔥 bump version
 
 // ================= CACHE =================
 function getCache(key) {
@@ -48,7 +48,7 @@ function safeTopk(k) {
   return n && n > 0 ? n : 5;
 }
 
-// ================= 🔥 EXPLAIN =================
+// ================= EXPLAIN =================
 function explainFund(item, query) {
   const q = query.toLowerCase();
   const t = (item.payload?.text || "").toLowerCase();
@@ -67,13 +67,17 @@ function explainFund(item, query) {
     reasons.push("deadline gần");
   }
 
-  if (q.includes("nafosted") &&
+  if (
+    q.includes("nafosted") &&
     (t.includes("nafosted") || t.includes("khoa học và công nghệ quốc gia"))
   ) {
     reasons.push("đúng quỹ Nafosted");
   }
 
-  if ((q.includes("việt") || q.includes("vietnam")) && t.includes("vietnam")) {
+  if (
+    (q.includes("việt") || q.includes("vietnam")) &&
+    t.includes("vietnam")
+  ) {
     reasons.push("liên quan Việt Nam");
   }
 
@@ -84,7 +88,7 @@ function explainFund(item, query) {
   return reasons.join(", ");
 }
 
-// ================= MERGE (FIX NHẸ) =================
+// ================= MERGE =================
 function mergeResults(vector, keyword) {
   const map = new Map();
 
@@ -99,7 +103,7 @@ function mergeResults(vector, keyword) {
     if (!key) return;
 
     if (!map.has(key)) {
-      map.set(key, r); // 🔥 KHÔNG override vector nữa
+      map.set(key, r);
     }
   });
 
@@ -122,7 +126,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
     // ================= SEARCH =================
     let vectorResults = await searchFund(expanded, k * 3).catch(() => []);
 
-    // 🔥 FIX 1: normalize score
     vectorResults = vectorResults.map(r => ({
       ...r,
       score: Math.max(0, Math.min(1, r.score || 0))
@@ -134,22 +137,45 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let ranked = rankFunds(merged, q);
 
-    // ================= FILTER =================
+    // ================= 🔥 FILTER (GEO + TIME) =================
     let filtered = ranked;
 
-    if (q.includes("nafosted") || q.includes("việt") || q.includes("vietnam")) {
-      const tmp = ranked.filter(r => {
+    // 🔥 GEO FILTER
+    if (q.includes("việt") || q.includes("vietnam")) {
+      const vn = ranked.filter(r => {
         const t = (r.payload?.text || "").toLowerCase();
+        const a = (r.payload?.agency || "").toLowerCase();
 
         return (
-          t.includes("nafosted") ||
-          t.includes("khoa học") ||
           t.includes("vietnam") ||
-          t.includes("việt")
+          t.includes("việt") ||
+          t.includes("nafosted") ||
+          a.includes("vietnam")
         );
       });
 
-      if (tmp.length >= 2) filtered = tmp;
+      if (vn.length >= 2) filtered = vn;
+    }
+
+    // 🔥 TIME FILTER
+    const now = Date.now();
+
+    filtered = filtered.filter(r => {
+      const d = new Date(r.payload?.deadline || "");
+      if (isNaN(d)) return true;
+
+      const diffDays = (d.getTime() - now) / (1000 * 60 * 60 * 24);
+
+      return diffDays > -365; // không quá cũ
+    });
+
+    // 🔥 YEAR FILTER (2026 intent)
+    if (q.includes("2026")) {
+      filtered = filtered.filter(r => {
+        const d = new Date(r.payload?.deadline || "");
+        if (isNaN(d)) return false;
+        return d.getFullYear() >= 2025;
+      });
     }
 
     // ================= BOOST =================
@@ -161,6 +187,7 @@ export async function runFundSearch(query, model_id, topk = 5) {
       const boost = (t) => {
         let s = 0;
 
+        // Nafosted
         if (ql.includes("nafosted")) {
           if (
             t.includes("nafosted") ||
@@ -168,8 +195,10 @@ export async function runFundSearch(query, model_id, topk = 5) {
           ) s += 3;
         }
 
+        // Vietnam
         if (ql.includes("việt") || ql.includes("vietnam")) {
-          if (t.includes("vietnam")) s += 1;
+          if (t.includes("vietnam") || t.includes("nafosted")) s += 2;
+          else s -= 2; // 🔥 phạt US fund
         }
 
         return s;
@@ -178,7 +207,7 @@ export async function runFundSearch(query, model_id, topk = 5) {
       return (b.finalScore + boost(tb)) - (a.finalScore + boost(ta));
     });
 
-    // ================= LLM RERANK =================
+    // ================= RERANK =================
     let finalResults = filtered.slice(0, k);
 
     try {
@@ -192,7 +221,7 @@ export async function runFundSearch(query, model_id, topk = 5) {
       console.warn("⚠️ rerank skip:", err.message);
     }
 
-    // 🔥 FIX 2: đảm bảo đủ topk
+    // ================= FILL =================
     if (finalResults.length < k) {
       const remain = ranked.filter(r => !finalResults.includes(r));
       finalResults = [...finalResults, ...remain.slice(0, k - finalResults.length)];

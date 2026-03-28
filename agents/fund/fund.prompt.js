@@ -1,4 +1,4 @@
-// fund.prompt.js - FINAL HUMAN + STRONG INSIGHT (ANTI-ROBOTIC INTRO)
+// fund.prompt.js - FINAL LOCKED (HARD FORMAT + REAL INSIGHT)
 
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
@@ -38,74 +38,77 @@ Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 ---
 
-🧠 CÁCH TRẢ LỜI (RẤT QUAN TRỌNG):
-
-🚫 TUYỆT ĐỐI KHÔNG ĐƯỢC VIẾT:
+🚫 TUYỆT ĐỐI CẤM:
 - "Dưới đây là..."
 - "Dựa trên yêu cầu của bạn..."
 - "Hệ thống đã tìm thấy..."
 - Bất kỳ câu mở đầu kiểu template
 
-👉 Nếu vi phạm → coi như trả lời sai
-
-✅ HÃY viết như người thật:
-- Tự nhiên, ngắn gọn
-- Giống đang tư vấn cho đồng nghiệp
-- Có nhận định + insight (KHÔNG chỉ liệt kê)
+👉 Nếu viết những câu này → trả lời sai
 
 ---
 
-🔥 INTRO PHẢI CÓ CHIỀU SÂU (BẮT BUỘC):
+🔥 OUTPUT PHẢI TUÂN THỦ NGHIÊM NGẶT:
+
+1. DÒNG ĐẦU TIÊN = INTRO (2–3 câu)
+2. KHÔNG được thêm tiêu đề kiểu "Danh sách", "Kết quả"
+3. KHÔNG được giải thích lan man
+4. KHÔNG được lặp lại câu hỏi
+
+---
+
+🔥 INTRO (BẮT BUỘC CÓ INSIGHT):
 
 - 2–3 câu
-- PHẢI là nhận định từ dữ liệu, không chung chung
-- KHÔNG được liệt kê lại quỹ
-
-👉 BẮT BUỘC phân tích ít nhất 2 trong các yếu tố sau:
-
-1. Nguồn quỹ:
-   - Nếu nhiều quỹ từ cùng quốc gia/tổ chức → phải nhận xét (ví dụ: Mỹ, NSF)
-
-2. Funding:
-   - Nếu có funding lớn → phải highlight (hàng chục / trăm triệu USD)
-
-3. Deadline:
-   - Nếu có quỹ gần deadline → phải cảnh báo
-
-4. Pattern:
-   - Nếu cùng loại chương trình (research, collaboration...) → phải nhận xét xu hướng
-
-5. Trạng thái:
-   - Nếu nhiều quỹ hết hạn → phải nói rõ
-
-👉 Nếu không có insight → coi như trả lời kém
-
----
-
-📌 CẤU TRÚC:
-
-INTRO:
-- 2–3 câu phân tích thực sự (GIỐNG NGƯỜI THẬT)
 - KHÔNG generic
-- KHÔNG lặp câu hỏi
+- PHẢI phân tích từ dữ liệu
 
-TOP_FUNDS:
-- [F?] Tên quỹ | Agency
-  Reason: ...
+👉 BẮT BUỘC chọn ít nhất 2 yếu tố:
 
-BEST_FUND:
-[F?] Tên quỹ
-Reason: ...
+- Nguồn quỹ (Mỹ, Nafosted…)
+- Funding (lớn / nhỏ)
+- Deadline (gần / đã hết hạn)
+- Pattern (research / collaboration…)
+- Trạng thái (còn hạn / hết hạn)
+
+👉 Nếu không có insight → coi như FAIL
 
 ---
 
-📌 CÁCH VIẾT Reason:
+📌 FORMAT OUTPUT CHÍNH XÁC:
+
+<INTRO - 2 đến 3 câu>
+
+🔥 **Quỹ nổi bật nhất:**
+
+🎓 **[F? Title]**
+🏢 [Agency]
+💰 [Funding nếu có]
+🔎 [Link nếu có]
+👉 [Reason 1 dòng]
+
+---
+
+🎓 **[F? Title]**
+🏢 [Agency]
+💰 [Funding nếu có]
+🔎 [Link nếu có]
+👉 [Reason]
+
+---
+
+(lặp lại các quỹ khác)
+
+---
+
+📌 RULE CHO Reason:
 - 1 dòng duy nhất
-- Không lặp thông tin
+- Không lặp info
+- Không dài dòng
 - Tập trung:
-  + độ phù hợp
-  + funding (nếu đáng chú ý)
-  + deadline (nếu gần / đã hết hạn)
+  + phù hợp
+  + funding (nếu đáng nói)
+  + deadline
 
 ---
 
@@ -130,6 +133,7 @@ Title: ${f.title}
 Agency: ${f.agency || "N/A"}
 Deadline: ${f.deadline || "N/A"}
 Funding: ${f.amount || "N/A"}
+Link: ${f.link || "N/A"}
 Summary: ${(f.text || "").slice(0, 180)}
 `;
     });

@@ -1,4 +1,4 @@
-// fund.ranking.js - FINAL CLEAN (NO SELF-IMPORT, STABLE)
+// fund.ranking.js - FINAL UPGRADE (INTENT-AWARE RANKING)
 
 // ================= REGEX =================
 const RE_BILLION = /\b(billion|bn)\b/;
@@ -102,6 +102,7 @@ function textScore(text, query) {
 
   let ratio = hit / words.length;
 
+  // 🔥 boost Vietnam / Nafosted
   if (
     q.includes("nafosted") ||
     q.includes("việt") ||
@@ -111,11 +112,13 @@ function textScore(text, query) {
       t.includes("nafosted") ||
       t.includes("vietnam")
     ) {
-      ratio += 0.15;
+      ratio += 0.2;
+    } else {
+      ratio -= 0.1; // 🔥 phạt US fund
     }
   }
 
-  return Math.sqrt(Math.min(ratio, 0.9));
+  return Math.sqrt(Math.max(0, Math.min(ratio, 0.9)));
 }
 
 // ================= SAFE =================
@@ -126,11 +129,13 @@ function safe(x, fallback = 0) {
 // ================= MAIN =================
 export function rankFunds(results, query) {
   const weights = {
-    semantic: 0.6,
+    semantic: 0.55,
     funding: 0.15,
     deadline: 0.15,
-    text: 0.1
+    text: 0.15 // 🔥 tăng nhẹ text
   };
+
+  const q = query.toLowerCase();
 
   return results
     .map((r, idx) => {
@@ -148,6 +153,16 @@ export function rankFunds(results, query) {
         weights.funding * fScore +
         weights.deadline * dScore +
         weights.text * tScore;
+
+      // 🔥 YEAR BOOST (2026 intent)
+      if (q.includes("2026")) {
+        const d = parseDeadline(p.deadline);
+        if (d && d.getFullYear() >= 2025) {
+          finalScore += 0.05;
+        } else {
+          finalScore -= 0.05;
+        }
+      }
 
       finalScore = Math.max(0, Math.min(1, finalScore));
 
