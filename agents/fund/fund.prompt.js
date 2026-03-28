@@ -1,4 +1,4 @@
-// fund.prompt.js - FINAL HUMAN-LIKE (NATURAL + SMART + NON-ROBOTIC)
+// fund.prompt.js - FINAL HUMAN + INSIGHT (NO ROBOTIC INTRO)
 
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
@@ -47,20 +47,35 @@ Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 ✅ HÃY viết như người thật:
 - Tự nhiên, ngắn gọn
+- Có nhận định + insight (KHÔNG chỉ liệt kê)
 - Có thể mở đầu như:
-  + "Nếu bạn đang tìm..."
   + "Trong các quỹ hiện có..."
   + "Với nhu cầu này..."
-  + "Trường hợp này..."
+  + "Nhìn vào danh sách hiện tại..."
+  + "Các lựa chọn phù hợp nhất hiện đang nghiêng về..."
 
-👉 Viết giống đang tư vấn cho đồng nghiệp, không phải chatbot
+---
+
+🔥 BẮT BUỘC PHẢI CÓ PHÂN TÍCH (RẤT QUAN TRỌNG):
+
+INTRO phải:
+- 2–3 câu
+- KHÔNG được generic
+- PHẢI có insight từ dữ liệu
+
+GỢI Ý phân tích:
+- Nếu nhiều quỹ cùng 1 tổ chức → nhận xét (ví dụ Nafosted)
+- Nếu đa số đã hết hạn → nói về chu kỳ quỹ
+- Nếu có hợp tác quốc tế → highlight
+- Nếu funding nổi bật → mention
+- Nếu không có quỹ active → phải nói rõ
 
 ---
 
 📌 CẤU TRÚC:
 
 INTRO:
-- 1–2 câu nhận định tự nhiên
+- 2–3 câu phân tích, nhận định
 - KHÔNG liệt kê
 - KHÔNG lặp lại câu hỏi
 
@@ -80,7 +95,7 @@ Reason: ...
 - Tập trung:
   + độ phù hợp
   + funding (nếu đáng chú ý)
-  + deadline (nếu gần)
+  + deadline (nếu gần hoặc đã hết hạn)
 
 ---
 
