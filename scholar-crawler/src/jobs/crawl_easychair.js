@@ -9,22 +9,23 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
+/* ================= CONFIG ================= */
 const client = new MongoClient(process.env.MONGODB_URI);
 const DB_NAME = process.env.DB_NAME || "fitneu";
 const COLLECTION = "conference";
-
 const URL = "https://easychair.org/cfp2/";
 
-const hash = (obj) =>
-  crypto.createHash("md5").update(JSON.stringify(obj)).digest("hex");
-
-/* ================= PATH FIX (QUAN TRỌNG) ================= */
+/* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const COUNTRY_FILE = path.join(__dirname, "../scripts/countryInfo.txt");
 const CITY_FILE = path.join(__dirname, "../scripts/cities15000.txt");
 const CITY_FALLBACK = path.join(__dirname, "../scripts/city_country_map.json");
+
+/* ================= HASH ================= */
+const hash = (obj) =>
+  crypto.createHash("md5").update(JSON.stringify(obj)).digest("hex");
 
 /* ================= GEO ================= */
 let geoMap = new Map();
@@ -36,7 +37,6 @@ function clean(s = "") {
   return s.toLowerCase().replace(/[()]/g, "").trim();
 }
 
-/* ================= LOAD GEO ================= */
 async function initGeo() {
   console.log("🌍 Loading Geo dataset...");
 
@@ -88,7 +88,7 @@ async function initGeo() {
     const fallbackText = await fs.readFile(CITY_FALLBACK, "utf8");
     fallbackMap = JSON.parse(fallbackText);
   } catch {
-    console.log("⚠️ No fallback map loaded");
+    console.log("⚠️ No fallback map");
   }
 
   console.log(`✅ Geo loaded: ${geoMap.size} cities`);
@@ -99,14 +99,11 @@ function extractLocation(location = "") {
   if (!location) return {};
 
   const parts = location.split(",").map(s => s.trim());
-
   const cityRaw = parts[0];
   const cityKey = clean(cityRaw);
 
-  // 1. geo dataset
   let geo = geoMap.get(cityKey);
 
-  // 2. fallback
   if (!geo && fallbackMap[cityRaw]) {
     const fb = fallbackMap[cityRaw];
 
@@ -121,14 +118,12 @@ function extractLocation(location = "") {
   if (!geo) return {};
 
   const country_code = geo.country_code;
-  const country = ISO_TO_COUNTRY[country_code] || null;
-  const continent = ISO_TO_CONTINENT[country_code] || null;
 
   return {
     city: geo.city,
     country_code,
-    country,
-    continent
+    country: ISO_TO_COUNTRY[country_code] || null,
+    continent: ISO_TO_CONTINENT[country_code] || null
   };
 }
 
@@ -149,10 +144,7 @@ async function removeDuplicates(col) {
     { $sort: { updated_time: -1 } },
     {
       $group: {
-        _id: {
-          acronym: "$acronym",
-          start_date: "$start_date"
-        },
+        _id: { _key: "$_key" },
         ids: { $push: "$_id" },
         count: { $sum: 1 }
       }
@@ -181,6 +173,9 @@ async function run() {
   const db = client.db(DB_NAME);
   const col = db.collection(COLLECTION);
 
+  // đảm bảo index đúng
+  await col.createIndex({ _key: 1 }, { unique: true });
+
   console.log("🚀 Crawling...");
 
   const { data } = await axios.get(URL);
@@ -203,19 +198,24 @@ async function run() {
     const deadline = parseDate($(cols[3]).text().trim());
     const start_date = parseDate($(cols[4]).text().trim());
 
-    const topics_raw = $(cols[5]).text().trim();
-    const topics = topics_raw
-      ? topics_raw.split(",").map(t => t.trim()).filter(Boolean)
-      : [];
-
-    const geo = extractLocation(location);
+    const topics = $(cols[5])
+      .text()
+      .trim()
+      .split(",")
+      .map(t => t.trim())
+      .filter(Boolean);
 
     let link = $(cols[0]).find("a").attr("href");
     if (link && !link.startsWith("http")) {
       link = "https://easychair.org" + link;
     }
 
+    const geo = extractLocation(location);
+
+    const _key = `${acronym}_${start_date}`;
+
     const newDoc = {
+      _key,
       acronym,
       name,
       location,
@@ -228,7 +228,7 @@ async function run() {
 
     const newHash = hash(newDoc);
 
-    const existing = await col.findOne({ acronym, start_date });
+    const existing = await col.findOne({ _key });
 
     if (!existing) {
       await col.insertOne({
@@ -264,11 +264,6 @@ async function run() {
   console.log({ inserted, updated, skipped });
 
   await removeDuplicates(col);
-
-  await col.createIndex(
-    { acronym: 1, start_date: 1 },
-    { unique: true }
-  );
 
   console.log("🎯 DONE");
   await client.close();
