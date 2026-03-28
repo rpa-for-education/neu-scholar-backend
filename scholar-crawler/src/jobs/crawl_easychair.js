@@ -1,164 +1,159 @@
-import crypto from "crypto";
+import axios from "axios";
+import * as cheerio from "cheerio";
 import { MongoClient } from "mongodb";
+import crypto from "crypto";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// ================= CONFIG =================
-const MONGO_URI = process.env.MONGO_URI;
-const DB_NAME = process.env.DB_NAME || "rpa";
+const client = new MongoClient(process.env.MONGODB_URI);
+const DB_NAME = process.env.DB_NAME || "fitneu";
 const COLLECTION = "conference";
-const SOURCE = "easychair";
-const BATCH_SIZE = 500;
 
-const client = new MongoClient(MONGO_URI);
+const URL = "https://easychair.org/cfp2/";
 
-// ================= UTIL =================
-const hash = (str) =>
-  crypto.createHash("md5").update(str).digest("hex");
+const hash = (obj) =>
+  crypto.createHash("md5").update(JSON.stringify(obj)).digest("hex");
 
-function generateExternalId(doc) {
-  return hash(doc.link || doc.title);
-}
+/* ================= REMOVE DUPLICATE ================= */
+async function removeDuplicates(col) {
+  console.log("🧹 Removing duplicates...");
 
-function extractYear(text = "") {
-  const match = text.match(/20\d{2}/);
-  return match ? Number(match[0]) : null;
-}
-
-function normalizeDoc(raw) {
-  return {
-    title: raw.title?.trim(),
-    acronym: raw.acronym?.trim(),
-    link: raw.link,
-    location: raw.location || "",
-    year: raw.year || extractYear(raw.title)
-  };
-}
-
-function generateRawHash(doc) {
-  const base = {
-    title: doc.title,
-    acronym: doc.acronym,
-    link: doc.link,
-    location: doc.location,
-    year: doc.year
-  };
-  return hash(JSON.stringify(base));
-}
-
-// ================= BULK UPSERT RAW =================
-async function bulkUpsertRaw(col, docs) {
-  const ops = [];
-
-  for (const raw of docs) {
-    const doc = normalizeDoc(raw);
-    if (!doc.title) continue;
-
-    const external_id = generateExternalId(doc);
-    const raw_hash = generateRawHash(doc);
-
-    ops.push({
-      updateOne: {
-        filter: {
-          source: SOURCE,
-          external_id
+  const cursor = col.aggregate([
+    { $sort: { updated_time: -1 } },
+    {
+      $group: {
+        _id: {
+          acronym: "$acronym",
+          start_date: "$start_date",
         },
-        update: [
-          {
-            $set: {
-              // RAW fields only
-              ...doc,
-              source: SOURCE,
-              external_id,
-              raw_hash,
-              isActive: true,
-              updatedAt: new Date()
-            }
-          },
-          {
-            $setOnInsert: {
-              createdAt: new Date()
-            }
-          }
-        ],
-        upsert: true
-      }
-    });
+        ids: { $push: "$_id" },
+        count: { $sum: 1 },
+      },
+    },
+    { $match: { count: { $gt: 1 } } },
+  ]);
+
+  let removed = 0;
+
+  for await (const doc of cursor) {
+    doc.ids.shift();
+    const res = await col.deleteMany({ _id: { $in: doc.ids } });
+    removed += res.deletedCount;
   }
 
-  if (!ops.length) return { inserted: 0, updated: 0 };
-
-  const res = await col.bulkWrite(ops, { ordered: false });
-
-  return {
-    inserted: res.upsertedCount || 0,
-    updated: res.modifiedCount || 0
-  };
+  console.log(`🗑️ Removed: ${removed}`);
 }
 
-// ================= MAIN =================
+/* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 RAW CRAWLER START");
-
   await client.connect();
-  const col = client.db(DB_NAME).collection(COLLECTION);
+  console.log("✅ MongoDB connected");
 
-  // 👉 TODO: thay bằng crawler thật
-  const crawled = await crawlEasyChairFull();
+  const db = client.db(DB_NAME);
+  const col = db.collection(COLLECTION);
+
+  console.log("🚀 Crawling...");
+
+  const { data } = await axios.get(URL, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120 Safari/537.36",
+    },
+  });
+
+  const $ = cheerio.load(data);
+  const rows = $("table tbody tr");
 
   let inserted = 0;
   let updated = 0;
+  let skipped = 0;
 
-  for (let i = 0; i < crawled.length; i += BATCH_SIZE) {
-    const chunk = crawled.slice(i, i + BATCH_SIZE);
+  for (const row of rows.toArray()) {
+    const cols = $(row).find("td");
+    if (cols.length < 6) continue;
 
-    const res = await bulkUpsertRaw(col, chunk);
+    const acronym = $(cols[0]).text().trim();
+    const name = $(cols[1]).text().trim();
+    const location = $(cols[2]).text().trim();
+    const deadline = $(cols[3]).text().trim();
+    const start_date = $(cols[4]).text().trim();
 
-    inserted += res.inserted;
-    updated += res.updated;
+    let link = $(cols[0]).find("a").attr("href");
+    if (link && !link.startsWith("http")) {
+      link = "https://easychair.org" + link;
+    }
+
+    const newDoc = {
+      acronym,
+      name,
+      location,
+      deadline,
+      start_date,
+      url: link,
+    };
+
+    const newHash = hash(newDoc);
+
+    const existing = await col.findOne({
+      acronym,
+      start_date,
+    });
+
+    // INSERT
+    if (!existing) {
+      await col.insertOne({
+        ...newDoc,
+        hash: newHash,
+        status: "pending",
+        updated_time: new Date(),
+      });
+      inserted++;
+      continue;
+    }
+
+    // SKIP
+    if (existing.hash === newHash) {
+      skipped++;
+      continue;
+    }
+
+    // UPDATE (KHÔNG overwrite field khác)
+    await col.updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          name,
+          location,
+          deadline,
+          url: link,
+          hash: newHash,
+          status: "pending",
+          updated_time: new Date(),
+        },
+      }
+    );
+
+    updated++;
   }
 
-  // ===== mark inactive =====
-  const seenIds = crawled.map(d =>
-    generateExternalId(normalizeDoc(d))
-  );
-
-  await col.updateMany(
-    {
-      source: SOURCE,
-      external_id: { $nin: seenIds }
-    },
-    {
-      $set: { isActive: false }
-    }
-  );
-
   console.log(`
-📊 RAW RESULT
 🆕 Inserted: ${inserted}
 🔄 Updated: ${updated}
+⏭️ Skipped: ${skipped}
   `);
 
-  await client.close();
-}
+  await removeDuplicates(col);
 
-// ================= MOCK =================
-async function crawlEasyChairFull() {
-  return [
-    {
-      title: "ICML 2026",
-      acronym: "ICML",
-      link: "https://icml.cc",
-      location: "USA"
-    },
-    {
-      title: "NeurIPS 2026",
-      acronym: "NeurIPS",
-      link: "https://neurips.cc",
-      location: "Canada"
-    }
-  ];
+  await col.createIndex(
+    { acronym: 1, start_date: 1 },
+    { unique: true }
+  );
+
+  console.log("✅ Index ready");
+  console.log("🎯 DONE");
+
+  await client.close();
 }
 
 run();

@@ -180,8 +180,8 @@ async function main() {
   await mongo.connect();
   console.log("✅ Mongo connected");
 
-  await sync("journal", "journal", "journal_vectors");
   await sync("fund", "fund", "fund_vectors");
+  await sync("journal", "journal", "journal_vectors");
   await sync("conference", "conference", "conference_vectors");
 
   console.log("🎯 ALL DONE");
