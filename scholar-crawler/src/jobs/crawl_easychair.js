@@ -4,6 +4,8 @@ import { MongoClient } from "mongodb";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -16,10 +18,13 @@ const URL = "https://easychair.org/cfp2/";
 const hash = (obj) =>
   crypto.createHash("md5").update(JSON.stringify(obj)).digest("hex");
 
-/* ================= FILE PATH ================= */
-const COUNTRY_FILE = new URL("../scripts/countryInfo.txt", import.meta.url);
-const CITY_FILE = new URL("../scripts/cities15000.txt", import.meta.url);
-const CITY_FALLBACK = new URL("../scripts/city_country_map.json", import.meta.url);
+/* ================= PATH FIX (QUAN TRỌNG) ================= */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const COUNTRY_FILE = path.join(__dirname, "../scripts/countryInfo.txt");
+const CITY_FILE = path.join(__dirname, "../scripts/cities15000.txt");
+const CITY_FALLBACK = path.join(__dirname, "../scripts/city_country_map.json");
 
 /* ================= GEO ================= */
 let geoMap = new Map();
@@ -78,7 +83,7 @@ async function initGeo() {
     }
   });
 
-  // fallback map
+  // fallback
   try {
     const fallbackText = await fs.readFile(CITY_FALLBACK, "utf8");
     fallbackMap = JSON.parse(fallbackText);
@@ -98,10 +103,10 @@ function extractLocation(location = "") {
   const cityRaw = parts[0];
   const cityKey = clean(cityRaw);
 
-  // 1. ưu tiên geo dataset
+  // 1. geo dataset
   let geo = geoMap.get(cityKey);
 
-  // 2. fallback json
+  // 2. fallback
   if (!geo && fallbackMap[cityRaw]) {
     const fb = fallbackMap[cityRaw];
 
