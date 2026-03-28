@@ -17,15 +17,45 @@ const CACHE = new Map();
 const EMBED_CACHE = new Map();
 const MAX_EMBED_CACHE = 200;
 
-// ================= 🔥 NORMALIZE =================
+// ================= 🔥 NORMALIZE (FIX) =================
 function normalizeFundDoc(d) {
   return {
-    title: d.title || d["OPPORTUNITY TITLE"] || "",
-    agency: d.agency || d["AGENCY NAME"] || "",
-    text: d.text || d["FUNDING DESCRIPTION"] || "",
-    deadline: d.deadline || d["ESTIMATED APPLICATION DUE DATE"] || "",
-    amount: d.amount || d["ESTIMATED TOTAL FUNDING"] || "",
-    url: d.url || d["OPPORTUNITY URL"] || d["URL"] || ""
+    title:
+      d.title ||
+      d.opportunity_title ||
+      d["OPPORTUNITY TITLE"] ||
+      "",
+
+    agency:
+      d.agency ||
+      d.agency_name ||
+      d["AGENCY NAME"] ||
+      "",
+
+    text:
+      d.text ||
+      d.description ||
+      d["FUNDING DESCRIPTION"] ||
+      "",
+
+    deadline:
+      d.deadline ||
+      d.close_date ||
+      d["ESTIMATED APPLICATION DUE DATE"] ||
+      "",
+
+    amount:
+      d.amount ||
+      d.funding_amount ||
+      d["ESTIMATED TOTAL FUNDING"] ||
+      "",
+
+    url:
+      d.url ||
+      d.additional_info_url ||
+      d["OPPORTUNITY URL"] ||
+      d["URL"] ||
+      ""
   };
 }
 
@@ -103,7 +133,7 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= 🔥 KEYWORD SEARCH =================
+// ================= 🔥 KEYWORD SEARCH (FIX) =================
 async function keywordSearch(query, limit) {
   try {
     const db = await getDb();
@@ -113,12 +143,9 @@ async function keywordSearch(query, limit) {
       .find({
         $or: words.map(w => ({
           $or: [
-            { title: { $regex: w, $options: "i" } },
-            { agency: { $regex: w, $options: "i" } },
-            { text: { $regex: w, $options: "i" } },
-            { "OPPORTUNITY TITLE": { $regex: w, $options: "i" } },
-            { "AGENCY NAME": { $regex: w, $options: "i" } },
-            { "FUNDING DESCRIPTION": { $regex: w, $options: "i" } }
+            { opportunity_title: { $regex: w, $options: "i" } },
+            { agency_name: { $regex: w, $options: "i" } },
+            { text: { $regex: w, $options: "i" } }
           ]
         }))
       })

@@ -66,7 +66,7 @@ function deadlineScore(deadline) {
   return Math.max(0, Math.min(1, score));
 }
 
-// ================= TEXT SCORE =================
+// ================= 🔥 TEXT SCORE (FIX NAFOSTED) =================
 function textScore(text, query) {
   if (!text) return 0;
 
@@ -102,15 +102,25 @@ function textScore(text, query) {
 
   let ratio = hit / words.length;
 
-  // 🔥 BOOST VN / NAFOSTED
+  // 🔥 FIX: nhận diện Nafosted (cả EN + VN)
   if (
-    q.includes("nafosted") ||
+    q.includes("nafosted") &&
+    (
+      t.includes("nafosted") ||
+      t.includes("khoa học và công nghệ quốc gia") ||
+      t.includes("quỹ phát triển khoa học") ||
+      t.includes("national foundation")
+    )
+  ) {
+    ratio += 0.3;
+  }
+
+  // 🔥 giữ boost VN
+  else if (
     q.includes("việt") ||
     q.includes("vietnam")
   ) {
-    if (t.includes("nafosted")) {
-      ratio += 0.25; // 🔥 boost mạnh hơn
-    } else if (t.includes("vietnam")) {
+    if (t.includes("vietnam")) {
       ratio += 0.15;
     }
   }
@@ -118,10 +128,9 @@ function textScore(text, query) {
   return Math.sqrt(Math.min(ratio, 1));
 }
 
-// ================= 🔥 RELEVANCE GATE =================
+// ================= 🔥 RELEVANCE GATE (NỚI NHẸ) =================
 function isRelevant(tScore, vScore) {
-  // phải có ít nhất 1 trong 2
-  return tScore > 0.1 || vScore > 0.3;
+  return tScore > 0.05 || vScore > 0.25;
 }
 
 // ================= WEIGHTS =================
@@ -129,10 +138,10 @@ function getWeights(query) {
   const q = query.toLowerCase();
 
   let w = {
-    semantic: 0.55,   // 🔥 giảm nhẹ
+    semantic: 0.55,
     funding: 0.15,
     deadline: 0.15,
-    text: 0.15        // 🔥 tăng text
+    text: 0.15
   };
 
   if (/(fund|budget|grant|money)/.test(q)) {
@@ -204,7 +213,7 @@ export function rankFunds(results, query) {
         _idx: idx
       };
     })
-    .filter(Boolean) // 🔥 remove rác
+    .filter(Boolean)
     .sort((a, b) => {
       if (b.finalScore !== a.finalScore) {
         return b.finalScore - a.finalScore;

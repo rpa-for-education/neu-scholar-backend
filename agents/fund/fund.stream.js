@@ -17,9 +17,17 @@ function writeSSE(res, data, type = "message") {
   return res.write(`data: ${payload}\n\n`);
 }
 
-// ================= SPLIT WORD =================
-function splitWords(text) {
-  return text.split(/\s+/);
+// ================= 🔥 SPLIT CHUNK (FIX UX) =================
+function splitChunks(text, size = 30) {
+  const chunks = [];
+  let i = 0;
+
+  while (i < text.length) {
+    chunks.push(text.slice(i, i + size));
+    i += size;
+  }
+
+  return chunks;
 }
 
 // ================= BUILD PROMPT =================
@@ -109,19 +117,19 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     writeSSE(res, "📊 Đã phân tích xong", "progress");
 
     // ================= STREAM RESULT =================
-    writeSSE(res, "💰 Kết quả:", "header");
+    writeSSE(res, "💰 Kết quả:\n", "header");
 
-    const words = splitWords(result.answer);
+    const chunks = splitChunks(result.answer, 40);
 
-    for (const word of words) {
+    for (const chunk of chunks) {
       if (isClosed) break;
 
-      writeSSE(res, word + " ", "chunk");
-      await new Promise(r => setTimeout(r, 8));
+      writeSSE(res, chunk, "chunk");
+      await new Promise(r => setTimeout(r, 10));
     }
 
     // ================= EXPLAIN =================
-    writeSSE(res, "\n\n🤖 Phân tích thêm:", "header");
+    writeSSE(res, "\n\n🤖 Phân tích thêm:\n", "header");
 
     let explain = "";
 
@@ -135,13 +143,13 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     } catch {}
 
     if (explain) {
-      const words = splitWords(explain);
+      const chunks = splitChunks(explain, 50);
 
-      for (const word of words) {
+      for (const chunk of chunks) {
         if (isClosed) break;
 
-        writeSSE(res, word + " ", "chunk");
-        await new Promise(r => setTimeout(r, 10));
+        writeSSE(res, chunk, "chunk");
+        await new Promise(r => setTimeout(r, 15));
       }
     } else {
       writeSSE(res, "Không có phân tích thêm.", "chunk");

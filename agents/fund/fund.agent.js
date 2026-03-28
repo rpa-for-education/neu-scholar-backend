@@ -1,4 +1,4 @@
-// fund.agent.js - FINAL (AUTO NORMALIZE + DEBUG + FIX FULL)
+// fund.agent.js - FINAL FIX (NAFOSTED + SCHEMA MATCH)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -7,7 +7,7 @@ import { getDb } from "../../db/mongo.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v11";
+const CACHE_VERSION = "v12";
 
 const DEBUG = true;
 
@@ -28,15 +28,46 @@ function setCache(key, value) {
   CACHE.set(key, { time: Date.now(), value });
 }
 
-// ================= 🔥 NORMALIZE (QUAN TRỌNG NHẤT) =================
+// ================= 🔥 NORMALIZE FIX =================
 function normalizeFundDoc(d) {
   return {
-    title: d.title || d["OPPORTUNITY TITLE"] || "",
-    agency: d.agency || d["AGENCY NAME"] || "",
-    text: d.text || d["FUNDING DESCRIPTION"] || "",
-    deadline: d.deadline || d["ESTIMATED APPLICATION DUE DATE"] || "",
-    amount: d.amount || d["ESTIMATED TOTAL FUNDING"] || "",
-    url: d.url || d["OPPORTUNITY URL"] || d["URL"] || ""
+    // 🔥 FIX: đọc đúng schema Mongo của bạn
+    title:
+      d.title ||
+      d.opportunity_title ||
+      d["OPPORTUNITY TITLE"] ||
+      "",
+
+    agency:
+      d.agency ||
+      d.agency_name ||
+      d["AGENCY NAME"] ||
+      "",
+
+    text:
+      d.text ||
+      d.description ||
+      d["FUNDING DESCRIPTION"] ||
+      "",
+
+    deadline:
+      d.deadline ||
+      d.close_date ||
+      d["ESTIMATED APPLICATION DUE DATE"] ||
+      "",
+
+    amount:
+      d.amount ||
+      d.funding_amount ||
+      d["ESTIMATED TOTAL FUNDING"] ||
+      "",
+
+    url:
+      d.url ||
+      d.additional_info_url ||
+      d["OPPORTUNITY URL"] ||
+      d["URL"] ||
+      ""
   };
 }
 
@@ -100,12 +131,9 @@ async function keywordSearch(query, limit = 10) {
       .find({
         $or: words.map(w => ({
           $or: [
-            { title: { $regex: w, $options: "i" } },
-            { agency: { $regex: w, $options: "i" } },
-            { text: { $regex: w, $options: "i" } },
-            { "OPPORTUNITY TITLE": { $regex: w, $options: "i" } },
-            { "AGENCY NAME": { $regex: w, $options: "i" } },
-            { "FUNDING DESCRIPTION": { $regex: w, $options: "i" } }
+            { opportunity_title: { $regex: w, $options: "i" } }, // 🔥 FIX
+            { agency_name: { $regex: w, $options: "i" } },       // 🔥 FIX
+            { text: { $regex: w, $options: "i" } }
           ]
         }))
       })
@@ -132,7 +160,7 @@ async function keywordSearch(query, limit = 10) {
       return {
         id: d._id?.toString(),
         payload: norm,
-        score: 0.2 + hit * 0.15
+        score: 0.3 + hit * 0.2
       };
     });
 
@@ -156,7 +184,6 @@ function mergeResults(vector, keyword) {
 
   vector.forEach(r => {
     const norm = normalizeFundDoc(r.payload || r);
-
     const key = r.id || norm.title;
     if (!key) return;
 
@@ -168,7 +195,7 @@ function mergeResults(vector, keyword) {
     if (!key) return;
 
     if (map.has(key)) {
-      map.get(key).score += 0.2;
+      map.get(key).score += 0.25;
     } else {
       map.set(key, r);
     }
@@ -181,23 +208,30 @@ function mergeResults(vector, keyword) {
   return merged;
 }
 
-// ================= FILTER =================
+// ================= FILTER FIX =================
 function parseDateSafe(d) {
   if (!d) return null;
   const date = new Date(d);
   return isNaN(date) ? null : date;
 }
 
-function filterResults(results) {
+function filterResults(results, query = "") {
   const now = Date.now();
+  const q = query.toLowerCase();
+
+  // 🔥 FIX: query info thì KHÔNG filter expired
+  const isInfoQuery =
+    q.includes("nafosted") ||
+    q.includes("thông tin");
 
   const filtered = results.filter(r => {
     const d = parseDateSafe(r.payload?.deadline);
 
-    // 🔥 chỉ drop nếu quá 2 năm
-    if (d && d.getTime() < now - 1000 * 60 * 60 * 24 * 365 * 2) {
-      if (DEBUG) console.log("❌ drop expired:", r.payload?.title);
-      return false;
+    if (!isInfoQuery) {
+      if (d && d.getTime() < now) {
+        if (DEBUG) console.log("❌ drop expired:", r.payload?.title);
+        return false;
+      }
     }
 
     return true;
@@ -237,7 +271,8 @@ export async function runFundSearch(query, model_id, topk = 5) {
       merged.push(...extra.slice(0, k));
     }
 
-    merged = filterResults(merged);
+    // 🔥 FIX: truyền query vào filter
+    merged = filterResults(merged, q);
 
     if (!merged.length) {
       return keywordResults.slice(0, k);

@@ -47,14 +47,28 @@ function normalizeFunds(arr) {
   });
 }
 
-// ================= 🔥 INTENT MATCH =================
+// ================= 🔥 INTENT MATCH (FIX NAFOSTED) =================
 function relevanceScore(fund, query) {
-  const t = (fund.title + " " + fund.text).toLowerCase();
+  const t = (fund.title + " " + fund.text + " " + fund.agency).toLowerCase();
   const q = query.toLowerCase();
 
   let score = 0;
 
-  if (q.includes("nafosted") && t.includes("nafosted")) score += 2;
+  // 🔥 FIX: nhận diện Nafosted (tiếng Việt + tiếng Anh)
+  if (
+    q.includes("nafosted") &&
+    (
+      t.includes("nafosted") ||
+      t.includes("khoa học và công nghệ quốc gia") ||
+      t.includes("quỹ phát triển khoa học") ||
+      t.includes("national foundation") ||
+      t.includes("vietnam")
+    )
+  ) {
+    score += 2;
+  }
+
+  // 🔥 giữ logic cũ
   if (q.includes("việt") || q.includes("vietnam")) {
     if (t.includes("vietnam")) score += 1;
   }
