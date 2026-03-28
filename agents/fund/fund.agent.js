@@ -1,14 +1,15 @@
-// fund.agent.js - FINAL BEST (KEEP LOGIC + SMART FILTER)
+// fund.agent.js - FINAL BEST + INTENT LAYER
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
 import { getDb } from "../../db/mongo.js";
 import { rerankFunds } from "./fund.rerank.js";
+import { detectIntent, rewriteQuery } from "./agentReasoning.js";
 
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v12"; // 🔥 bump
+const CACHE_VERSION = "v13";
 
 // ================= CACHE =================
 function getCache(key) {
@@ -30,17 +31,6 @@ function setCache(key, value) {
 // ================= UTILS =================
 function normalizeQuery(q) {
   return (q || "").trim().toLowerCase();
-}
-
-function expandQuery(q) {
-  let expanded = q;
-
-  if (q.includes("quỹ")) expanded += " fund grant funding";
-  if (q.includes("nghiên cứu")) expanded += " research science";
-  if (q.includes("nafosted")) expanded += " nafosted vietnam foundation";
-  if (q.includes("việt")) expanded += " vietnam";
-
-  return expanded;
 }
 
 function safeTopk(k) {
@@ -99,7 +89,8 @@ export async function runFundSearch(query, model_id, topk = 5) {
   const q = normalizeQuery(query);
   if (!q) return [];
 
-  const expanded = expandQuery(q);
+  const intent = detectIntent(q);
+  const expanded = rewriteQuery(q, intent);
   const k = safeTopk(topk);
 
   const cacheKey = `${CACHE_VERSION}:${expanded}:${k}`;
@@ -119,71 +110,62 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let ranked = rankFunds(merged, q);
 
-    // ================= 🔥 SMART FILTER =================
-    let filtered = ranked;
+    // ================= 🔥 INTENT-AWARE BOOST =================
+    let filtered = ranked.map(r => {
+      const t = (r.payload?.text || "").toLowerCase();
+      const a = (r.payload?.agency || "").toLowerCase();
 
-    // 🔥 SOFT GEO BOOST
-    if (q.includes("việt") || q.includes("vietnam")) {
-      filtered = ranked
-        .map(r => {
-          const t = (r.payload?.text || "").toLowerCase();
-          const a = (r.payload?.agency || "").toLowerCase();
+      let bonus = 0;
 
-          let bonus = 0;
+      // COUNTRY
+      if (intent.country === "vietnam") {
+        if (t.includes("vietnam") || t.includes("nafosted")) bonus += 0.25;
+        if (a.includes("vietnam")) bonus += 0.25;
 
-          if (t.includes("vietnam") || t.includes("nafosted")) bonus += 0.2;
-          if (a.includes("vietnam")) bonus += 0.2;
+        if (
+          a.includes("nsf") ||
+          a.includes("u.s.") ||
+          a.includes("naval")
+        ) {
+          bonus -= 0.2;
+        }
+      }
 
-          if (
-            a.includes("nsf") ||
-            a.includes("u.s.") ||
-            a.includes("naval")
-          ) {
-            bonus -= 0.25;
-          }
-
-          return { ...r, finalScore: r.finalScore + bonus };
-        })
-        .sort((a, b) => b.finalScore - a.finalScore);
-    }
-
-    // 🔥 TIME SOFT
-    const now = Date.now();
-
-    filtered = filtered
-      .map(r => {
+      // YEAR
+      if (intent.year) {
         const d = new Date(r.payload?.deadline || "");
-        if (isNaN(d)) return r;
+        if (!isNaN(d)) {
+          if (d.getFullYear() >= intent.year - 1) bonus += 0.1;
+          else bonus -= 0.1;
+        }
+      }
 
-        const diffDays = (d.getTime() - now) / (1000 * 60 * 60 * 24);
+      return { ...r, finalScore: r.finalScore + bonus };
+    });
 
-        let bonus = 0;
-        if (diffDays > 0) bonus += 0.05;
-        if (diffDays < -365) bonus -= 0.1;
+    filtered = filtered.sort((a, b) => b.finalScore - a.finalScore);
 
-        return { ...r, finalScore: r.finalScore + bonus };
-      })
-      .sort((a, b) => b.finalScore - a.finalScore);
+    // ================= FALLBACK =================
+    let finalResults = filtered.slice(0, k);
 
-    // 🔥 FALLBACK HARD (CHỈ khi sai hoàn toàn)
     if (
-      q.includes("việt") &&
-      filtered.slice(0, 3).every(r => {
+      intent.country === "vietnam" &&
+      finalResults.every(r => {
         const t = (r.payload?.text || "").toLowerCase();
         return !t.includes("vietnam") && !t.includes("nafosted");
       })
     ) {
-      const hard = ranked.filter(r => {
+      const fallback = ranked.filter(r => {
         const t = (r.payload?.text || "").toLowerCase();
         return t.includes("vietnam") || t.includes("nafosted");
       });
 
-      if (hard.length > 0) filtered = hard;
+      if (fallback.length > 0) {
+        finalResults = fallback.slice(0, k);
+      }
     }
 
     // ================= RERANK =================
-    let finalResults = filtered.slice(0, k);
-
     try {
       const reranked = await rerankFunds(q, finalResults, model_id);
       if (reranked?.length) {
@@ -191,12 +173,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
         finalResults = [...reranked, ...remain].slice(0, k);
       }
     } catch {}
-
-    // ================= FILL =================
-    if (finalResults.length < k) {
-      const remain = ranked.filter(r => !finalResults.includes(r));
-      finalResults = [...finalResults, ...remain.slice(0, k - finalResults.length)];
-    }
 
     // ================= EXPLAIN =================
     finalResults = finalResults.map(r => ({
