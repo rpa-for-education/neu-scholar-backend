@@ -1,6 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { MongoClient } from "mongodb";
+import { getDb } from "../services/mongo.js";
 import crypto from "crypto";
 import dotenv from "dotenv";
 

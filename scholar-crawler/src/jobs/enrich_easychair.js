@@ -3,7 +3,7 @@ import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import fs from "fs/promises";
 import { chromium } from "playwright";
-import { getDb } from "../db/mongo.js";
+import { getDb } from "../services/mongo.js"; // ✅ FIX PATH
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
@@ -20,8 +20,8 @@ const COUNTRY_NAME_TO_ISO = {
 };
 
 /* ================= PATH ================= */
-const COUNTRY_FILE = new URL("./scripts/countryInfo.txt", import.meta.url);
-const CITY_FILE = new URL("./scripts/cities15000.txt", import.meta.url);
+const COUNTRY_FILE = new URL("../scripts/countryInfo.txt", import.meta.url);
+const CITY_FILE = new URL("../scripts/cities15000.txt", import.meta.url);
 
 /* ================= GLOBAL ================= */
 let geoMap = new Map();
@@ -271,7 +271,6 @@ async function run() {
           data = {};
         }
 
-        // 🔥 SAFE UPDATE (KHÔNG PHÁ DATA)
         const updateFields = {
           crawl_source: source,
           updated_time: new Date()

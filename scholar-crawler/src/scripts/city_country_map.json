@@ -1,0 +1,3622 @@
+{
+  "A Coruña": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "AMES": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "ANTALYA": {
+    "country_code": "TR",
+    "country": "TR",
+    "continent": "Asia"
+  },
+  "Aachen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Aalborg": {
+    "country_code": "DK",
+    "country": "DK",
+    "continent": "Europe"
+  },
+  "Abu Dhabi": {
+    "country_code": "AE",
+    "country": "AE",
+    "continent": "Asia"
+  },
+  "Abuja": {
+    "country_code": "NG",
+    "country": "NG",
+    "continent": null
+  },
+  "Aden": {
+    "country_code": "YE",
+    "country": "YE",
+    "continent": null
+  },
+  "Agadir": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Agra": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Ahilyanagar": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Ahmedabad": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Ahvaz": {
+    "country_code": "IR",
+    "country": "IR",
+    "continent": "Asia"
+  },
+  "Alagoinhas": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Albuquerque": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Alcalá de Henares": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Alcalá la Real": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Alexandria": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Algiers": {
+    "country_code": "DZ",
+    "country": "DZ",
+    "continent": "Africa"
+  },
+  "Alicante": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Almaty": {
+    "country_code": "KZ",
+    "country": "KZ",
+    "continent": null
+  },
+  "Ambato": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "Ames": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Amiens": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Amman": {
+    "country_code": "JO",
+    "country": "JO",
+    "continent": null
+  },
+  "Amsterdam": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Ancona": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Ankara": {
+    "country_code": "TR",
+    "country": "TR",
+    "continent": "Asia"
+  },
+  "Arequipa": {
+    "country_code": "PE",
+    "country": "PE",
+    "continent": null
+  },
+  "Arlington": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Arusha": {
+    "country_code": "TZ",
+    "country": "TZ",
+    "continent": null
+  },
+  "Athens": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Atlanta": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Auckland": {
+    "country_code": "NZ",
+    "country": "NZ",
+    "continent": "Oceania"
+  },
+  "Augsburg": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Aveiro": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Avignon": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "BHUBANESWAR": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Baku": {
+    "country_code": "AZ",
+    "country": "AZ",
+    "continent": null
+  },
+  "Bali": {
+    "country_code": "CM",
+    "country": "CM",
+    "continent": null
+  },
+  "Bamako": {
+    "country_code": "ML",
+    "country": "ML",
+    "continent": null
+  },
+  "Bamberg": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bandar Seri Begawan": {
+    "country_code": "BN",
+    "country": "BN",
+    "continent": null
+  },
+  "Bandung": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Bangkok": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Banjul": {
+    "country_code": "GM",
+    "country": "GM",
+    "continent": null
+  },
+  "Banyumas": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Baoding": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Baqubah": {
+    "country_code": "IQ",
+    "country": "IQ",
+    "continent": null
+  },
+  "Barcelona": {
+    "country_code": "VE",
+    "country": "VE",
+    "continent": null
+  },
+  "Bari": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Batam": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Bath": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Bayonne": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Bayreuth": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Beijing": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Bekasi": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Belgrade": {
+    "country_code": "RS",
+    "country": "RS",
+    "continent": null
+  },
+  "Belo Horizonte": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Ben Guerir": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Benevento": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Bengaluru": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Beni Mellal": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Benin City": {
+    "country_code": "NG",
+    "country": "NG",
+    "continent": null
+  },
+  "Bergen": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Berlin": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bern": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Besançon": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Bhopal": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Bhubaneswar": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Biarritz": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Bielefeld": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bilbao": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Birmingham": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Bishkek": {
+    "country_code": "KG",
+    "country": "KG",
+    "continent": null
+  },
+  "Bloemfontein": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Bobo-Dioulasso": {
+    "country_code": "BF",
+    "country": "BF",
+    "continent": null
+  },
+  "Bognor Regis": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Bogotá": {
+    "country_code": "CO",
+    "country": "CO",
+    "continent": "South America"
+  },
+  "Boise": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Bologna": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Bonn": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bordeaux": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Boston": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Boulder": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Bradford": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Braga": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Bragança": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Braunschweig": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bremen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Bremerhaven": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Brest": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Brighton": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Brisbane": {
+    "country_code": "AU",
+    "country": "AU",
+    "continent": "Oceania"
+  },
+  "Brno": {
+    "country_code": "CZ",
+    "country": "CZ",
+    "continent": "Europe"
+  },
+  "Brussels": {
+    "country_code": "BE",
+    "country": "BE",
+    "continent": "Europe"
+  },
+  "Bucharest": {
+    "country_code": "RO",
+    "country": "RO",
+    "continent": null
+  },
+  "Budapest": {
+    "country_code": "HU",
+    "country": "HU",
+    "continent": "Europe"
+  },
+  "Budva": {
+    "country_code": "ME",
+    "country": "ME",
+    "continent": null
+  },
+  "Buenos Aires": {
+    "country_code": "AR",
+    "country": "AR",
+    "continent": "South America"
+  },
+  "Buraydah": {
+    "country_code": "SA",
+    "country": "SA",
+    "continent": "Asia"
+  },
+  "Busan": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Böblingen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "CARTAGENA": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "CHENNAI": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "COIMBATORE": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Cagliari": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Cairo": {
+    "country_code": "EG",
+    "country": "EG",
+    "continent": "Africa"
+  },
+  "Cajamarca": {
+    "country_code": "PE",
+    "country": "PE",
+    "continent": null
+  },
+  "Calais": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Calgary": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Cali": {
+    "country_code": "CO",
+    "country": "CO",
+    "continent": "South America"
+  },
+  "Cambridge": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Campinas": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Canberra": {
+    "country_code": "AU",
+    "country": "AU",
+    "continent": "Oceania"
+  },
+  "Cancún": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Cannes": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Canterbury": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Caparica": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Cape Town": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Cardiff": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Cartagena": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Casablanca": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Catania": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Cebu City": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Changsha": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Changzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Charlotte": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Chattogram": {
+    "country_code": "BD",
+    "country": "BD",
+    "continent": "Asia"
+  },
+  "Chemnitz": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Chengdu": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Chennai": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Chiang Mai": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Chiba": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Chicago": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Chiclayo": {
+    "country_code": "PE",
+    "country": "PE",
+    "continent": null
+  },
+  "Chongqing": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Christchurch": {
+    "country_code": "NZ",
+    "country": "NZ",
+    "continent": "Oceania"
+  },
+  "Chur": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Ciudad Obregón": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Clermont-Ferrand": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Cluj-Napoca": {
+    "country_code": "RO",
+    "country": "RO",
+    "continent": null
+  },
+  "Coimbatore": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Coimbra": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Colima": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "College Station": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Columbus": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Concepción": {
+    "country_code": "VE",
+    "country": "VE",
+    "continent": null
+  },
+  "Copenhagen": {
+    "country_code": "DK",
+    "country": "DK",
+    "continent": "Europe"
+  },
+  "Cotonou": {
+    "country_code": "BJ",
+    "country": "BJ",
+    "continent": null
+  },
+  "Coventry": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Covilhã": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Cuenca": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Cusco": {
+    "country_code": "PE",
+    "country": "PE",
+    "continent": null
+  },
+  "Córdoba": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Da Nang": {
+    "country_code": "VN",
+    "country": "VN",
+    "continent": "Asia"
+  },
+  "Daegu": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Daejeon": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Dakhla": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Dalat": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Dalian": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Dallas": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Dar es Salaam": {
+    "country_code": "TZ",
+    "country": "TZ",
+    "continent": null
+  },
+  "Darmstadt": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Debrecen": {
+    "country_code": "HU",
+    "country": "HU",
+    "continent": "Europe"
+  },
+  "Deggendorf": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Dehradun": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Delft": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Delhi": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Denver": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Depok": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Dhahran": {
+    "country_code": "SA",
+    "country": "SA",
+    "continent": "Asia"
+  },
+  "Dhanbad": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Dijon": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Doha": {
+    "country_code": "QA",
+    "country": "QA",
+    "continent": null
+  },
+  "Dortmund": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Dresden": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Dubai": {
+    "country_code": "AE",
+    "country": "AE",
+    "continent": "Asia"
+  },
+  "Dublin": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Dubrovnik": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "Dumaguete": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Durban": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Durham": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Düsseldorf": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Edinburgh": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Edmonton": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Eger": {
+    "country_code": "HU",
+    "country": "HU",
+    "continent": "Europe"
+  },
+  "Egham": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Eindhoven": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "El Eulma": {
+    "country_code": "DZ",
+    "country": "DZ",
+    "continent": "Africa"
+  },
+  "El Jadida": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Enschede": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Entebbe": {
+    "country_code": "UG",
+    "country": "UG",
+    "continent": null
+  },
+  "Erbil": {
+    "country_code": "IQ",
+    "country": "IQ",
+    "continent": null
+  },
+  "Erlangen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Erode": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Esch-sur-Alzette": {
+    "country_code": "LU",
+    "country": "LU",
+    "continent": null
+  },
+  "Escárcega": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Espoo": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Exeter": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Faridabad": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Faro": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Fes": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Flagstaff": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Florence": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Florianópolis": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Frankfurt am Main": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Fredericton": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Fribourg": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Fukuoka": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Fulda": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Funchal": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Fuzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Gaborone": {
+    "country_code": "BW",
+    "country": "BW",
+    "continent": null
+  },
+  "Gainesville": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Galway": {
+    "country_code": "IE",
+    "country": "IE",
+    "continent": "Europe"
+  },
+  "Gandhinagar": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Gap": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Gatineau": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Geneva": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Genoa": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Gent": {
+    "country_code": "BE",
+    "country": "BE",
+    "continent": "Europe"
+  },
+  "Gijón": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Giza": {
+    "country_code": "EG",
+    "country": "EG",
+    "continent": "Africa"
+  },
+  "Glasgow": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Goa": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Gold Coast": {
+    "country_code": "AU",
+    "country": "AU",
+    "continent": "Oceania"
+  },
+  "Gorakhpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Gqeberha": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Granada": {
+    "country_code": "NI",
+    "country": "NI",
+    "continent": null
+  },
+  "Graz": {
+    "country_code": "AT",
+    "country": "AT",
+    "continent": "Europe"
+  },
+  "Greater Noida": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Greenville": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Grenoble": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Groningen": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Guangzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Guayaquil": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "Guildford": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Guilin": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Guimarães": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Guiyang": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Gujrat": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Gurugram": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Guwahati": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Gwalior": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Göttingen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "HALDEN": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Haifa": {
+    "country_code": "IL",
+    "country": "IL",
+    "continent": "Asia"
+  },
+  "Hakodate": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Halden": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Hamburg": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Hamilton": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Hammamet": {
+    "country_code": "TN",
+    "country": "TN",
+    "continent": null
+  },
+  "Hangzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Hannover": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Hanoi": {
+    "country_code": "VN",
+    "country": "VN",
+    "continent": "Asia"
+  },
+  "Hat Yai": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Hefei": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Heidelberg": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Heilbronn": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Helsinki": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Hiroshima": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Ho Chi Minh City": {
+    "country_code": "VN",
+    "country": "VN",
+    "continent": "Asia"
+  },
+  "Hong Kong": {
+    "country_code": "HK",
+    "country": "HK",
+    "continent": "Asia"
+  },
+  "Honolulu": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Houston": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Hsinchu": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Huizhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Huzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Hyderabad": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Ibadan": {
+    "country_code": "NG",
+    "country": "NG",
+    "continent": null
+  },
+  "Ibb": {
+    "country_code": "YE",
+    "country": "YE",
+    "continent": null
+  },
+  "Ifrane": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Ilmenau": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Iloilo": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Incheon": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Indianapolis": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Indore": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Innsbruck": {
+    "country_code": "AT",
+    "country": "AT",
+    "continent": "Europe"
+  },
+  "Ipswich": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Irbid": {
+    "country_code": "JO",
+    "country": "JO",
+    "continent": null
+  },
+  "Irvine": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Islamabad": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Istanbul": {
+    "country_code": "TR",
+    "country": "TR",
+    "continent": "Asia"
+  },
+  "Ixtapa": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Jabalpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Jaipur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Jakarta": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Jammu": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Jamshedpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Jaén": {
+    "country_code": "PE",
+    "country": "PE",
+    "continent": null
+  },
+  "Jeddah": {
+    "country_code": "SA",
+    "country": "SA",
+    "continent": "Asia"
+  },
+  "Jember": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Jena": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Jilin": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Jinan": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Jinzhong": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Joensuu": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Johannesburg": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Johor Bahru": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "João Pessoa": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Jupiter": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Jönköping": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "KUALA LUMPUR": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Kajang": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Kanazawa": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Kanchipuram": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kandy": {
+    "country_code": "LK",
+    "country": "LK",
+    "continent": null
+  },
+  "Kanpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kaohsiung": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Karachi": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Karlsruhe": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Kashipur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kassala": {
+    "country_code": "SD",
+    "country": "SD",
+    "continent": null
+  },
+  "Kathmandu": {
+    "country_code": "NP",
+    "country": "NP",
+    "continent": null
+  },
+  "Katowice": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Kaunas": {
+    "country_code": "LT",
+    "country": "LT",
+    "continent": null
+  },
+  "Kenitra": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Kennesaw": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Kharagpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Khartoum": {
+    "country_code": "SD",
+    "country": "SD",
+    "continent": null
+  },
+  "Khon Kaen": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Kiel": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Kielce": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Kigali": {
+    "country_code": "RW",
+    "country": "RW",
+    "continent": null
+  },
+  "Kingston": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Kitakyushu": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Kitwe": {
+    "country_code": "ZM",
+    "country": "ZM",
+    "continent": null
+  },
+  "Knoxville": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Kobe": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Kolkata": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Konstanz": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Konya": {
+    "country_code": "TR",
+    "country": "TR",
+    "continent": "Asia"
+  },
+  "Koper": {
+    "country_code": "SI",
+    "country": "SI",
+    "continent": null
+  },
+  "Kos": {
+    "country_code": "GR",
+    "country": "GR",
+    "continent": "Europe"
+  },
+  "Kota Kinabalu": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Kottayam": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kowloon": {
+    "country_code": "HK",
+    "country": "HK",
+    "continent": "Asia"
+  },
+  "Kozhikode": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kraków": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Krishnagiri": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Kristiansund": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Kuala Lumpur": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Kuching": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Kumamoto": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Kunming": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Kusatsu": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Kutaisi": {
+    "country_code": "GE",
+    "country": "GE",
+    "continent": null
+  },
+  "Kyoto": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "L'Aquila": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "LOJA": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Lagos": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Lahore": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Lahti": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Lappeenranta": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Largo": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Larnaca": {
+    "country_code": "CY",
+    "country": "CY",
+    "continent": null
+  },
+  "Las Vegas": {
+    "country_code": "VE",
+    "country": "VE",
+    "continent": null
+  },
+  "Lausanne": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Le Havre": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Lecce": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Leicester": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Leipzig": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Leuven": {
+    "country_code": "BE",
+    "country": "BE",
+    "continent": "Europe"
+  },
+  "Lexington": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Liaocheng": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Lille": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Lima": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Limassol": {
+    "country_code": "CY",
+    "country": "CY",
+    "continent": null
+  },
+  "Limerick": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Linköping": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "Linz": {
+    "country_code": "AT",
+    "country": "AT",
+    "continent": "Europe"
+  },
+  "Lisbon": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Liverpool": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Liège": {
+    "country_code": "BE",
+    "country": "BE",
+    "continent": "Europe"
+  },
+  "Ljubljana": {
+    "country_code": "SI",
+    "country": "SI",
+    "continent": null
+  },
+  "Loja": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "London": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Los Angeles": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Loughborough": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Louvain-la-Neuve": {
+    "country_code": "BE",
+    "country": "BE",
+    "continent": "Europe"
+  },
+  "Lubango": {
+    "country_code": "AO",
+    "country": "AO",
+    "continent": null
+  },
+  "Lucknow": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Lugano": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Luleå": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "Lund": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "Luxembourg": {
+    "country_code": "LU",
+    "country": "LU",
+    "continent": null
+  },
+  "Lyon": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Lübeck": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Maastricht": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Macau": {
+    "country_code": "MO",
+    "country": "MO",
+    "continent": null
+  },
+  "Madrid": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Makassar": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Malda": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Manado": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Manchester": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Manfredonia": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Manhattan": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Manila": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Manipal": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Mankato": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Manokwari": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Maribor": {
+    "country_code": "SI",
+    "country": "SI",
+    "continent": null
+  },
+  "Marrakesh": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Masvingo": {
+    "country_code": "ZW",
+    "country": "ZW",
+    "continent": null
+  },
+  "Mataram": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Matsuyama": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Melbourne": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Mesa": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Metz": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Mexico City": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Middlesbrough": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Milan": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Minneapolis": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Mohali": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Mohammedia": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Monastir": {
+    "country_code": "TN",
+    "country": "TN",
+    "continent": null
+  },
+  "Monterrey": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Montevideo": {
+    "country_code": "UY",
+    "country": "UY",
+    "continent": null
+  },
+  "Montréal": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Morogoro": {
+    "country_code": "TZ",
+    "country": "TZ",
+    "continent": null
+  },
+  "Mostaganem": {
+    "country_code": "DZ",
+    "country": "DZ",
+    "continent": "Africa"
+  },
+  "Mostar": {
+    "country_code": "BA",
+    "country": "BA",
+    "continent": null
+  },
+  "Mosul": {
+    "country_code": "IQ",
+    "country": "IQ",
+    "continent": null
+  },
+  "Mumbai": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Munich": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Muscat": {
+    "country_code": "OM",
+    "country": "OM",
+    "continent": null
+  },
+  "Málaga": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Nabeul": {
+    "country_code": "TN",
+    "country": "TN",
+    "continent": null
+  },
+  "Nagaoka": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Nagoya": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Nagpur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Nairobi": {
+    "country_code": "KE",
+    "country": "KE",
+    "continent": null
+  },
+  "Nakhon Pathom": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Nancy": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Nanjing": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Nanning": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Nantes": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Nantou": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Naples": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Nara": {
+    "country_code": "ML",
+    "country": "ML",
+    "continent": null
+  },
+  "Nashik": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Nashville": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Natal": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Navi Mumbai": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "New Delhi": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "New Haven": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "New Orleans": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "New Taipei City": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "New York City": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Newcastle": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Newcastle Upon Tyne": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Nha Trang": {
+    "country_code": "VN",
+    "country": "VN",
+    "continent": "Asia"
+  },
+  "Nice": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Nijmegen": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Ningbo": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Niš": {
+    "country_code": "RS",
+    "country": "RS",
+    "continent": null
+  },
+  "Norfolk": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Norrköping": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "Norwich": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Nottingham": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Nouakchott": {
+    "country_code": "MR",
+    "country": "MR",
+    "continent": null
+  },
+  "Nsukka": {
+    "country_code": "NG",
+    "country": "NG",
+    "continent": null
+  },
+  "Nyborg": {
+    "country_code": "DK",
+    "country": "DK",
+    "continent": "Europe"
+  },
+  "OSAKA": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Odense": {
+    "country_code": "DK",
+    "country": "DK",
+    "continent": "Europe"
+  },
+  "Odesa": {
+    "country_code": "UA",
+    "country": "UA",
+    "continent": null
+  },
+  "Ohrid": {
+    "country_code": "MK",
+    "country": "MK",
+    "continent": null
+  },
+  "Okayama": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Okinawa": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Oldenburg": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Olomouc": {
+    "country_code": "CZ",
+    "country": "CZ",
+    "continent": "Europe"
+  },
+  "Opole": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Oran": {
+    "country_code": "DZ",
+    "country": "DZ",
+    "continent": "Africa"
+  },
+  "Orlando": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Osaka": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Oshawa": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Osijek": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "Oslo": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Ottawa": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Ouarzazate": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Oujda": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Oulu": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Oviedo": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Oxford": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "PARIS": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "PUEBLA": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Padova": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Padua": {
+    "country_code": "CO",
+    "country": "CO",
+    "continent": "South America"
+  },
+  "Palermo": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Panama City": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Paphos": {
+    "country_code": "CY",
+    "country": "CY",
+    "continent": null
+  },
+  "Paris": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Passau": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Pathum Thani": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Patna": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Pattaya": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Pavia": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Pereira": {
+    "country_code": "CO",
+    "country": "CO",
+    "continent": "South America"
+  },
+  "Perth": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Perugia": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Pescara": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Philadelphia": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Phnom Penh": {
+    "country_code": "KH",
+    "country": "KH",
+    "continent": null
+  },
+  "Phu Quoc": {
+    "country_code": "VN",
+    "country": "VN",
+    "continent": "Asia"
+  },
+  "Phuket": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Pisa": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Pittsburgh": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Plovdiv": {
+    "country_code": "BG",
+    "country": "BG",
+    "continent": null
+  },
+  "Poitiers": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Polokwane": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Pomona": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Ponta Delgada": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Popayán": {
+    "country_code": "CO",
+    "country": "CO",
+    "continent": "South America"
+  },
+  "Port Louis": {
+    "country_code": "MU",
+    "country": "MU",
+    "continent": null
+  },
+  "Porto": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Porto Alegre": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Potsdam": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Poznań": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Prague": {
+    "country_code": "CZ",
+    "country": "CZ",
+    "continent": "Europe"
+  },
+  "Prayagraj": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Pretoria": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Pristina": {
+    "country_code": "XK",
+    "country": "XK",
+    "continent": null
+  },
+  "Puebla": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Puerto Vallarta": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Pula": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "Pune": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Putrajaya": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Qingdao": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Quito": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "Rabat": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Rahim Yar Khan": {
+    "country_code": "PK",
+    "country": "PK",
+    "continent": "Asia"
+  },
+  "Raipur": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Raleigh": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Rancagua": {
+    "country_code": "CL",
+    "country": "CL",
+    "continent": "South America"
+  },
+  "Ranchi": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Ras Al Khaimah": {
+    "country_code": "AE",
+    "country": "AE",
+    "continent": "Asia"
+  },
+  "Reading": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Recife": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Rennes": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Rethymno": {
+    "country_code": "GR",
+    "country": "GR",
+    "continent": "Europe"
+  },
+  "Reutlingen": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Richards Bay": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Riga": {
+    "country_code": "LV",
+    "country": "LV",
+    "continent": null
+  },
+  "Rio de Janeiro": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Riobamba": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "Riyadh": {
+    "country_code": "SA",
+    "country": "SA",
+    "continent": "Asia"
+  },
+  "Rome": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Roorkee": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Ropar": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Rouen": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Rzeszów": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "SANTANDER": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Sacramento": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Saint-Denis": {
+    "country_code": "RE",
+    "country": "RE",
+    "continent": null
+  },
+  "Saint-Malo": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Salamanca": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Salerno": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Salford": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Salt Lake City": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Salzburg": {
+    "country_code": "AT",
+    "country": "AT",
+    "continent": "Europe"
+  },
+  "Samarkand": {
+    "country_code": "UZ",
+    "country": "UZ",
+    "continent": null
+  },
+  "Samborondón": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "San Antonio": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "San Benedetto Del Tronto": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "San Diego": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "San Francisco": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "San Jose": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "San José": {
+    "country_code": "CR",
+    "country": "CR",
+    "continent": null
+  },
+  "San Juan": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Santa Clara": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Santa Fe": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Santander": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Santiago": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Santo Domingo": {
+    "country_code": "DO",
+    "country": "DO",
+    "continent": null
+  },
+  "Sanya": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Sapporo": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Sarajevo": {
+    "country_code": "BA",
+    "country": "BA",
+    "continent": null
+  },
+  "Saskatoon": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Savannah": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Seattle": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Seoul": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Setúbal": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Sevilla": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Sha Tin": {
+    "country_code": "HK",
+    "country": "HK",
+    "continent": "Asia"
+  },
+  "Shah Alam": {
+    "country_code": "MY",
+    "country": "MY",
+    "continent": "Asia"
+  },
+  "Shanghai": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Shantou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Sharjah": {
+    "country_code": "AE",
+    "country": "AE",
+    "continent": "Asia"
+  },
+  "Sharm El-Sheikh": {
+    "country_code": "EG",
+    "country": "EG",
+    "continent": "Africa"
+  },
+  "Sheffield": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Shenyang": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Shenzhen": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Sibiu": {
+    "country_code": "RO",
+    "country": "RO",
+    "continent": null
+  },
+  "Siedlce": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Siem Reap": {
+    "country_code": "KH",
+    "country": "KH",
+    "continent": null
+  },
+  "Siena": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Siliguri": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Silver Lake": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Singapore": {
+    "country_code": "SG",
+    "country": "SG",
+    "continent": "Asia"
+  },
+  "Sintra": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Skopje": {
+    "country_code": "MK",
+    "country": "MK",
+    "continent": null
+  },
+  "Sofia": {
+    "country_code": "BG",
+    "country": "BG",
+    "continent": null
+  },
+  "Solan": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Songkhla": {
+    "country_code": "TH",
+    "country": "TH",
+    "continent": "Asia"
+  },
+  "Sousse": {
+    "country_code": "TN",
+    "country": "TN",
+    "continent": null
+  },
+  "South Tangerang": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Southampton": {
+    "country_code": "GB",
+    "country": "GB",
+    "continent": "Europe"
+  },
+  "Split": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "St. Petersburg": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Stavanger": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Stockholm": {
+    "country_code": "SE",
+    "country": "SE",
+    "continent": "Europe"
+  },
+  "Stuttgart": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Sun City": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Surabaya": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Surakarta": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Suwon": {
+    "country_code": "KR",
+    "country": "KR",
+    "continent": "Asia"
+  },
+  "Suzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Swansea": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Sydney": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Sylhet": {
+    "country_code": "BD",
+    "country": "BD",
+    "continent": "Asia"
+  },
+  "Szczecin": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Szeged": {
+    "country_code": "HU",
+    "country": "HU",
+    "continent": "Europe"
+  },
+  "Székesfehérvár": {
+    "country_code": "HU",
+    "country": "HU",
+    "continent": "Europe"
+  },
+  "São José dos Campos": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "São Paulo": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "TOKYO": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "TOULOUSE": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Tadepalligudem": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Taguig": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Taicang": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Taichung": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Tainan": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Taipei": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Taiyuan": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Takasaki": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Tallinn": {
+    "country_code": "EE",
+    "country": "EE",
+    "continent": null
+  },
+  "Tampere": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Tangerang": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Tangier": {
+    "country_code": "MA",
+    "country": "MA",
+    "continent": null
+  },
+  "Taoyuan": {
+    "country_code": "TW",
+    "country": "TW",
+    "continent": "Asia"
+  },
+  "Tartu": {
+    "country_code": "EE",
+    "country": "EE",
+    "continent": null
+  },
+  "Tashkent": {
+    "country_code": "UZ",
+    "country": "UZ",
+    "continent": null
+  },
+  "Tbilisi": {
+    "country_code": "GE",
+    "country": "GE",
+    "continent": null
+  },
+  "Tegucigalpa": {
+    "country_code": "HN",
+    "country": "HN",
+    "continent": null
+  },
+  "Tepic": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Ternopil": {
+    "country_code": "UA",
+    "country": "UA",
+    "continent": null
+  },
+  "Terrassa": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "The Hague": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Thimphu": {
+    "country_code": "BT",
+    "country": "BT",
+    "continent": null
+  },
+  "Thiruvananthapuram": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Thiès": {
+    "country_code": "SN",
+    "country": "SN",
+    "continent": null
+  },
+  "Thun": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Tilburg": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Tirana": {
+    "country_code": "AL",
+    "country": "AL",
+    "continent": "Europe"
+  },
+  "Tirunelveli": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Tirupati": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Tokushima": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Tokyo": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "Toronto": {
+    "country_code": "CA",
+    "country": "CA",
+    "continent": "North America"
+  },
+  "Toulouse": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Trento": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Trier": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Tromsø": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Trondheim": {
+    "country_code": "NO",
+    "country": "NO",
+    "continent": "Europe"
+  },
+  "Troyes": {
+    "country_code": "FR",
+    "country": "FR",
+    "continent": "Europe"
+  },
+  "Tucson": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Tulcán": {
+    "country_code": "EC",
+    "country": "EC",
+    "continent": null
+  },
+  "Tunis": {
+    "country_code": "TN",
+    "country": "TN",
+    "continent": null
+  },
+  "Turin": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Turku": {
+    "country_code": "FI",
+    "country": "FI",
+    "continent": "Europe"
+  },
+  "Ufa": {
+    "country_code": "RU",
+    "country": "RU",
+    "continent": "Europe"
+  },
+  "Utrecht": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Vadodara": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Valencia": {
+    "country_code": "VE",
+    "country": "VE",
+    "continent": null
+  },
+  "Valladolid": {
+    "country_code": "MX",
+    "country": "MX",
+    "continent": "North America"
+  },
+  "Valletta": {
+    "country_code": "MT",
+    "country": "MT",
+    "continent": null
+  },
+  "Vancouver": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Varanasi": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Varna": {
+    "country_code": "BG",
+    "country": "BG",
+    "continent": null
+  },
+  "Vellore": {
+    "country_code": "IN",
+    "country": "IN",
+    "continent": "Asia"
+  },
+  "Venice": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Verona": {
+    "country_code": "IT",
+    "country": "IT",
+    "continent": "Europe"
+  },
+  "Viana do Castelo": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Victoria": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Vienna": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Vila Real": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Vilnius": {
+    "country_code": "LT",
+    "country": "LT",
+    "continent": null
+  },
+  "Viseu": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Vitória": {
+    "country_code": "BR",
+    "country": "BR",
+    "continent": "South America"
+  },
+  "Viña Del Mar": {
+    "country_code": "CL",
+    "country": "CL",
+    "continent": "South America"
+  },
+  "Volos": {
+    "country_code": "GR",
+    "country": "GR",
+    "continent": "Europe"
+  },
+  "Waco": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Wageningen": {
+    "country_code": "NL",
+    "country": "NL",
+    "continent": "Europe"
+  },
+  "Warsaw": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Washington": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Waterford": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Waterloo": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Wellington": {
+    "country_code": "ZA",
+    "country": "ZA",
+    "continent": null
+  },
+  "Wiesbaden": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Wolfenbüttel": {
+    "country_code": "DE",
+    "country": "DE",
+    "continent": "Europe"
+  },
+  "Wollongong": {
+    "country_code": "AU",
+    "country": "AU",
+    "continent": "Oceania"
+  },
+  "Wrocław": {
+    "country_code": "PL",
+    "country": "PL",
+    "continent": "Europe"
+  },
+  "Wuhan": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Wuxi": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Xiamen": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Xianyang": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Xi’an": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Yangzhou": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Yerevan": {
+    "country_code": "AM",
+    "country": "AM",
+    "continent": null
+  },
+  "Yogyakarta": {
+    "country_code": "ID",
+    "country": "ID",
+    "continent": "Asia"
+  },
+  "Yokohama": {
+    "country_code": "JP",
+    "country": "JP",
+    "continent": "Asia"
+  },
+  "York": {
+    "country_code": "US",
+    "country": "US",
+    "continent": "North America"
+  },
+  "Yverdon-Les-Bains": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Zadar": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "Zagreb": {
+    "country_code": "HR",
+    "country": "HR",
+    "continent": null
+  },
+  "Zamora": {
+    "country_code": "ES",
+    "country": "ES",
+    "continent": "Europe"
+  },
+  "Zaragoza": {
+    "country_code": "PH",
+    "country": "PH",
+    "continent": "Asia"
+  },
+  "Zhenjiang": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Zhuhai": {
+    "country_code": "CN",
+    "country": "CN",
+    "continent": "Asia"
+  },
+  "Zhytomyr": {
+    "country_code": "UA",
+    "country": "UA",
+    "continent": null
+  },
+  "Zug": {
+    "country_code": "CH",
+    "country": "CH",
+    "continent": "Europe"
+  },
+  "Évora": {
+    "country_code": "PT",
+    "country": "PT",
+    "continent": "Europe"
+  },
+  "Šiauliai": {
+    "country_code": "LT",
+    "country": "LT",
+    "continent": null
+  }
+}
