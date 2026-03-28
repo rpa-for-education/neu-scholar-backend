@@ -34,7 +34,7 @@ services:
     command: >
       sh -c "
       echo '⏳ Waiting for Qdrant...' &&
-      until curl -s http://qdrant:6333/collections > /dev/null; do
+      until curl -s http://scholar-qdrant:6333/collections > /dev/null; do
         sleep 2;
       done &&
       echo '🚀 Start Sync...' &&
@@ -43,7 +43,7 @@ services:
       "
 
     environment:
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=http://scholar-qdrant:6333
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
@@ -82,7 +82,7 @@ services:
     environment:
       - PORT=8014
       - NODE_ENV=production
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=http://scholar-qdrant:6333
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
       - SESSION_SECRET=neu-secret
