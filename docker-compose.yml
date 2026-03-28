@@ -1,9 +1,12 @@
 version: "3.9"
 
 services:
+  # ===========================================
+  # 🧠 VECTOR DB
+  # ===========================================
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: neu-qdrant
+    container_name: qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -15,15 +18,18 @@ services:
     networks:
       - neu-net
 
-  sync:
+  # ===========================================
+  # 🔄 SYNC SERVICE
+  # ===========================================
+  scholar-sync:
     build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    container_name: neu-sync
+      context: ./scholar-sync
+    container_name: scholar-sync
 
     depends_on:
       - qdrant
+
+    working_dir: /app
 
     command: >
       sh -c "
@@ -31,22 +37,16 @@ services:
       until curl -s http://qdrant:6333/collections > /dev/null; do
         sleep 2;
       done &&
-      echo '🚀 Sync ALL (fund + conference + journal)...' &&
-      node scripts/syncAllQdrant.js &&
+      echo '🚀 Start Sync...' &&
+      node src/jobs/syncAllQdrant.js &&
       echo '✅ Sync DONE'
       "
 
     environment:
       - QDRANT_URL=http://qdrant:6333
-
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
-
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
-
-      - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
-      - EMBEDDING_MODE=proxy
-      - USE_OLLAMA_EMBEDDING=true
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,21 +55,26 @@ services:
     networks:
       - neu-net
 
-  backend:
+  # ===========================================
+  # 🧠 BACKEND
+  # ===========================================
+  scholar-backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ./scholar-backend
       target: production
-    container_name: neu-scholar-backend
+    container_name: scholar-backend
+
     ports:
       - "8014:8014"
 
     depends_on:
       - qdrant
 
+    working_dir: /app
+
     command: >
       sh -c "
-      echo '⏳ Waiting for data (sync)...' &&
+      echo '⏳ Waiting for initial sync (approx)...' &&
       sleep 20 &&
       npm start
       "
@@ -77,19 +82,13 @@ services:
     environment:
       - PORT=8014
       - NODE_ENV=production
-
       - QDRANT_URL=http://qdrant:6333
-
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
-
       - SESSION_SECRET=neu-secret
-
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
-
       - OLLAMA_MODEL=qwen3:8b
       - OLLAMA_EMBEDDING_MODEL=qwen3-embedding:8b
-
       - EMBEDDING_MODE=proxy
       - USE_OLLAMA_EMBEDDING=true
 
@@ -101,29 +100,28 @@ services:
       - neu-net
 
   # ===========================================
-  # 🔥 NEW SERVICE: AI CRAWLER (KHÔNG ẢNH HƯỞNG GÌ KHÁC)
+  # 🌐 CRAWLER
   # ===========================================
-  crawler-ai:
+  scholar-crawler:
     build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-
-    container_name: neu-crawler-ai
+      context: ./scholar-crawler
+    container_name: scholar-crawler
 
     depends_on:
       - qdrant
 
+    working_dir: /app
+
     command: >
       sh -c "
-      echo '🚀 AI Crawler started...';
+      echo '🚀 Crawler started...';
       while true; do
 
         echo '🌐 Crawl EasyChair...';
-        node services/crawl_easychair_fast.js || echo '⚠️ Crawl fail';
+        node src/jobs/crawl_easychair.js || echo '⚠️ Crawl fail';
 
-        echo '🤖 Enrich AI (Ollama)...';
-        node services/enrich_easychair_ai.js || echo '⚠️ Enrich fail';
+        echo '🤖 Enrich incremental...';
+        node src/jobs/enrich_easychair.js || echo '⚠️ Enrich fail';
 
         echo '😴 Sleep 6 hours...';
         sleep 21600;
@@ -133,12 +131,8 @@ services:
 
     environment:
       - NODE_ENV=production
-
-      # dùng lại Mongo của bạn
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
-      - DB_NAME=${MONGODB_DB:-fitneu}
-
-      # dùng lại Ollama
+      - MONGODB_DB=${MONGODB_DB:-fitneu}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
 
     extra_hosts:
