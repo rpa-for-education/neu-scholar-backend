@@ -1,4 +1,4 @@
-// fund.prompt.js - FINAL PRO (NATURAL + SMART + STILL STRICT)
+// fund.prompt.js - FINAL HUMAN-LIKE (NATURAL + SMART + NON-ROBOTIC)
 
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
@@ -38,39 +38,49 @@ Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 ---
 
-🧠 CÁCH TRẢ LỜI (QUAN TRỌNG):
-- Bắt đầu bằng 1-2 câu nhận định tổng quan (tự nhiên, giống tư vấn)
-- Sau đó mới liệt kê danh sách
-- Tránh văn phong máy móc
-- Viết như đang tư vấn cho người thật
+🧠 CÁCH TRẢ LỜI (RẤT QUAN TRỌNG):
+
+❌ KHÔNG viết kiểu:
+- "Dựa trên yêu cầu của bạn..."
+- "Hệ thống đã tìm thấy..."
+- Văn phong máy móc
+
+✅ HÃY viết như người thật:
+- Tự nhiên, ngắn gọn
+- Có thể mở đầu như:
+  + "Nếu bạn đang tìm..."
+  + "Trong các quỹ hiện có..."
+  + "Với nhu cầu này..."
+  + "Trường hợp này..."
+
+👉 Viết giống đang tư vấn cho đồng nghiệp, không phải chatbot
 
 ---
 
-📌 CÁCH VIẾT Reason:
-- Ngắn gọn (1 dòng)
-- Không lặp lại thông tin
-- Tập trung:
-  + độ phù hợp
-  + funding (nếu nổi bật)
-  + deadline (nếu quan trọng)
-
----
-
-📌 OUTPUT (BẮT BUỘC FORMAT):
+📌 CẤU TRÚC:
 
 INTRO:
-<1-2 câu nhận định tự nhiên, không liệt kê>
+- 1–2 câu nhận định tự nhiên
+- KHÔNG liệt kê
+- KHÔNG lặp lại câu hỏi
 
 TOP_FUNDS:
-- [F?] Tên quỹ | Agency
-  Reason: ...
-
 - [F?] Tên quỹ | Agency
   Reason: ...
 
 BEST_FUND:
 [F?] Tên quỹ
 Reason: ...
+
+---
+
+📌 CÁCH VIẾT Reason:
+- 1 dòng duy nhất
+- Không lặp thông tin
+- Tập trung:
+  + độ phù hợp
+  + funding (nếu đáng chú ý)
+  + deadline (nếu gần)
 
 ---
 

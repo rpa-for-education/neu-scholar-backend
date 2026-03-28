@@ -1,4 +1,4 @@
-// fund.stream.js - FINAL PRO (SMOOTH + STRUCTURED STREAM)
+// fund.stream.js - FINAL ULTRA SMOOTH (WORD STREAM + HUMAN UX)
 
 import fetch from "node-fetch";
 import { runFundAgent } from "./fund.service.js";
@@ -17,17 +17,9 @@ function writeSSE(res, data, type = "message") {
   return res.write(`data: ${payload}\n\n`);
 }
 
-// ================= 🔥 SPLIT CHUNK (FIX UX) =================
-function splitChunks(text, size = 30) {
-  const chunks = [];
-  let i = 0;
-
-  while (i < text.length) {
-    chunks.push(text.slice(i, i + size));
-    i += size;
-  }
-
-  return chunks;
+// ================= 🔥 WORD SPLIT (MƯỢT NHƯ CHATGPT) =================
+function splitWords(text) {
+  return text.split(/(\s+)/); // giữ cả dấu cách
 }
 
 // ================= BUILD PROMPT =================
@@ -50,10 +42,10 @@ ${question}
 ---
 
 Yêu cầu:
-- Giải thích vì sao quỹ #1 phù hợp nhất
+- Giải thích ngắn gọn (3-4 dòng)
+- Viết tự nhiên, giống người thật (không robotic)
+- Vì sao quỹ #1 phù hợp nhất
 - So sánh nhanh các quỹ còn lại
-- Viết 3-4 dòng
-- KHÔNG bịa thêm thông tin
 `;
 }
 
@@ -119,13 +111,13 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     // ================= STREAM RESULT =================
     writeSSE(res, "💰 Kết quả:\n", "header");
 
-    const chunks = splitChunks(result.answer, 40);
+    const words = splitWords(result.answer);
 
-    for (const chunk of chunks) {
+    for (const w of words) {
       if (isClosed) break;
 
-      writeSSE(res, chunk, "chunk");
-      await new Promise(r => setTimeout(r, 10));
+      writeSSE(res, w, "chunk");
+      await new Promise(r => setTimeout(r, 8)); // 🔥 mượt hơn
     }
 
     // ================= EXPLAIN =================
@@ -143,13 +135,13 @@ export async function streamFund(req, res, question, model_id, topk = 5) {
     } catch {}
 
     if (explain) {
-      const chunks = splitChunks(explain, 50);
+      const words = splitWords(explain);
 
-      for (const chunk of chunks) {
+      for (const w of words) {
         if (isClosed) break;
 
-        writeSSE(res, chunk, "chunk");
-        await new Promise(r => setTimeout(r, 15));
+        writeSSE(res, w, "chunk");
+        await new Promise(r => setTimeout(r, 10));
       }
     } else {
       writeSSE(res, "Không có phân tích thêm.", "chunk");

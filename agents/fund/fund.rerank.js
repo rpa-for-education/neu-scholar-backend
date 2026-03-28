@@ -1,14 +1,18 @@
-// fund.rerank.js - Rerank kết quả quỹ nghiên cứu khoa học bằng LLM
+// fund.rerank.js - FINAL FIX (STABLE + INTENT-AWARE + SAFE)
+
 import { callLLM } from "../shared/llm.js";
 
 const MAX_INPUT = 8;
 const DEFAULT_TOPK = 3;
 
-// ================= PARSE =================
+// ================= PARSE (FIX CHẶT) =================
 function parseIndexes(text, max) {
   if (!text) return [];
 
-  const nums = text.match(/\d+/g);
+  // 🔥 chỉ lấy dòng đầu (tránh hallucination)
+  const firstLine = text.split("\n")[0];
+
+  const nums = firstLine.match(/\d+/g);
   if (!nums) return [];
 
   const seen = new Set();
@@ -23,26 +27,26 @@ function parseIndexes(text, max) {
     });
 }
 
-// ================= BUILD PROMPT =================
+// ================= BUILD PROMPT (FIX INTENT) =================
 function buildPrompt(query, funds) {
   return `
 Bạn là chuyên gia chọn quỹ nghiên cứu.
 
-Nhiệm vụ:
-- Chọn ra ${DEFAULT_TOPK} quỹ PHÙ HỢP NHẤT với query
-- Ưu tiên:
-  + liên quan nội dung
-  + funding cao
-  + deadline hợp lý
+🎯 Mục tiêu:
+Chọn ${DEFAULT_TOPK} quỹ PHÙ HỢP NHẤT với query.
 
-⚠️ QUY TẮC:
-- CHỈ trả về index
-- KHÔNG giải thích
-- KHÔNG viết thêm chữ
-- Format bắt buộc: 1,3,5
+⚠️ QUAN TRỌNG:
+- Ưu tiên KHỚP NỘI DUNG query (QUAN TRỌNG NHẤT)
+- Nếu query chứa từ khóa cụ thể (ví dụ: nafosted, vietnam):
+  → PHẢI ưu tiên quỹ có chứa từ khóa đó
+- KHÔNG chọn quỹ không liên quan chỉ vì funding cao
+
+---
 
 Query:
 ${query}
+
+---
 
 Danh sách:
 ${funds.map((f, i) => `
@@ -50,7 +54,12 @@ ${funds.map((f, i) => `
 - ${f.agency || ""}
 `).join("\n")}
 
-OUTPUT:
+---
+
+⚠️ OUTPUT:
+- CHỈ trả về index
+- KHÔNG giải thích
+- Format: 1,3,5
 `;
 }
 
@@ -80,7 +89,7 @@ export async function rerankFunds(query, funds, model_id) {
 
     const indexes = parseIndexes(text, input.length);
 
-    // 🔥 nếu LLM trả ít hơn yêu cầu → bổ sung semantic
+    // 🔥 nếu parse fail → KHÔNG override mạnh
     if (!indexes.length) {
       console.warn("⚠️ rerank parse fail → fallback");
       return fallbackTop(input);
@@ -96,6 +105,7 @@ export async function rerankFunds(query, funds, model_id) {
       selected.push(...remain.slice(0, DEFAULT_TOPK - selected.length));
     }
 
+    // 🔥 FIX QUAN TRỌNG: chỉ override nhẹ (không phá ranking gốc)
     return selected.slice(0, DEFAULT_TOPK);
 
   } catch (err) {

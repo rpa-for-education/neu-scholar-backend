@@ -1,4 +1,4 @@
-// fund.service.js - FINAL PRO (SMART BEST + BETTER UX)
+// fund.service.js - FINAL HUMAN + SMART BEST (NO ROBOT TONE)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -47,28 +47,24 @@ function normalizeFunds(arr) {
   });
 }
 
-// ================= 🔥 INTENT MATCH (FIX NAFOSTED) =================
+// ================= 🔥 INTENT MATCH (UPGRADE) =================
 function relevanceScore(fund, query) {
   const t = (fund.title + " " + fund.text + " " + fund.agency).toLowerCase();
   const q = query.toLowerCase();
 
   let score = 0;
 
-  // 🔥 FIX: nhận diện Nafosted (tiếng Việt + tiếng Anh)
-  if (
-    q.includes("nafosted") &&
-    (
+  // 🔥 BOOST mạnh Nafosted
+  if (q.includes("nafosted")) {
+    if (
       t.includes("nafosted") ||
       t.includes("khoa học và công nghệ quốc gia") ||
-      t.includes("quỹ phát triển khoa học") ||
-      t.includes("national foundation") ||
-      t.includes("vietnam")
-    )
-  ) {
-    score += 2;
+      t.includes("quỹ phát triển khoa học")
+    ) {
+      score += 5; // 🔥 tăng mạnh
+    }
   }
 
-  // 🔥 giữ logic cũ
   if (q.includes("việt") || q.includes("vietnam")) {
     if (t.includes("vietnam")) score += 1;
   }
@@ -104,24 +100,24 @@ function getDeadlineInfo(deadline) {
   return "";
 }
 
-// ================= 🔥 REASONING =================
+// ================= REASON =================
 function buildReasoning(fund, index, query) {
   const reasons = [];
 
-  if (index === 0) reasons.push("phù hợp tổng thể tốt nhất");
+  if (index === 0) reasons.push("phù hợp nhất với nhu cầu");
 
   const rel = relevanceScore(fund, query);
-  if (rel > 0) reasons.push("phù hợp trực tiếp với yêu cầu");
+  if (rel > 0) reasons.push("khớp trực tiếp với yêu cầu");
 
   if ((fund.amount_num || 0) >= 1e7) {
-    reasons.push("mức tài trợ cao");
+    reasons.push("mức tài trợ tốt");
   }
 
   const deadlineInfo = getDeadlineInfo(fund.deadline);
   if (deadlineInfo) reasons.push(deadlineInfo);
 
   return reasons.length
-    ? "👉 Lý do: " + reasons.join(", ")
+    ? "👉 " + reasons.join(", ")
     : "";
 }
 
@@ -143,6 +139,7 @@ function pickBestFund(funds, query) {
     const rb = relevanceScore(b, query);
 
     if (rb !== ra) return rb - ra;
+
     return b.score - a.score;
   });
 
@@ -167,17 +164,19 @@ function renderFund(f, index, query) {
   return txt + "\n";
 }
 
-// ================= INSIGHT =================
-function buildInsight(funds) {
-  const highFunding = funds.filter(f => (f.amount_num || 0) >= 1e7);
+// ================= 🔥 INTRO HUMAN =================
+function buildIntro(question) {
+  const q = question.toLowerCase();
 
-  let insights = [];
-
-  if (highFunding.length) {
-    insights.push(`${highFunding.length} quỹ có mức tài trợ cao`);
+  if (q.includes("nafosted")) {
+    return "Nếu bạn đang tìm quỹ Nafosted, thì các chương trình tài trợ nghiên cứu cơ bản tại Việt Nam là phù hợp nhất.";
   }
 
-  return insights.length ? "👉 " + insights.join(". ") : "";
+  if (q.includes("ai") || q.includes("data")) {
+    return "Với hướng nghiên cứu này, bạn nên ưu tiên các quỹ có tài trợ cho AI và dữ liệu.";
+  }
+
+  return "Dưới đây là một số quỹ phù hợp nhất với nhu cầu của bạn.";
 }
 
 // ================= BUILD ANSWER =================
@@ -188,12 +187,9 @@ function buildAnswer(funds, question) {
 
   const best = pickBestFund(funds, question);
 
-  let txt = `Dựa trên yêu cầu *"${question}"*, hệ thống đã chọn các quỹ phù hợp nhất.\n\n`;
+  let txt = `${buildIntro(question)}\n\n`;
 
-  const insight = buildInsight(funds);
-  if (insight) txt += insight + "\n\n";
-
-  txt += `🔥 **Quỹ phù hợp nhất:**\n\n`;
+  txt += `🔥 **Quỹ nổi bật nhất:**\n\n`;
   txt += renderFund(best, 0, question);
 
   funds

@@ -1,4 +1,4 @@
-// fund.search.js - FINAL SYNC (AUTO NORMALIZE + STABLE SEARCH)
+// fund.search.js - FINAL FIX (NAFOSTED MATCH + CLEAN RESULT)
 
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
@@ -11,32 +11,39 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v10";
+const CACHE_VERSION = "v11";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
 const MAX_EMBED_CACHE = 200;
 
-// ================= 🔥 NORMALIZE (FIX) =================
+// ================= 🔥 NORMALIZE (FIX QUAN TRỌNG) =================
 function normalizeFundDoc(d) {
+  const title =
+    d.title ||
+    d.opportunity_title ||
+    d["OPPORTUNITY TITLE"] ||
+    "";
+
+  const agency =
+    d.agency ||
+    d.agency_name ||
+    d["AGENCY NAME"] ||
+    "";
+
+  const baseText =
+    d.text ||
+    d.description ||
+    d["FUNDING DESCRIPTION"] ||
+    "";
+
+  // 🔥 FIX: inject agency vào text (QUAN TRỌNG NHẤT)
+  const text = `${title} ${agency} ${baseText}`.toLowerCase();
+
   return {
-    title:
-      d.title ||
-      d.opportunity_title ||
-      d["OPPORTUNITY TITLE"] ||
-      "",
-
-    agency:
-      d.agency ||
-      d.agency_name ||
-      d["AGENCY NAME"] ||
-      "",
-
-    text:
-      d.text ||
-      d.description ||
-      d["FUNDING DESCRIPTION"] ||
-      "",
+    title,
+    agency,
+    text,
 
     deadline:
       d.deadline ||
@@ -69,9 +76,6 @@ function getCache(map, key, ttl) {
     return null;
   }
 
-  map.delete(key);
-  map.set(key, item);
-
   return item.value;
 }
 
@@ -92,21 +96,14 @@ function normalizeQuery(query) {
     .replace(/\s+/g, " ");
 }
 
+// 🔥 FIX: expand mạnh hơn cho VN
 function expandQuery(q) {
-  const map = {
-    "quỹ": "fund grant funding nafosted",
-    "nghiên cứu": "research science project",
-    "việt nam": "vietnam nafosted",
-    "nafosted": "nafosted vietnam foundation science",
-  };
-
   let expanded = q;
 
-  for (const key in map) {
-    if (expanded.includes(key)) {
-      expanded += " " + map[key];
-    }
-  }
+  if (q.includes("quỹ")) expanded += " fund grant funding";
+  if (q.includes("nghiên cứu")) expanded += " research science";
+  if (q.includes("nafosted")) expanded += " nafosted vietnam science foundation";
+  if (q.includes("việt")) expanded += " vietnam nafosted";
 
   return expanded;
 }
@@ -133,11 +130,11 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= 🔥 KEYWORD SEARCH (FIX) =================
+// ================= 🔥 KEYWORD SEARCH (BOOST CHUẨN) =================
 async function keywordSearch(query, limit) {
   try {
     const db = await getDb();
-    const words = query.split(/\s+/).filter(Boolean);
+    const words = query.split(/\s+/).filter(w => w.length > 2);
 
     const docs = await db.collection("fund")
       .find({
@@ -155,23 +152,27 @@ async function keywordSearch(query, limit) {
     const scored = docs.map(d => {
       const norm = normalizeFundDoc(d);
 
-      const text = (
-        norm.title +
-        " " +
-        norm.agency +
-        " " +
-        norm.text
-      ).toLowerCase();
+      const full = norm.text;
 
       let hit = 0;
 
       for (const w of words) {
-        if (text.includes(w)) hit++;
+        if (full.includes(w)) hit++;
+      }
+
+      let score = 0.2 + hit * 0.2;
+
+      // 🔥 BOOST NAFOSTED
+      if (
+        query.includes("nafosted") &&
+        full.includes("nafosted")
+      ) {
+        score += 1.5;
       }
 
       return {
         payload: norm,
-        score: 0.2 + hit * 0.15
+        score
       };
     });
 
@@ -201,7 +202,7 @@ function mergeResults(vector, keyword) {
     if (!key) return;
 
     if (map.has(key)) {
-      map.get(key).score += 0.2;
+      map.get(key).score += 0.3;
     } else {
       map.set(key, r);
     }
@@ -255,13 +256,6 @@ export async function searchFund(query, topk = 5) {
     const keywordResults = await keywordSearch(normalized, limit * 2);
 
     let merged = mergeResults(vectorResults, keywordResults);
-
-    if (merged.length < limit && keywordResults.length) {
-      const extra = keywordResults.filter(
-        k => !merged.some(m => m.payload?.title === k.payload?.title)
-      );
-      merged.push(...extra.slice(0, limit));
-    }
 
     if (!merged.length) return [];
 
