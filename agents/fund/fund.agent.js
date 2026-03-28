@@ -1,4 +1,4 @@
-// fund.agent.js - FINAL UPGRADE (GEO + TIME + SMART BOOST)
+// fund.agent.js - FINAL BEST (KEEP LOGIC + SMART FILTER)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -8,7 +8,7 @@ import { rerankFunds } from "./fund.rerank.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v11"; // 🔥 bump version
+const CACHE_VERSION = "v12"; // 🔥 bump
 
 // ================= CACHE =================
 function getCache(key) {
@@ -55,17 +55,9 @@ function explainFund(item, query) {
 
   const reasons = [];
 
-  if (item.explain?.semantic > 0.6) {
-    reasons.push("liên quan nội dung tốt");
-  }
-
-  if (item.explain?.funding > 0.6) {
-    reasons.push("mức tài trợ cao");
-  }
-
-  if (item.explain?.deadline > 0.7) {
-    reasons.push("deadline gần");
-  }
+  if (item.explain?.semantic > 0.6) reasons.push("liên quan nội dung tốt");
+  if (item.explain?.funding > 0.6) reasons.push("mức tài trợ cao");
+  if (item.explain?.deadline > 0.7) reasons.push("deadline gần");
 
   if (
     q.includes("nafosted") &&
@@ -74,16 +66,11 @@ function explainFund(item, query) {
     reasons.push("đúng quỹ Nafosted");
   }
 
-  if (
-    (q.includes("việt") || q.includes("vietnam")) &&
-    t.includes("vietnam")
-  ) {
+  if ((q.includes("việt") || q.includes("vietnam")) && t.includes("vietnam")) {
     reasons.push("liên quan Việt Nam");
   }
 
-  if (!reasons.length) {
-    reasons.push("phù hợp tương đối với yêu cầu");
-  }
+  if (!reasons.length) reasons.push("phù hợp tương đối với yêu cầu");
 
   return reasons.join(", ");
 }
@@ -101,10 +88,7 @@ function mergeResults(vector, keyword) {
   keyword.forEach(r => {
     const key = r.payload?.title;
     if (!key) return;
-
-    if (!map.has(key)) {
-      map.set(key, r);
-    }
+    if (!map.has(key)) map.set(key, r);
   });
 
   return Array.from(map.values());
@@ -123,7 +107,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
   if (cached) return cached;
 
   try {
-    // ================= SEARCH =================
     let vectorResults = await searchFund(expanded, k * 3).catch(() => []);
 
     vectorResults = vectorResults.map(r => ({
@@ -132,94 +115,82 @@ export async function runFundSearch(query, model_id, topk = 5) {
     }));
 
     let merged = mergeResults(vectorResults, []);
-
     if (!merged.length) return [];
 
     let ranked = rankFunds(merged, q);
 
-    // ================= 🔥 FILTER (GEO + TIME) =================
+    // ================= 🔥 SMART FILTER =================
     let filtered = ranked;
 
-    // 🔥 GEO FILTER
+    // 🔥 SOFT GEO BOOST
     if (q.includes("việt") || q.includes("vietnam")) {
-      const vn = ranked.filter(r => {
-        const t = (r.payload?.text || "").toLowerCase();
-        const a = (r.payload?.agency || "").toLowerCase();
+      filtered = ranked
+        .map(r => {
+          const t = (r.payload?.text || "").toLowerCase();
+          const a = (r.payload?.agency || "").toLowerCase();
 
-        return (
-          t.includes("vietnam") ||
-          t.includes("việt") ||
-          t.includes("nafosted") ||
-          a.includes("vietnam")
-        );
-      });
+          let bonus = 0;
 
-      if (vn.length >= 2) filtered = vn;
+          if (t.includes("vietnam") || t.includes("nafosted")) bonus += 0.2;
+          if (a.includes("vietnam")) bonus += 0.2;
+
+          if (
+            a.includes("nsf") ||
+            a.includes("u.s.") ||
+            a.includes("naval")
+          ) {
+            bonus -= 0.25;
+          }
+
+          return { ...r, finalScore: r.finalScore + bonus };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore);
     }
 
-    // 🔥 TIME FILTER
+    // 🔥 TIME SOFT
     const now = Date.now();
 
-    filtered = filtered.filter(r => {
-      const d = new Date(r.payload?.deadline || "");
-      if (isNaN(d)) return true;
-
-      const diffDays = (d.getTime() - now) / (1000 * 60 * 60 * 24);
-
-      return diffDays > -365; // không quá cũ
-    });
-
-    // 🔥 YEAR FILTER (2026 intent)
-    if (q.includes("2026")) {
-      filtered = filtered.filter(r => {
+    filtered = filtered
+      .map(r => {
         const d = new Date(r.payload?.deadline || "");
-        if (isNaN(d)) return false;
-        return d.getFullYear() >= 2025;
+        if (isNaN(d)) return r;
+
+        const diffDays = (d.getTime() - now) / (1000 * 60 * 60 * 24);
+
+        let bonus = 0;
+        if (diffDays > 0) bonus += 0.05;
+        if (diffDays < -365) bonus -= 0.1;
+
+        return { ...r, finalScore: r.finalScore + bonus };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore);
+
+    // 🔥 FALLBACK HARD (CHỈ khi sai hoàn toàn)
+    if (
+      q.includes("việt") &&
+      filtered.slice(0, 3).every(r => {
+        const t = (r.payload?.text || "").toLowerCase();
+        return !t.includes("vietnam") && !t.includes("nafosted");
+      })
+    ) {
+      const hard = ranked.filter(r => {
+        const t = (r.payload?.text || "").toLowerCase();
+        return t.includes("vietnam") || t.includes("nafosted");
       });
+
+      if (hard.length > 0) filtered = hard;
     }
-
-    // ================= BOOST =================
-    filtered = filtered.sort((a, b) => {
-      const ta = (a.payload?.text || "").toLowerCase();
-      const tb = (b.payload?.text || "").toLowerCase();
-      const ql = q.toLowerCase();
-
-      const boost = (t) => {
-        let s = 0;
-
-        // Nafosted
-        if (ql.includes("nafosted")) {
-          if (
-            t.includes("nafosted") ||
-            t.includes("khoa học và công nghệ quốc gia")
-          ) s += 3;
-        }
-
-        // Vietnam
-        if (ql.includes("việt") || ql.includes("vietnam")) {
-          if (t.includes("vietnam") || t.includes("nafosted")) s += 2;
-          else s -= 2; // 🔥 phạt US fund
-        }
-
-        return s;
-      };
-
-      return (b.finalScore + boost(tb)) - (a.finalScore + boost(ta));
-    });
 
     // ================= RERANK =================
     let finalResults = filtered.slice(0, k);
 
     try {
       const reranked = await rerankFunds(q, finalResults, model_id);
-
       if (reranked?.length) {
         const remain = finalResults.filter(f => !reranked.includes(f));
         finalResults = [...reranked, ...remain].slice(0, k);
       }
-    } catch (err) {
-      console.warn("⚠️ rerank skip:", err.message);
-    }
+    } catch {}
 
     // ================= FILL =================
     if (finalResults.length < k) {
@@ -234,7 +205,6 @@ export async function runFundSearch(query, model_id, topk = 5) {
     }));
 
     setCache(cacheKey, finalResults);
-
     return finalResults;
 
   } catch (err) {
