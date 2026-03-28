@@ -1,8 +1,12 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import crypto from "crypto";
 import { getDb } from "../services/mongo.js";
 
 const URL = "https://easychair.org/cfp2/";
+
+const genKey = (v) =>
+  crypto.createHash("md5").update(String(v)).digest("hex");
 
 async function run() {
   const db = await getDb();
@@ -37,35 +41,54 @@ async function run() {
       link = "https://easychair.org" + link;
     }
 
+    const _key = genKey(acronym + "_" + start_date);
+
     bulk.push({
       updateOne: {
-        filter: { acronym, start_date },
+        filter: { _key }, // 🔥 chỉ dùng _key
         update: [
           {
             $set: {
+              _key,
+              acronym,
+              start_date,
+
               name,
               location,
               deadline,
               url: link,
 
-              // 🔥 detect thay đổi → set pending
+              // 🔥 CHỈ update nếu có thay đổi
+              changed: {
+                $or: [
+                  { $ne: ["$name", name] },
+                  { $ne: ["$location", location] },
+                  { $ne: ["$deadline", deadline] },
+                  { $ne: ["$url", link] }
+                ]
+              }
+            }
+          },
+          {
+            $set: {
               status: {
                 $cond: [
-                  {
-                    $or: [
-                      { $ne: ["$name", name] },
-                      { $ne: ["$location", location] },
-                      { $ne: ["$deadline", deadline] },
-                      { $ne: ["$url", link] }
-                    ]
-                  },
+                  "$changed",
                   "pending",
                   "$status"
                 ]
               },
-
-              updated_time: new Date()
+              updated_time: {
+                $cond: [
+                  "$changed",
+                  new Date(),
+                  "$updated_time"
+                ]
+              }
             }
+          },
+          {
+            $unset: "changed"
           }
         ],
         upsert: true
@@ -83,9 +106,9 @@ async function run() {
     );
   }
 
-  // 🔥 index giúp enrich nhanh
+  // 🔥 index chuẩn
+  await col.createIndex({ _key: 1 }, { unique: true });
   await col.createIndex({ status: 1 });
-  await col.createIndex({ acronym: 1, start_date: 1 }, { unique: true });
 
   console.log("✅ Crawl DONE");
 }
