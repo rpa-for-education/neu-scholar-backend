@@ -1,99 +1,92 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
-import PQueue from "p-queue";
-import { chromium } from "playwright";
-import { getDb } from "../services/mongo.js";
+import crypto from "crypto";
+import { MongoClient } from "mongodb";
+import dotenv from "dotenv";
 
-const CONCURRENCY = 2;
-const LIMIT = 200;
-const TIMEOUT = 15000;
+dotenv.config();
 
-let browser;
+// ================= CONFIG =================
+const MONGO_URI = process.env.MONGO_URI;
+const DB_NAME = process.env.DB_NAME || "rpa";
+const COLLECTION = "conference";
 
-// ================= EXTRACT =================
-function extractDeadline(text) {
-  const match = text.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
-  if (!match) return null;
+const client = new MongoClient(MONGO_URI);
 
-  const d = new Date(match[1]);
-  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+// ================= UTIL =================
+const hash = (str) =>
+  crypto.createHash("md5").update(str).digest("hex");
+
+function generateEnrichHash(enrich) {
+  return hash(JSON.stringify(enrich));
 }
 
-// ================= FETCH =================
-async function fetch(url) {
-  try {
-    const res = await axios.get(url, { timeout: TIMEOUT });
-    if (res.data && res.data.length > 500) return res.data;
-  } catch {}
+// ================= ENRICH LOGIC =================
+function enrichDoc(doc) {
+  // 👉 thay bằng AI / NLP / API thật
+  return {
+    core_rank: guessRank(doc.acronym),
+    topics: extractTopics(doc.title),
+    score: Math.random().toFixed(2)
+  };
+}
 
-  if (!browser) {
-    browser = await chromium.launch({ headless: true });
-  }
+function guessRank(acronym = "") {
+  if (!acronym) return "C";
+  if (acronym.includes("ICML")) return "A*";
+  if (acronym.includes("NeurIPS")) return "A*";
+  return "B";
+}
 
-  const page = await browser.newPage();
-  try {
-    await page.goto(url, { timeout: 30000 });
-    return await page.content();
-  } catch {
-    return null;
-  } finally {
-    await page.close();
-  }
+function extractTopics(title = "") {
+  if (!title) return [];
+  return title.split(" ").slice(0, 3);
 }
 
 // ================= MAIN =================
 async function run() {
-  const db = await getDb();
-  const col = db.collection("conference");
+  console.log("🚀 ENRICH START");
 
-  console.log("🚀 Enrich incremental...");
+  await client.connect();
+  const col = client.db(DB_NAME).collection(COLLECTION);
 
-  // 🔥 CHỈ lấy data cần enrich
-  const docs = await col
-    .find({ status: "pending" })
-    .limit(LIMIT)
-    .toArray();
+  const cursor = col.find({
+    isActive: true
+  });
 
-  console.log(`📊 Need enrich: ${docs.length}`);
+  let updated = 0;
+  let skipped = 0;
 
-  if (!docs.length) {
-    console.log("✅ Nothing to enrich");
-    process.exit(0);
-  }
+  while (await cursor.hasNext()) {
+    const doc = await cursor.next();
 
-  const queue = new PQueue({ concurrency: CONCURRENCY });
+    const enriched = enrichDoc(doc);
+    const enrich_hash = generateEnrichHash(enriched);
 
-  for (const doc of docs) {
-    queue.add(async () => {
-      const html = await fetch(doc.url);
-      if (!html) return;
+    if (doc.enrich_hash === enrich_hash) {
+      skipped++;
+      continue;
+    }
 
-      const $ = cheerio.load(html);
-      const text = $("body").text();
-
-      const deadline = extractDeadline(text);
-
-      await col.updateOne(
-        { _id: doc._id },
-        {
-          $set: {
-            deadline,
-            enrichedAt: new Date(),
-            status: "done"
-          }
+    await col.updateOne(
+      { _id: doc._id },
+      {
+        $set: {
+          ...enriched,
+          enrich_hash,
+          enrichedAt: new Date()
         }
-      );
+      }
+    );
 
-      console.log("✅ enriched:", doc.acronym);
-    });
+    updated++;
   }
 
-  await queue.onIdle();
+  console.log(`
+📊 ENRICH RESULT
+🔄 Updated: ${updated}
+⏭️ Skipped: ${skipped}
+  `);
 
-  console.log("🎯 ENRICH DONE");
-
-  if (browser) await browser.close();
-  process.exit(0);
+  await client.close();
 }
 
 run();

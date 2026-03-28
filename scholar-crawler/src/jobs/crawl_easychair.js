@@ -1,116 +1,164 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
 import crypto from "crypto";
-import { getDb } from "../services/mongo.js";
+import { MongoClient } from "mongodb";
+import dotenv from "dotenv";
 
-const URL = "https://easychair.org/cfp2/";
+dotenv.config();
 
-const genKey = (v) =>
-  crypto.createHash("md5").update(String(v)).digest("hex");
+// ================= CONFIG =================
+const MONGO_URI = process.env.MONGO_URI;
+const DB_NAME = process.env.DB_NAME || "rpa";
+const COLLECTION = "conference";
+const SOURCE = "easychair";
+const BATCH_SIZE = 500;
 
-async function run() {
-  const db = await getDb();
-  const col = db.collection("conference");
+const client = new MongoClient(MONGO_URI);
 
-  console.log("🚀 Crawling EasyChair...");
+// ================= UTIL =================
+const hash = (str) =>
+  crypto.createHash("md5").update(str).digest("hex");
 
-  const { data } = await axios.get(URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120 Safari/537.36",
-    },
-  });
+function generateExternalId(doc) {
+  return hash(doc.link || doc.title);
+}
 
-  const $ = cheerio.load(data);
-  const rows = $("table tbody tr");
+function extractYear(text = "") {
+  const match = text.match(/20\d{2}/);
+  return match ? Number(match[0]) : null;
+}
 
-  let bulk = [];
+function normalizeDoc(raw) {
+  return {
+    title: raw.title?.trim(),
+    acronym: raw.acronym?.trim(),
+    link: raw.link,
+    location: raw.location || "",
+    year: raw.year || extractYear(raw.title)
+  };
+}
 
-  rows.each((_, row) => {
-    const cols = $(row).find("td");
-    if (cols.length < 6) return;
+function generateRawHash(doc) {
+  const base = {
+    title: doc.title,
+    acronym: doc.acronym,
+    link: doc.link,
+    location: doc.location,
+    year: doc.year
+  };
+  return hash(JSON.stringify(base));
+}
 
-    const acronym = $(cols[0]).text().trim();
-    const name = $(cols[1]).text().trim();
-    const location = $(cols[2]).text().trim();
-    const deadline = $(cols[3]).text().trim();
-    const start_date = $(cols[4]).text().trim();
+// ================= BULK UPSERT RAW =================
+async function bulkUpsertRaw(col, docs) {
+  const ops = [];
 
-    let link = $(cols[0]).find("a").attr("href");
-    if (link && !link.startsWith("http")) {
-      link = "https://easychair.org" + link;
-    }
+  for (const raw of docs) {
+    const doc = normalizeDoc(raw);
+    if (!doc.title) continue;
 
-    const _key = genKey(acronym + "_" + start_date);
+    const external_id = generateExternalId(doc);
+    const raw_hash = generateRawHash(doc);
 
-    bulk.push({
+    ops.push({
       updateOne: {
-        filter: { _key }, // 🔥 chỉ dùng _key
+        filter: {
+          source: SOURCE,
+          external_id
+        },
         update: [
           {
             $set: {
-              _key,
-              acronym,
-              start_date,
-
-              name,
-              location,
-              deadline,
-              url: link,
-
-              // 🔥 CHỈ update nếu có thay đổi
-              changed: {
-                $or: [
-                  { $ne: ["$name", name] },
-                  { $ne: ["$location", location] },
-                  { $ne: ["$deadline", deadline] },
-                  { $ne: ["$url", link] }
-                ]
-              }
+              // RAW fields only
+              ...doc,
+              source: SOURCE,
+              external_id,
+              raw_hash,
+              isActive: true,
+              updatedAt: new Date()
             }
           },
           {
-            $set: {
-              status: {
-                $cond: [
-                  "$changed",
-                  "pending",
-                  "$status"
-                ]
-              },
-              updated_time: {
-                $cond: [
-                  "$changed",
-                  new Date(),
-                  "$updated_time"
-                ]
-              }
+            $setOnInsert: {
+              createdAt: new Date()
             }
-          },
-          {
-            $unset: "changed"
           }
         ],
         upsert: true
       }
     });
-  });
-
-  if (bulk.length) {
-    const res = await col.bulkWrite(bulk, { ordered: false });
-
-    console.log(
-      `🆕 Inserted: ${res.upsertedCount || 0} | 🔄 Updated: ${
-        res.modifiedCount || 0
-      }`
-    );
   }
 
-  // 🔥 index chuẩn
-  await col.createIndex({ _key: 1 }, { unique: true });
-  await col.createIndex({ status: 1 });
+  if (!ops.length) return { inserted: 0, updated: 0 };
 
-  console.log("✅ Crawl DONE");
+  const res = await col.bulkWrite(ops, { ordered: false });
+
+  return {
+    inserted: res.upsertedCount || 0,
+    updated: res.modifiedCount || 0
+  };
+}
+
+// ================= MAIN =================
+async function run() {
+  console.log("🚀 RAW CRAWLER START");
+
+  await client.connect();
+  const col = client.db(DB_NAME).collection(COLLECTION);
+
+  // 👉 TODO: thay bằng crawler thật
+  const crawled = await crawlEasyChairFull();
+
+  let inserted = 0;
+  let updated = 0;
+
+  for (let i = 0; i < crawled.length; i += BATCH_SIZE) {
+    const chunk = crawled.slice(i, i + BATCH_SIZE);
+
+    const res = await bulkUpsertRaw(col, chunk);
+
+    inserted += res.inserted;
+    updated += res.updated;
+  }
+
+  // ===== mark inactive =====
+  const seenIds = crawled.map(d =>
+    generateExternalId(normalizeDoc(d))
+  );
+
+  await col.updateMany(
+    {
+      source: SOURCE,
+      external_id: { $nin: seenIds }
+    },
+    {
+      $set: { isActive: false }
+    }
+  );
+
+  console.log(`
+📊 RAW RESULT
+🆕 Inserted: ${inserted}
+🔄 Updated: ${updated}
+  `);
+
+  await client.close();
+}
+
+// ================= MOCK =================
+async function crawlEasyChairFull() {
+  return [
+    {
+      title: "ICML 2026",
+      acronym: "ICML",
+      link: "https://icml.cc",
+      location: "USA"
+    },
+    {
+      title: "NeurIPS 2026",
+      acronym: "NeurIPS",
+      link: "https://neurips.cc",
+      location: "Canada"
+    }
+  ];
 }
 
 run();
