@@ -40,7 +40,6 @@ function clean(s = "") {
 async function initGeo() {
   console.log("🌍 Loading Geo dataset...");
 
-  // country
   const countryText = await fs.readFile(COUNTRY_FILE, "utf8");
 
   countryText.split("\n").forEach(line => {
@@ -65,7 +64,6 @@ async function initGeo() {
     }[continent] || null;
   });
 
-  // cities
   const geoText = await fs.readFile(CITY_FILE, "utf8");
 
   geoText.split("\n").forEach(line => {
@@ -83,7 +81,6 @@ async function initGeo() {
     }
   });
 
-  // fallback
   try {
     const fallbackText = await fs.readFile(CITY_FALLBACK, "utf8");
     fallbackMap = JSON.parse(fallbackText);
@@ -173,7 +170,6 @@ async function run() {
   const db = client.db(DB_NAME);
   const col = db.collection(COLLECTION);
 
-  // đảm bảo index đúng
   await col.createIndex({ _key: 1 }, { unique: true });
 
   console.log("🚀 Crawling...");
@@ -191,7 +187,17 @@ async function run() {
     const cols = $(row).find("td");
     if (cols.length < 6) continue;
 
-    const acronym = $(cols[0]).text().trim();
+    // ✅ FIX ACRONYM CHUẨN
+    const linkEl = $(cols[0]).find("a").first();
+    if (!linkEl.length) continue;
+
+    const acronym = linkEl.text().trim();
+
+    // 🚨 FILTER ROW RÁC
+    if (!acronym || acronym.length > 100 || acronym.includes("EasyChair")) {
+      continue;
+    }
+
     const name = $(cols[1]).text().trim();
     const location = $(cols[2]).text().trim();
 
@@ -205,7 +211,7 @@ async function run() {
       .map(t => t.trim())
       .filter(Boolean);
 
-    let link = $(cols[0]).find("a").attr("href");
+    let link = linkEl.attr("href");
     if (link && !link.startsWith("http")) {
       link = "https://easychair.org" + link;
     }
