@@ -91,23 +91,19 @@ function buildJournalText(doc) {
   ].join(" "));
 }
 
-// 🔥 FUND (FIX NAFOSTED + VN BOOST)
+// 🔥 FUND (giữ nguyên logic của bạn)
 function buildFundText(doc) {
   return norm([
     "research grant funding",
 
-    // ===== CORE =====
     doc.opportunity_title,
 
-    // 🔥 FIX QUAN TRỌNG
-    doc.agency_code,        // NAFOSTED
+    doc.agency_code,
     doc.agency_name,
 
-    // 🔥 BOOST NGỮ CẢNH VN
     doc.country,
     "vietnam nafosted grant research funding",
 
-    // ===== CONTEXT =====
     doc.category,
     doc.funding_categories,
 
@@ -116,7 +112,6 @@ function buildFundText(doc) {
     doc.applicant_types,
     doc.funding_instruments,
 
-    // ===== EXTRA SIGNAL =====
     doc.opportunity_number,
     doc.opportunity_id,
 
@@ -167,13 +162,26 @@ function journalPayload(doc) {
   };
 }
 
-// 🔥 FIX nhẹ payload (country fallback)
+// 🔥🔥🔥 CHỈ SỬA DUY NHẤT Ở ĐÂY (THÊM text)
 function fundPayload(doc) {
   return {
     type: "fund",
 
     title: doc.opportunity_title,
     agency: doc.agency_name,
+
+    // 🔥 FIX QUAN TRỌNG NHẤT
+    text: [
+      doc.opportunity_title,
+      doc.agency_name,
+      doc.agency_code,
+      doc.description,
+      doc.category,
+      doc.funding_categories
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase(),
 
     deadline: doc.close_date,
     amount: doc.funding_amount,
