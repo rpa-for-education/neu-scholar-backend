@@ -135,29 +135,23 @@ function parseDate(text = "") {
   }
 }
 
-/* ================= REMOVE DUP ================= */
-async function removeDuplicates(col) {
-  const cursor = col.aggregate([
-    { $sort: { updated_time: -1 } },
-    {
-      $group: {
-        _id: { _key: "$_key" },
-        ids: { $push: "$_id" },
-        count: { $sum: 1 }
-      }
-    },
-    { $match: { count: { $gt: 1 } } }
-  ]);
+/* ================= TOPIC ================= */
+function parseTopics(raw = "") {
+  if (!raw) return [];
 
-  let removed = 0;
+  raw = raw.replace(/\s+/g, " ").trim().toLowerCase();
 
-  for await (const doc of cursor) {
-    doc.ids.shift();
-    const res = await col.deleteMany({ _id: { $in: doc.ids } });
-    removed += res.deletedCount;
+  if (raw.includes(",")) {
+    return [...new Set(
+      raw.split(",").map(t => t.trim()).filter(Boolean)
+    )];
   }
 
-  console.log(`🗑️ Removed: ${removed}`);
+  // fallback đơn giản (không over-engineer)
+  return raw
+    .split(/(?=\b(ai|data|learning|model|analysis|prediction|classification)\b)/gi)
+    .map(t => t.trim())
+    .filter(t => t.length > 3);
 }
 
 /* ================= MAIN ================= */
@@ -181,19 +175,17 @@ async function run() {
 
   let inserted = 0;
   let updated = 0;
-  let skipped = 0;
 
   for (const row of rows.toArray()) {
     const cols = $(row).find("td");
     if (cols.length < 6) continue;
 
-    // ✅ FIX ACRONYM CHUẨN
     const linkEl = $(cols[0]).find("a").first();
     if (!linkEl.length) continue;
 
     const acronym = linkEl.text().trim();
 
-    // 🚨 FILTER ROW RÁC
+    // filter row rác
     if (!acronym || acronym.length > 100 || acronym.includes("EasyChair")) {
       continue;
     }
@@ -204,12 +196,7 @@ async function run() {
     const deadline = parseDate($(cols[3]).text().trim());
     const start_date = parseDate($(cols[4]).text().trim());
 
-    const topics = $(cols[5])
-      .text()
-      .trim()
-      .split(",")
-      .map(t => t.trim())
-      .filter(Boolean);
+    const topics = parseTopics($(cols[5]).text());
 
     let link = linkEl.attr("href");
     if (link && !link.startsWith("http")) {
@@ -234,26 +221,8 @@ async function run() {
 
     const newHash = hash(newDoc);
 
-    const existing = await col.findOne({ _key });
-
-    if (!existing) {
-      await col.insertOne({
-        ...newDoc,
-        hash: newHash,
-        status: "pending",
-        updated_time: new Date()
-      });
-      inserted++;
-      continue;
-    }
-
-    if (existing.hash === newHash) {
-      skipped++;
-      continue;
-    }
-
-    await col.updateOne(
-      { _id: existing._id },
+    const res = await col.updateOne(
+      { _key },
       {
         $set: {
           ...newDoc,
@@ -261,15 +230,15 @@ async function run() {
           status: "pending",
           updated_time: new Date()
         }
-      }
+      },
+      { upsert: true }
     );
 
-    updated++;
+    if (res.upsertedCount) inserted++;
+    else if (res.modifiedCount) updated++;
   }
 
-  console.log({ inserted, updated, skipped });
-
-  await removeDuplicates(col);
+  console.log({ inserted, updated });
 
   console.log("🎯 DONE");
   await client.close();
