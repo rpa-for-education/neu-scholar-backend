@@ -1,4 +1,4 @@
-// agentReasoning.js - INTENT + QUERY REASONING
+// agentReasoning.js - FINAL STABLE (MINIMAL + SAFE)
 
 export function detectIntent(query = "") {
   const q = query.toLowerCase();
@@ -9,7 +9,7 @@ export function detectIntent(query = "") {
     keywords: [],
   };
 
-  // COUNTRY
+  // ===== COUNTRY =====
   if (q.includes("việt") || q.includes("vietnam")) {
     intent.country = "vietnam";
   }
@@ -18,14 +18,14 @@ export function detectIntent(query = "") {
     intent.country = "usa";
   }
 
-  // YEAR
+  // ===== YEAR =====
   const yearMatch = q.match(/\b20\d{2}\b/);
   if (yearMatch) {
     intent.year = parseInt(yearMatch[0]);
   }
 
-  // KEYWORDS
-  if (q.includes("ai")) intent.keywords.push("artificial intelligence");
+  // ===== KEYWORDS (GIỮ NGUYÊN NHẸ NHÀNG) =====
+  if (q.includes("ai")) intent.keywords.push("ai");
   if (q.includes("y tế") || q.includes("health")) intent.keywords.push("health");
   if (q.includes("giáo dục")) intent.keywords.push("education");
   if (q.includes("cơ bản")) intent.keywords.push("basic research");
@@ -33,23 +33,18 @@ export function detectIntent(query = "") {
   return intent;
 }
 
+// ================= QUERY REWRITE =================
+// 🔥 RẤT QUAN TRỌNG: KHÔNG thêm YEAR vào query
 export function rewriteQuery(query, intent) {
   let expanded = query.toLowerCase();
 
+  // chỉ thêm nhẹ country (không spam)
   if (intent.country === "vietnam") {
-    expanded += " vietnam nafosted vietnam-based funding";
+    expanded += " vietnam nafosted";
   }
 
   if (intent.country === "usa") {
-    expanded += " united states nsf federal funding";
-  }
-
-  if (intent.year) {
-    expanded += ` ${intent.year} ${intent.year - 1}`;
-  }
-
-  if (intent.keywords.length) {
-    expanded += " " + intent.keywords.join(" ");
+    expanded += " usa nsf";
   }
 
   return expanded;

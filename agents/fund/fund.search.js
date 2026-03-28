@@ -1,4 +1,4 @@
-// fund.search.js - FINAL FIX (NAFOSTED MATCH + CLEAN RESULT)
+// fund.search.js - FINAL FIX (SAFE YEAR FILTER + CLEAN RESULT)
 
 import { embed } from "../shared/embedding.js";
 import { qdrantClient } from "../../db/qdrant.js";
@@ -11,13 +11,13 @@ const CACHE_TTL = 1000 * 60 * 5;
 const EMBED_TTL = 1000 * 60 * 30;
 const TIMEOUT = 1500;
 
-const CACHE_VERSION = "v11";
+const CACHE_VERSION = "v12";
 
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
 const MAX_EMBED_CACHE = 200;
 
-// ================= 🔥 NORMALIZE (FIX QUAN TRỌNG) =================
+// ================= NORMALIZE =================
 function normalizeFundDoc(d) {
   const title =
     d.title ||
@@ -37,7 +37,6 @@ function normalizeFundDoc(d) {
     d["FUNDING DESCRIPTION"] ||
     "";
 
-  // 🔥 FIX: inject agency vào text (QUAN TRỌNG NHẤT)
   const text = `${title} ${agency} ${baseText}`.toLowerCase();
 
   return {
@@ -96,7 +95,6 @@ function normalizeQuery(query) {
     .replace(/\s+/g, " ");
 }
 
-// 🔥 FIX: expand mạnh hơn cho VN
 function expandQuery(q) {
   let expanded = q;
 
@@ -109,7 +107,7 @@ function expandQuery(q) {
 }
 
 function cleanQueryForEmbed(q) {
-  return q.replace(/20\d{2}/g, "").trim();
+  return q.replace(/20\d{2}/g, "").trim(); // 🔥 giữ nguyên logic tốt
 }
 
 function safeTopk(topk) {
@@ -130,7 +128,7 @@ function withTimeout(promise, ms = TIMEOUT) {
   ]);
 }
 
-// ================= 🔥 KEYWORD SEARCH (BOOST CHUẨN) =================
+// ================= KEYWORD SEARCH =================
 async function keywordSearch(query, limit) {
   try {
     const db = await getDb();
@@ -151,18 +149,15 @@ async function keywordSearch(query, limit) {
 
     const scored = docs.map(d => {
       const norm = normalizeFundDoc(d);
-
       const full = norm.text;
 
       let hit = 0;
-
       for (const w of words) {
         if (full.includes(w)) hit++;
       }
 
       let score = 0.2 + hit * 0.2;
 
-      // 🔥 BOOST NAFOSTED
       if (
         query.includes("nafosted") &&
         full.includes("nafosted")
@@ -259,13 +254,17 @@ export async function searchFund(query, topk = 5) {
 
     if (!merged.length) return [];
 
+    // ================= 🔥 SAFE YEAR FILTER (FIX GỐC) =================
     if (year) {
       const filtered = merged.filter(r => {
         const d = new Date(r.payload?.deadline);
         return !isNaN(d) && d.getUTCFullYear() === year;
       });
 
-      if (filtered.length) merged = filtered;
+      // 🔥 CHỈ apply khi KHÔNG làm mất ngữ nghĩa
+      if (filtered.length >= Math.min(2, limit)) {
+        merged = filtered;
+      }
     }
 
     const finalResult = merged.slice(0, limit);

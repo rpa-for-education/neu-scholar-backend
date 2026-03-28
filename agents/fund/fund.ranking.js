@@ -1,4 +1,4 @@
-// fund.ranking.js - FINAL UPGRADE (INTENT-AWARE RANKING)
+// fund.ranking.js - FINAL STABLE (FIX YEAR BUG + SAFE TEXT)
 
 // ================= REGEX =================
 const RE_BILLION = /\b(billion|bn)\b/;
@@ -108,14 +108,16 @@ function textScore(text, query) {
     q.includes("việt") ||
     q.includes("vietnam")
   ) {
-    if (
-      t.includes("nafosted") ||
-      t.includes("vietnam")
-    ) {
+    if (t.includes("nafosted") || t.includes("vietnam")) {
       ratio += 0.2;
     } else {
-      ratio -= 0.1; // 🔥 phạt US fund
+      ratio = Math.max(0, ratio - 0.1); // ✅ safe penalty
     }
+  }
+
+  // 🔥 reinforce nhẹ (không phá ranking)
+  if (t.includes("vietnam") || t.includes("nafosted")) {
+    ratio += 0.05;
   }
 
   return Math.sqrt(Math.max(0, Math.min(ratio, 0.9)));
@@ -132,7 +134,7 @@ export function rankFunds(results, query) {
     semantic: 0.55,
     funding: 0.15,
     deadline: 0.15,
-    text: 0.15 // 🔥 tăng nhẹ text
+    text: 0.15
   };
 
   const q = query.toLowerCase();
@@ -154,14 +156,13 @@ export function rankFunds(results, query) {
         weights.deadline * dScore +
         weights.text * tScore;
 
-      // 🔥 YEAR BOOST (2026 intent)
+      // 🔥 YEAR BOOST (SAFE – KHÔNG PHẠT)
       if (q.includes("2026")) {
         const d = parseDeadline(p.deadline);
         if (d && d.getFullYear() >= 2025) {
           finalScore += 0.05;
-        } else {
-          finalScore -= 0.05;
         }
+        // ❌ không trừ nữa
       }
 
       finalScore = Math.max(0, Math.min(1, finalScore));
