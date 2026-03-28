@@ -1,142 +1,27 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
-import fs from "fs/promises";
 import { chromium } from "playwright";
-import { getDb } from "../services/mongo.js"; // ✅ FIX PATH
+import { getDb } from "../services/mongo.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
-/* ================= COUNTRY MAP ================= */
-const COUNTRY_NAME_TO_ISO = {
-  "italy": "IT","france": "FR","china": "CN","vietnam": "VN",
-  "united states": "US","usa": "US","uk": "GB","united kingdom": "GB",
-  "germany": "DE","japan": "JP","spain": "ES","canada": "CA",
-  "peru": "PE","qatar": "QA","india": "IN","netherlands": "NL",
-  "switzerland": "CH","australia": "AU","singapore": "SG"
-};
-
-/* ================= PATH ================= */
-const COUNTRY_FILE = new URL("../scripts/countryInfo.txt", import.meta.url);
-const CITY_FILE = new URL("../scripts/cities15000.txt", import.meta.url);
-
-/* ================= GLOBAL ================= */
-let geoMap = new Map();
-let ISO_TO_COUNTRY = {};
-let ISO_TO_CONTINENT = {};
-let browser;
-
-/* ================= HELPER ================= */
-function clean(s = "") {
-  return s.toLowerCase().replace(/[()]/g, "").trim();
-}
-
-function titleCase(s = "") {
-  return s.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-
-async function safeRead(fileUrl) {
-  try {
-    return await fs.readFile(fileUrl, "utf8");
-  } catch {
-    console.error("❌ Missing file:", fileUrl.href);
-    return "";
-  }
-}
-
-/* ================= GEO ================= */
-async function initGeo() {
-  console.log("🌍 Loading Geo...");
-
-  const countryText = await safeRead(COUNTRY_FILE);
-
-  countryText.split("\n").forEach(line => {
-    if (!line || line.startsWith("#")) return;
-
-    const cols = line.split("\t");
-    const iso = cols[0];
-    const name = cols[4];
-    const continent = cols[8];
-
-    if (!iso) return;
-
-    ISO_TO_COUNTRY[iso] = name;
-
-    ISO_TO_CONTINENT[iso] = {
-      AF: "Africa", AS: "Asia", EU: "Europe",
-      NA: "North America", SA: "South America", OC: "Oceania"
-    }[continent] || null;
-  });
-
-  const geoText = await safeRead(CITY_FILE);
-
-  geoText.split("\n").forEach(line => {
-    const cols = line.split("\t");
-    if (!cols || cols.length < 9) return;
-
-    const city = clean(cols[1]);
-    const countryCode = cols[8];
-
-    if (city && countryCode) {
-      geoMap.set(city, {
-        city: cols[1],
-        country_code: countryCode
-      });
-    }
-  });
-
-  console.log(`✅ Geo loaded: ${geoMap.size}`);
-}
-
-/* ================= LOCATION ================= */
-function extractFromLocation(location) {
-  if (!location) return {};
-
-  const parts = location.split(",").map(s => s.trim());
-  const cityKey = clean(parts[0]);
-
-  if (geoMap.has(cityKey)) return geoMap.get(cityKey);
-
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const key = clean(parts[i]);
-    if (COUNTRY_NAME_TO_ISO[key]) {
-      return {
-        city: titleCase(parts[0]),
-        country_code: COUNTRY_NAME_TO_ISO[key]
-      };
-    }
-  }
-
-  return {};
-}
-
 /* ================= CFP ================= */
 function extractCFP($) {
   try {
     $("script, style, nav, footer, header").remove();
 
-    let text = $("body").text();
-
-    text = text
+    let text = $("body").text()
       .replace(/EasyChair.*?Log in/gi, "")
       .replace(/\s+/g, " ")
       .trim();
 
-    const parts = text.split(/(?<=\.)\s+/);
+    if (text.length < 200) return null;
 
-    const good = parts.filter(p =>
-      p.length > 80 && !/login|easychair/i.test(p)
-    );
-
-    let cfp = good.join("\n");
-
-    if (cfp.length > MAX_CFP_LENGTH) cfp = cfp.slice(0, MAX_CFP_LENGTH);
-    if (cfp.length < 200) return null;
-
-    return cfp.trim();
+    return text.slice(0, MAX_CFP_LENGTH);
   } catch {
     return null;
   }
@@ -149,31 +34,13 @@ function extractDeadline(text) {
     if (!match) return null;
 
     const d = new Date(match[1]);
-    if (isNaN(d)) return null;
-
-    return d.toISOString().slice(0, 10);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
   } catch {
     return null;
   }
 }
 
-/* ================= PARSER ================= */
-async function parseEasyChair(doc, html) {
-  try {
-    const $ = cheerio.load(html);
-    const bodyText = $("body").text();
-
-    return {
-      cfp_text: extractCFP($),
-      deadline: extractDeadline(bodyText),
-      ...extractFromLocation(doc.location || "")
-    };
-  } catch (err) {
-    throw new Error("Parse crash: " + err.message);
-  }
-}
-
-/* ================= AXIOS ================= */
+/* ================= FETCH ================= */
 async function fetchAxios(url) {
   try {
     const res = await axios.get(url, {
@@ -195,19 +62,16 @@ async function fetchAxios(url) {
   }
 }
 
-/* ================= PLAYWRIGHT ================= */
-async function getBrowser() {
+let browser;
+
+async function fetchPlaywright(url) {
   if (!browser) {
     browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox"]
     });
   }
-  return browser;
-}
 
-async function fetchPlaywright(url) {
-  const browser = await getBrowser();
   const page = await browser.newPage();
 
   try {
@@ -221,12 +85,11 @@ async function fetchPlaywright(url) {
   }
 }
 
-/* ================= SMART FETCH ================= */
 async function smartFetch(url) {
   let html = await fetchAxios(url);
   if (html) return { html, source: "axios" };
 
-  console.log("⚠️ Fallback Playwright:", url);
+  console.log("⚠️ Playwright fallback:", url);
 
   html = await fetchPlaywright(url);
   if (html) return { html, source: "playwright" };
@@ -236,74 +99,91 @@ async function smartFetch(url) {
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 ENRICH FINAL STABLE");
-
-  await initGeo();
+  console.log("🤖 Enrich incremental...");
 
   const db = await getDb();
   const col = db.collection("conference");
 
-  const docs = await col.find({}).limit(5000).toArray();
+  const cursor = col.find({
+    $or: [
+      { status: { $exists: false } },
+      { status: { $ne: "done" } }
+    ]
+  }).limit(5000);
 
   const queue = new PQueue({ concurrency: CONCURRENCY });
 
-  let done = 0;
+  let updated = 0;
+  let skipped = 0;
 
-  for (const doc of docs) {
+  for await (const doc of cursor) {
     queue.add(async () => {
       try {
         if (!doc.url) return;
 
         const { html, source } = await smartFetch(doc.url);
+        if (!html) return;
 
-        if (!html || html.length < 500) {
-          console.log("❌ HTML yếu:", doc.url);
-          return;
-        }
+        const $ = cheerio.load(html);
+        const bodyText = $("body").text();
 
-        let data = {};
+        const cfp_text = extractCFP($);
+        const newDeadline = extractDeadline(bodyText);
 
-        try {
-          data = await parseEasyChair(doc, html);
-        } catch (err) {
-          console.log("⚠️ Parse fail:", doc.url);
-          console.log("👉", err.message);
-          data = {};
-        }
-
-        const updateFields = {
+        const update = {
           crawl_source: source,
           updated_time: new Date()
         };
 
-        if (data.cfp_text) updateFields.cfp_text = data.cfp_text;
-        if (data.deadline) updateFields.deadline = data.deadline;
-        if (data.city) updateFields.city = data.city;
-        if (data.country_code) updateFields.country_code = data.country_code;
+        let needUpdate = false;
 
-        updateFields.status = Object.keys(data).length
-          ? "done"
-          : doc.status || "partial";
+        // ===== CFP =====
+        if (cfp_text && !doc.cfp_text) {
+          update.cfp_text = cfp_text;
+          needUpdate = true;
+        }
 
-        await col.updateOne(
-          { _id: doc._id },
-          { $set: updateFields }
-        );
+        // ===== DEADLINE (QUAN TRỌNG) =====
+        if (newDeadline) {
+          if (!doc.deadline) {
+            update.deadline = newDeadline;
+            needUpdate = true;
+          } else if (doc.deadline !== newDeadline) {
+            // nếu khác → có thể log nhưng KHÔNG overwrite bừa
+            console.log("⚠️ Deadline mismatch:", doc.acronym);
+          }
+        }
 
-        done++;
-        console.log(`✅ ${done} (${source})`);
-        console.log(`   📌 ${doc.name || "No name"}`);
-        console.log(`   🔗 ${doc.url}`);
+        // ===== STATUS =====
+        if (needUpdate) {
+          update.status = "done";
+
+          await col.updateOne(
+            { _id: doc._id },
+            { $set: update }
+          );
+
+          updated++;
+          console.log(`✅ ${updated} - ${doc.acronym}`);
+        } else {
+          skipped++;
+        }
       } catch (err) {
-        console.log("❌ ERROR:", doc.url);
-        console.log("👉", err.message);
+        console.log("❌", doc.url);
       }
     });
   }
 
   await queue.onIdle();
 
-  console.log("🎯 DONE");
+  if (browser) await browser.close();
+
+  console.log(`
+🔄 Updated: ${updated}
+⏭️ Skipped: ${skipped}
+🎯 ENRICH DONE
+  `);
+
   process.exit(0);
 }
 
