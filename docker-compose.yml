@@ -121,6 +121,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8030
+      - SERVER_URL=http://101.96.66.232:8030   # 🔥 FIX DUY NHẤT
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 
