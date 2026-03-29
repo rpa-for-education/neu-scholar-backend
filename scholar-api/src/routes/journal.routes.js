@@ -1,6 +1,11 @@
-// routes/journal.routes.js
 import express from "express";
-import * as ctrl from "../controllers/journal.controller.js";
+import {
+  getJournals,
+  createJournal,
+  getJournal,
+  updateJournal,
+  deleteJournal
+} from "../controllers/journal.controller.js";
 
 const router = express.Router();
 
@@ -12,47 +17,135 @@ const router = express.Router();
 
 /**
  * @swagger
- * /journal:
+ * /api/v1/journal:
  *   get:
- *     summary: Get all journals
+ *     summary: List Journals
  *     tags: [journal]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         example: Economics
+ *       - in: query
+ *         name: country
+ *         schema:
+ *           type: string
+ *         example: Vietnam
+ *     responses:
+ *       200:
+ *         description: Success
+ *         content:
+ *           application/json:
+ *             example:
+ *               data:
+ *                 - _id: "69c557..."
+ *                   title: "Kinh tế & Phát triển"
+ *                   country: "Vietnam"
+ *                   sjr_best_quartile: ""
+ *               meta:
+ *                 page: 1
+ *                 limit: 10
+ *                 total: 100
  */
-router.get("/", ctrl.getJournals);
+router.get("/", getJournals);
 
 /**
  * @swagger
- * /journal:
+ * /api/v1/journal:
  *   post:
- *     summary: Create journal
+ *     summary: Create Journal
  *     tags: [journal]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             title: "New Journal"
+ *             country: "United States"
+ *             sjr_best_quartile: "Q1"
+ *     responses:
+ *       201:
+ *         description: Created
+ *         content:
+ *           application/json:
+ *             example:
+ *               _id: "69c7ee..."
+ *               title: "New Journal"
+ *               country: "United States"
  */
-router.post("/", ctrl.createJournal);
+router.post("/", createJournal);
 
 /**
  * @swagger
- * /journal/{journal_id}:
+ * /api/v1/journal/{id}:
  *   get:
- *     summary: Get journal by id
+ *     summary: Get Journal by ID
  *     tags: [journal]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: 69c557e3c58d6676ee672721
+ *     responses:
+ *       200:
+ *         description: Success
+ *         content:
+ *           application/json:
+ *             example:
+ *               _id: "69c557..."
+ *               title: "Kinh tế & Phát triển"
+ *               country: "Vietnam"
+ *       404:
+ *         description: Not found
  */
-router.get("/:journal_id", ctrl.getJournal);
+router.get("/:id", getJournal);
 
 /**
  * @swagger
- * /journal/{journal_id}:
+ * /api/v1/journal/{id}:
  *   put:
- *     summary: Update journal
+ *     summary: Update Journal
  *     tags: [journal]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           example:
+ *             country: "United Kingdom"
+ *     responses:
+ *       200:
+ *         description: Updated
+ *       404:
+ *         description: Not found
  */
-router.put("/:journal_id", ctrl.updateJournal);
+router.put("/:id", updateJournal);
 
 /**
  * @swagger
- * /journal/{journal_id}:
+ * /api/v1/journal/{id}:
  *   delete:
- *     summary: Delete journal
+ *     summary: Delete Journal
  *     tags: [journal]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Deleted
+ *       404:
+ *         description: Not found
  */
-router.delete("/:journal_id", ctrl.deleteJournal);
+router.delete("/:id", deleteJournal);
 
 export default router;

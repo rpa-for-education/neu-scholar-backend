@@ -1,47 +1,158 @@
-// controllers/journal.controller.js
 import { getDb } from "../db/mongo.js";
-import { buildPagination } from "../utils/pagination.js";
+import { ObjectId } from "mongodb";
 
-export async function getJournals(req, res) {
+const COL = "journal";
+
+// ================= GET ALL =================
+export const getJournals = async (req, res) => {
   const db = await getDb();
-  const { page, limit, skip } = buildPagination(req.query);
 
-  const data = await db.collection("journal")
-    .find({})
-    .skip(skip)
-    .limit(limit)
-    .toArray();
+  const {
+    q,
+    country,
+    publisher,
+    quartile,
+    page = 1,
+    limit = 10
+  } = req.query;
 
-  res.json({ page, limit, data });
-}
+  const query = {};
 
-export async function createJournal(req, res) {
+  // 🔥 SEARCH (giống conference)
+  if (q && q.trim() !== "") {
+    query.$or = [
+      { title: { $regex: q, $options: "i" } },
+      { categories: { $regex: q, $options: "i" } },
+      { areas: { $regex: q, $options: "i" } },
+      { text: { $regex: q, $options: "i" } }
+    ];
+  }
+
+  // 🔥 FILTER
+  if (country && country.trim() !== "") {
+    query.country = { $regex: country, $options: "i" };
+  }
+
+  if (publisher && publisher.trim() !== "") {
+    query.publisher = { $regex: publisher, $options: "i" };
+  }
+
+  if (quartile && quartile.trim() !== "") {
+    query.sjr_best_quartile = quartile;
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [data, total] = await Promise.all([
+    db.collection(COL)
+      .find(query)
+      .skip(Number(skip))
+      .limit(Number(limit))
+      .toArray(),
+
+    db.collection(COL).countDocuments(query)
+  ]);
+
+  res.json({
+    data,
+    meta: {
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
+};
+
+// ================= CREATE =================
+export const createJournal = async (req, res) => {
   const db = await getDb();
-  await db.collection("journal").insertOne(req.body);
-  res.json({ message: "Created" });
-}
 
-export async function getJournal(req, res) {
+  const { title } = req.body;
+
+  if (!title) {
+    return res.status(422).json({
+      message: "Validation Error",
+      errors: {
+        title: ["Title is required"]
+      }
+    });
+  }
+
+  const newItem = {
+    ...req.body,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+
+  const result = await db.collection(COL).insertOne(newItem);
+
+  res.status(201).json({
+    _id: result.insertedId,
+    ...newItem
+  });
+};
+
+// ================= GET BY ID =================
+export const getJournal = async (req, res) => {
   const db = await getDb();
-  const data = await db.collection("journal")
-    .findOne({ _key: req.params.journal_id });
 
-  res.json(data);
-}
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid ID" });
+  }
 
-export async function updateJournal(req, res) {
+  const item = await db.collection(COL).findOne({
+    _id: new ObjectId(req.params.id)
+  });
+
+  if (!item) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  res.json(item);
+};
+
+// ================= UPDATE =================
+export const updateJournal = async (req, res) => {
   const db = await getDb();
-  await db.collection("journal").updateOne(
-    { _key: req.params.journal_id },
-    { $set: req.body }
+
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid ID" });
+  }
+
+  const result = await db.collection(COL).findOneAndUpdate(
+    { _id: new ObjectId(req.params.id) },
+    {
+      $set: {
+        ...req.body,
+        updatedAt: new Date()
+      }
+    },
+    { returnDocument: "after" }
   );
-  res.json({ message: "Updated" });
-}
 
-export async function deleteJournal(req, res) {
+  if (!result.value) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  res.json(result.value);
+};
+
+// ================= DELETE =================
+export const deleteJournal = async (req, res) => {
   const db = await getDb();
-  await db.collection("journal")
-    .deleteOne({ _key: req.params.journal_id });
+
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid ID" });
+  }
+
+  const result = await db.collection(COL).deleteOne({
+    _id: new ObjectId(req.params.id)
+  });
+
+  if (!result.deletedCount) {
+    return res.status(404).json({ message: "Not found" });
+  }
 
   res.json({ message: "Deleted" });
-}
+};
