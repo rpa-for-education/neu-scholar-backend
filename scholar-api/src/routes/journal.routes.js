@@ -23,30 +23,33 @@ const router = express.Router();
  *     tags: [journal]
  *     parameters:
  *       - in: query
- *         name: q
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: search
  *         schema:
  *           type: string
  *         example: Economics
  *       - in: query
- *         name: country
+ *         name: publisher
  *         schema:
  *           type: string
- *         example: Vietnam
+ *         example: Elsevier
+ *       - in: query
+ *         name: quartile
+ *         schema:
+ *           type: string
+ *         example: Q1
  *     responses:
  *       200:
  *         description: Success
- *         content:
- *           application/json:
- *             example:
- *               data:
- *                 - _id: "69c557..."
- *                   title: "Kinh tế & Phát triển"
- *                   country: "Vietnam"
- *                   sjr_best_quartile: ""
- *               meta:
- *                 page: 1
- *                 limit: 10
- *                 total: 100
  */
 router.get("/", getJournals);
 
@@ -61,18 +64,15 @@ router.get("/", getJournals);
  *       content:
  *         application/json:
  *           example:
- *             title: "New Journal"
- *             country: "United States"
- *             sjr_best_quartile: "Q1"
+ *             title: "Kinh tế & Phát triển"
+ *             country: "Vietnam"
+ *             publisher: "ĐH Kinh tế Quốc dân"
+ *             categories: "Economics"
+ *             areas: "Business"
+ *             issn: "1859-0012"
  *     responses:
  *       201:
  *         description: Created
- *         content:
- *           application/json:
- *             example:
- *               _id: "69c7ee..."
- *               title: "New Journal"
- *               country: "United States"
  */
 router.post("/", createJournal);
 
@@ -98,6 +98,8 @@ router.post("/", createJournal);
  *               _id: "69c557..."
  *               title: "Kinh tế & Phát triển"
  *               country: "Vietnam"
+ *               publisher: "ĐH Kinh tế Quốc dân"
+ *               issn: "1859-0012"
  *       404:
  *         description: Not found
  */
@@ -115,11 +117,18 @@ router.get("/:id", getJournal);
  *         required: true
  *         schema:
  *           type: string
+ *         example: 69c557e3c58d6676ee672721
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           example:
- *             country: "United Kingdom"
+ *             title: "Kinh tế & Phát triển"
+ *             country: "Vietnam"
+ *             publisher: "ĐH Kinh tế Quốc dân"
+ *             categories: "Economics"
+ *             areas: "Business"
+ *             issn: "1859-0012"
  *     responses:
  *       200:
  *         description: Updated
@@ -140,6 +149,7 @@ router.put("/:id", updateJournal);
  *         required: true
  *         schema:
  *           type: string
+ *         example: 69c557e3c58d6676ee672721
  *     responses:
  *       200:
  *         description: Deleted

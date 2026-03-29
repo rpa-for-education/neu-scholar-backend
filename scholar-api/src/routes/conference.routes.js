@@ -1,4 +1,4 @@
-// conference.routes.js
+// src/routes/conference.routes.js --- IGNORE ---
 import express from "express";
 import {
   getConferences,
@@ -24,15 +24,26 @@ const router = express.Router();
  *     tags: [conference]
  *     parameters:
  *       - in: query
- *         name: q
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: search
+ *         description: Tìm theo tên hội thảo, chủ đề, v.v...
  *         schema:
  *           type: string
- *         example: AI
+ *         example: AI Agents
  *       - in: query
  *         name: country
  *         schema:
  *           type: string
- *         example: China
+ *         example: Vietnam
  *     responses:
  *       200:
  *         description: Success
@@ -61,8 +72,17 @@ router.get("/", getConferences);
  *       content:
  *         application/json:
  *           example:
- *             name: "Test Conference"
- *             country: "Vietnam"
+ *             name: "The 2nd International Sustainable Aviation Research Conference"
+ *             acronym: "ISAR 2026"
+ *             country: "China"
+ *             city: "Chengdu"
+ *             start_date: "2026-09-01"
+ *             deadline: "2026-06-15"
+ *             topics:
+ *               - "aviation noise"
+ *               - "air traffic management"
+ *             url: "https://easychair.org/cfp/ISARC2026"
+ *             cfp_text: ""
  *     responses:
  *       201:
  *         description: Created
@@ -91,14 +111,6 @@ router.post("/", createConference);
  *     responses:
  *       200:
  *         description: Success
- *         content:
- *           application/json:
- *             example:
- *               _id: "69c7ee..."
- *               name: "Conference name"
- *               country: "China"
- *       404:
- *         description: Not found
  */
 router.get("/:id", getConference);
 
@@ -114,11 +126,23 @@ router.get("/:id", getConference);
  *         required: true
  *         schema:
  *           type: string
+ *         example: 69c7ee28c58d6676ee6789ae
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           example:
- *             country: "Japan"
+ *             name: "The 2nd International Sustainable Aviation Research Conference"
+ *             acronym: "ISAR 2026"
+ *             country: "China"
+ *             city: "Chengdu"
+ *             start_date: "2026-09-01"
+ *             deadline: "2026-06-15"
+ *             topics:
+ *               - "aviation noise"
+ *               - "air traffic management"
+ *             url: "https://easychair.org/cfp/ISARC2026"
+ *             cfp_text: ""
  *     responses:
  *       200:
  *         description: Updated
@@ -139,6 +163,7 @@ router.put("/:id", updateConference);
  *         required: true
  *         schema:
  *           type: string
+ *         example: 69c7ee28c58d6676ee6789ae
  *     responses:
  *       200:
  *         description: Deleted

@@ -1,3 +1,4 @@
+// src/controllers/conference.controller.js
 import { getDb } from "../db/mongo.js";
 import { ObjectId } from "mongodb";
 
@@ -7,16 +8,17 @@ const COL = "conference";
 export const getConferences = async (req, res) => {
   const db = await getDb();
 
-  const { q, country, page = 1, limit = 10 } = req.query;
+  const { search, country, page = 1, limit = 100 } = req.query;
 
   const query = {};
 
   // 🔥 SEARCH
-  if (q && q.trim() !== "") {
+  if (search && search.trim() !== "") {
     query.$or = [
-      { name: { $regex: q, $options: "i" } },
-      { acronym: { $regex: q, $options: "i" } },
-      { topics: { $regex: q, $options: "i" } }
+      { name: { $regex: search, $options: "i" } },
+      { acronym: { $regex: search, $options: "i" } },
+      { topics: { $regex: search, $options: "i" } },
+      { location: { $regex: search, $options: "i" } }
     ];
   }
 
@@ -104,14 +106,21 @@ export const updateConference = async (req, res) => {
     return res.status(400).json({ message: "Invalid ID" });
   }
 
+  if (!req.body || Object.keys(req.body).length === 0) {
+    return res.status(422).json({
+      message: "Validation Error",
+      errors: { body: ["Update data is required"] }
+    });
+  }
+
+  const updateDoc = {
+    ...req.body,
+    updatedAt: new Date()
+  };
+
   const result = await db.collection(COL).findOneAndUpdate(
     { _id: new ObjectId(req.params.id) },
-    {
-      $set: {
-        ...req.body,
-        updatedAt: new Date()
-      }
-    },
+    { $set: updateDoc },
     { returnDocument: "after" }
   );
 

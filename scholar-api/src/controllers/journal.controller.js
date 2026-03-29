@@ -8,8 +8,7 @@ export const getJournals = async (req, res) => {
   const db = await getDb();
 
   const {
-    q,
-    country,
+    search,
     publisher,
     quartile,
     page = 1,
@@ -18,19 +17,13 @@ export const getJournals = async (req, res) => {
 
   const query = {};
 
-  // 🔥 SEARCH (giống conference)
-  if (q && q.trim() !== "") {
+  if (search && search.trim() !== "") {
     query.$or = [
-      { title: { $regex: q, $options: "i" } },
-      { categories: { $regex: q, $options: "i" } },
-      { areas: { $regex: q, $options: "i" } },
-      { text: { $regex: q, $options: "i" } }
+      { title: { $regex: search, $options: "i" } },
+      { categories: { $regex: search, $options: "i" } },
+      { areas: { $regex: search, $options: "i" } },
+      { text: { $regex: search, $options: "i" } }
     ];
-  }
-
-  // 🔥 FILTER
-  if (country && country.trim() !== "") {
-    query.country = { $regex: country, $options: "i" };
   }
 
   if (publisher && publisher.trim() !== "") {
@@ -49,7 +42,6 @@ export const getJournals = async (req, res) => {
       .skip(Number(skip))
       .limit(Number(limit))
       .toArray(),
-
     db.collection(COL).countDocuments(query)
   ]);
 
@@ -120,14 +112,21 @@ export const updateJournal = async (req, res) => {
     return res.status(400).json({ message: "Invalid ID" });
   }
 
+  if (!req.body || Object.keys(req.body).length === 0) {
+    return res.status(422).json({
+      message: "Validation Error",
+      errors: { body: ["Update data is required"] }
+    });
+  }
+
+  const updateDoc = {
+    ...req.body,
+    updatedAt: new Date()
+  };
+
   const result = await db.collection(COL).findOneAndUpdate(
     { _id: new ObjectId(req.params.id) },
-    {
-      $set: {
-        ...req.body,
-        updatedAt: new Date()
-      }
-    },
+    { $set: updateDoc },
     { returnDocument: "after" }
   );
 

@@ -1,3 +1,4 @@
+// src/utils/pagination.js
 export function buildPagination(query) {
   const page = Math.max(parseInt(query.page) || 1, 1);
   const limit = Math.min(parseInt(query.limit) || 20, 100);
