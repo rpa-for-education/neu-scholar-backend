@@ -81,7 +81,7 @@ router.post("/", createFund);
  *         required: true
  *         schema:
  *           type: string
- *         example: 69c4fcf6c58d6676ee671cc6
+ *         example: 69c4fcf6c58d6676ee671ce0
  *     responses:
  *       200:
  *         description: Success
@@ -89,8 +89,8 @@ router.post("/", createFund);
  *           application/json:
  *             example:
  *               _id: "69c4fc..."
- *               opportunity_title: "Air Force Defense Research Sciences Conference and Workshop Support"
- *               agency_name: "Air Force Office of Scientific Research"
+ *               opportunity_title: "Pay-for-Performance (PfP) Incentive Payments Program"
+ *               agency_name: "Employment and Training Administration"
  *       404:
  *         description: Not found
  */
@@ -112,7 +112,7 @@ router.get("/:id", getFund);
  *       content:
  *         application/json:
  *           example:
- *             agency_name: "NASA"
+ *             agency_name: "Employment and Training Administration"
  *     responses:
  *       200:
  *         description: Updated

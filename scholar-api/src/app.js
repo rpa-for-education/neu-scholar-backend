@@ -1,3 +1,4 @@
+// app.js
 import express from "express";
 import cors from "cors";
 
@@ -16,6 +17,84 @@ app.use(express.json());
 // ================= API PREFIX =================
 const API_PREFIX = "/api/v1";
 
+// ================= DEFAULT ROOT "/" =================
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Root
+ *     tags: [default]
+ *     responses:
+ *       200:
+ *         description: Welcome message
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: "Welcome to Conference, Journal & Fund API"
+ *               version: "1.0.0"
+ */
+app.get("/", (req, res) => {
+  res.json({
+    message: "Welcome to Conference, Journal & Fund API",
+    version: "1.0.0"
+  });
+});
+
+// ================= API ROOT /api/v1 =================
+/**
+ * @swagger
+ * /api/v1/:
+ *   get:
+ *     summary: API Root endpoint
+ *     tags: [default]
+ *     responses:
+ *       200:
+ *         description: API information
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: "Conference, Journal & Fund API is running successfully"
+ *               version: "1.0.0"
+ *               status: "healthy"
+ *               endpoints:
+ *                 conference: "/api/v1/conference"
+ *                 journal: "/api/v1/journal"
+ *                 fund: "/api/v1/fund"
+ */
+app.get(API_PREFIX + "/", (req, res) => {
+  res.json({
+    message: "Conference, Journal & Fund API is running successfully",
+    version: "1.0.0",
+    status: "healthy",
+    endpoints: {
+      conference: "/api/v1/conference",
+      journal: "/api/v1/journal",
+      fund: "/api/v1/fund"
+    }
+  });
+});
+
+// ================= HEALTH =================
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health Check
+ *     tags: [default]
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             example:
+ *               status: "healthy"
+ */
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy"
+  });
+});
+
 // ================= ROUTES =================
 app.use(API_PREFIX + "/conference", conferenceRoutes);
 app.use(API_PREFIX + "/journal", journalRoutes);
@@ -24,7 +103,6 @@ app.use(API_PREFIX + "/fund", fundRoutes);
 // ================= SWAGGER =================
 const PORT = process.env.PORT || 8030;
 
-// 🔥 KHÔNG gắn API_PREFIX ở đây nữa
 const SERVER_URL =
   process.env.SERVER_URL || `http://localhost:${PORT}`;
 
@@ -33,119 +111,47 @@ const specs = swaggerJsdoc({
     openapi: "3.0.0",
     info: {
       title: "Scholar API",
-      version: "1.0.0",
-      description: "Conference / Journal / Fund API (Production Ready)"
+      version: "1.0.0"
     },
 
-    // ✅ FIX QUAN TRỌNG: KHÔNG + API_PREFIX
     servers: [
       {
         url: SERVER_URL
       }
     ],
 
-    components: {
-      schemas: {
-        // ===== CONFERENCE =====
-        Conference: {
-          type: "object",
-          properties: {
-            _id: { type: "string", example: "69c7ee28c58d6676ee6789ae" },
-            name: { type: "string", example: "ICAI 2026" },
-            country: { type: "string", example: "China" },
-            start_date: { type: "string" },
-            deadline: { type: "string" }
-          }
-        },
-
-        // ===== JOURNAL =====
-        Journal: {
-          type: "object",
-          properties: {
-            _id: { type: "string" },
-            title: { type: "string", example: "CA-A Cancer Journal" },
-            country: { type: "string", example: "United States" },
-            publisher: { type: "string", example: "Wiley" }
-          }
-        },
-
-        // ===== FUND =====
-        Fund: {
-          type: "object",
-          properties: {
-            _id: { type: "string" },
-            opportunity_title: {
-              type: "string",
-              example: "AI Research Grant"
-            },
-            agency_name: {
-              type: "string",
-              example: "NASA"
-            }
-          }
-        },
-
-        // ===== PAGINATION =====
-        Pagination: {
-          type: "object",
-          properties: {
-            page: { type: "integer", example: 1 },
-            limit: { type: "integer", example: 10 },
-            total: { type: "integer", example: 100 },
-            totalPages: { type: "integer", example: 10 }
-          }
-        },
-
-        // ===== RESPONSE =====
-        ConferenceListResponse: {
-          type: "object",
-          properties: {
-            data: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Conference" }
-            },
-            meta: { $ref: "#/components/schemas/Pagination" }
-          }
-        },
-
-        JournalListResponse: {
-          type: "object",
-          properties: {
-            data: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Journal" }
-            },
-            meta: { $ref: "#/components/schemas/Pagination" }
-          }
-        },
-
-        FundListResponse: {
-          type: "object",
-          properties: {
-            data: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Fund" }
-            },
-            meta: { $ref: "#/components/schemas/Pagination" }
-          }
-        }
-      }
-    }
+    tags: [
+      { name: "default" },
+      { name: "conference" },
+      { name: "journal" },
+      { name: "fund" }
+    ]
   },
 
-  // load swagger từ routes
-  apis: ["./src/routes/*.js"]
+  apis: ["./src/routes/*.js", "./src/app.js"]
 });
 
-// ================= SWAGGER UI =================
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(specs));
+// ================= SWAGGER UI (SORT FIX) =================
+app.use(
+  "/docs",
+  swaggerUi.serve,
+  swaggerUi.setup(specs, {
+    operationsSorter: (a, b) => {
+      const order = ["/", "/api/v1/", "/health"];
 
-// ================= ROOT =================
-app.get("/", (req, res) => {
-  res.json({
-    message: "Scholar API running",
-    docs: "/docs"
-  });
-});
+      const aPath = a.get("path");
+      const bPath = b.get("path");
+
+      const aIndex = order.indexOf(aPath);
+      const bIndex = order.indexOf(bPath);
+
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+
+      return aIndex - bIndex;
+    }
+  })
+);
 
 export default app;

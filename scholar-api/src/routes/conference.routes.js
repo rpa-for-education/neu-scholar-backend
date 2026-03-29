@@ -1,3 +1,4 @@
+// conference.routes.js
 import express from "express";
 import {
   getConferences,
@@ -40,7 +41,7 @@ const router = express.Router();
  *             example:
  *               data:
  *                 - _id: "69c7ee..."
- *                   name: "ICAI 2026"
+ *                   name: "ISAR 2026"
  *                   country: "China"
  *               meta:
  *                 page: 1
