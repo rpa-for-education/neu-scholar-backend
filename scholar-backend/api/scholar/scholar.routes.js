@@ -139,7 +139,7 @@ router.get("/data", async (req, res) => {
     const db = await getDb();
 
     const collectionName =
-      t === "conferences" ? "conferences" : "journals";
+      t === "conferences" ? "conference" : "journal";
 
     const col = db.collection(collectionName);
 

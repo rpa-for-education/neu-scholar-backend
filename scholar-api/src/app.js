@@ -101,7 +101,7 @@ app.use(API_PREFIX + "/journal", journalRoutes);
 app.use(API_PREFIX + "/fund", fundRoutes);
 
 // ================= SWAGGER =================
-const PORT = process.env.PORT || 8030;
+const PORT = process.env.PORT || 8029;
 
 const SERVER_URL =
   process.env.SERVER_URL || `http://localhost:${PORT}`;

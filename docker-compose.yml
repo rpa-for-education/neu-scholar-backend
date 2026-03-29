@@ -108,7 +108,7 @@ services:
     container_name: scholar-api
 
     ports:
-      - "8030:8030"
+      - "8029:8029"
 
     working_dir: /app
 
@@ -120,8 +120,8 @@ services:
 
     environment:
       - NODE_ENV=production
-      - PORT=8030
-      - SERVER_URL=http://101.96.66.232:8030   # 🔥 FIX DUY NHẤT
+      - PORT=8029
+      - SERVER_URL=http://101.96.66.232:8029   # 🔥 FIX DUY NHẤT
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 

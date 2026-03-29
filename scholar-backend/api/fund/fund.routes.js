@@ -82,6 +82,71 @@ async function handleAsk(req, res) {
 router.post("/", handleAsk);
 router.post("/ask", handleAsk);
 
+// ================= DATA API =================
+router.get("/data", async (req, res) => {
+  try {
+    const { type, limit = 20, page = 1 } = req.query;
+
+    const t = String(type || "").toLowerCase();
+
+    if (!["fund", "funds"].includes(t)) {
+      return res.status(400).json({
+        status: "error",
+        error: "type must be 'funds'"
+      });
+    }
+
+    const finalLimit = Math.min(Number(limit) || 20, 100);
+    const skip = (Number(page) - 1) * finalLimit;
+
+    // 👉 dùng mongo giống project của bạn
+    const { getDb } = await import("../../db/mongo.js");
+    const db = await getDb();
+
+    // ⚠️ QUAN TRỌNG: kiểm tra tên collection
+    // 👉 mặc định mình set là "fund"
+    const col = db.collection("fund");
+
+    const [items, total] = await Promise.all([
+      col.find({})
+        .skip(skip)
+        .limit(finalLimit)
+        .toArray(),
+      col.countDocuments({})
+    ]);
+
+    const data = items.map((f) => ({
+      id: f._id,
+      title: f.title,
+      agency: f.agency,
+      amount: f.amount,
+      deadline: f.deadline,
+      country: f.country,
+      url: f.url || ""
+    }));
+
+    return res.json({
+      status: "success",
+      type: "funds",
+      pagination: {
+        total,
+        page: Number(page),
+        limit: finalLimit,
+        total_pages: Math.ceil(total / finalLimit)
+      },
+      data
+    });
+
+  } catch (err) {
+    console.error("❌ /fund/data error:", err);
+
+    return res.status(500).json({
+      status: "error",
+      error: err.message || "Internal error"
+    });
+  }
+});
+
 // ================= STREAM =================
 router.post("/stream", async (req, res) => {
   try {
