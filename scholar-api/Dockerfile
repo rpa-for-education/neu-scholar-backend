@@ -7,6 +7,8 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 8025
+# 🔥 expose đúng port mới
+EXPOSE 8030
 
+# 🔥 chạy server
 CMD ["node", "server.js"]

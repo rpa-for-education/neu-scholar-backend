@@ -1,4 +1,3 @@
-// src/app.js
 import express from "express";
 import cors from "cors";
 
@@ -17,13 +16,15 @@ app.use(express.json());
 
 const API_PREFIX = "/api/v1";
 
-// routes
+// ================= ROUTES =================
 app.use(API_PREFIX, systemRoutes);
 app.use(API_PREFIX + "/conference", conferenceRoutes);
 app.use(API_PREFIX + "/journal", journalRoutes);
 app.use(API_PREFIX + "/fund", fundRoutes);
 
-// swagger
+// ================= SWAGGER =================
+const PORT = process.env.PORT || 8025;
+
 const specs = swaggerJsdoc({
   definition: {
     openapi: "3.0.0",
@@ -32,12 +33,19 @@ const specs = swaggerJsdoc({
       version: "1.0.0"
     },
     servers: [
-      { url: "http://localhost:8025/api/v1" }
+      {
+        url: `http://localhost:${PORT}${API_PREFIX}`
+      }
     ]
   },
   apis: ["./src/routes/*.js"]
 });
 
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(specs));
+
+// ================= HEALTH CHECK =================
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
 
 export default app;
