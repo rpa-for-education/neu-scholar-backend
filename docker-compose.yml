@@ -108,7 +108,7 @@ services:
     container_name: scholar-api
 
     ports:
-      - "8019:8019"
+      - "8030:8030"
 
     working_dir: /app
 
@@ -120,7 +120,7 @@ services:
 
     environment:
       - NODE_ENV=production
-      - PORT=8019
+      - PORT=8030
       - MONGODB_URI=${MONGODB_URI:-mongodb+srv://huycv:HuyCV20252026@aiagents.e0vgq4.mongodb.net}
       - MONGODB_DB=${MONGODB_DB:-fitneu}
 
