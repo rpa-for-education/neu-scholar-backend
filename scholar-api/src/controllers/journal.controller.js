@@ -1,3 +1,4 @@
+// controllers/journal.controller.js
 import { getDb } from "../db/mongo.js";
 import { buildPagination } from "../utils/pagination.js";
 

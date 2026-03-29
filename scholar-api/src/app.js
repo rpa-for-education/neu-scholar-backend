@@ -1,3 +1,4 @@
+// src/app.js
 import express from "express";
 import cors from "cors";
 
@@ -16,11 +17,13 @@ app.use(express.json());
 
 const API_PREFIX = "/api/v1";
 
+// routes
 app.use(API_PREFIX, systemRoutes);
 app.use(API_PREFIX + "/conference", conferenceRoutes);
 app.use(API_PREFIX + "/journal", journalRoutes);
 app.use(API_PREFIX + "/fund", fundRoutes);
 
+// swagger
 const specs = swaggerJsdoc({
   definition: {
     openapi: "3.0.0",
