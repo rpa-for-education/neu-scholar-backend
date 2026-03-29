@@ -1,3 +1,4 @@
+// controllers/journal.controller.js
 import { getDb } from "../db/mongo.js";
 import { ObjectId } from "mongodb";
 

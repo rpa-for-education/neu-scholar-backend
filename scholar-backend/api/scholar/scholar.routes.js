@@ -117,6 +117,88 @@ async function handleAsk(req, res) {
 router.post("/", handleAsk);
 router.post("/ask", handleAsk);
 
+// ================= DATA API =================
+router.get("/data", async (req, res) => {
+  try {
+    const { type, limit = 20, page = 1 } = req.query;
+
+    const t = String(type || "").toLowerCase();
+
+    if (!["conferences", "journals"].includes(t)) {
+      return res.status(400).json({
+        status: "error",
+        error: "type must be 'conferences' or 'journals'"
+      });
+    }
+
+    const finalLimit = Math.min(Number(limit) || 20, 100);
+    const skip = (Number(page) - 1) * finalLimit;
+
+    // 👉 IMPORT DB nếu chưa có ở đầu file
+    const { getDb } = await import("../../db/mongo.js");
+    const db = await getDb();
+
+    const collectionName =
+      t === "conferences" ? "conferences" : "journals";
+
+    const col = db.collection(collectionName);
+
+    const [items, total] = await Promise.all([
+      col.find({})
+        .skip(skip)
+        .limit(finalLimit)
+        .toArray(),
+      col.countDocuments({})
+    ]);
+
+    let data = [];
+
+    if (t === "conferences") {
+      data = items.map((c) => ({
+        id: c._id,
+        name: c.name,
+        acronym: c.acronym,
+        year: c.year,
+        country: c.country,
+        deadline: c.deadline,
+        url: c.url || ""
+      }));
+    }
+
+    if (t === "journals") {
+      data = items.map((j) => ({
+        id: j._id,
+        title: j.title,
+        publisher: j.publisher,
+        quartile: j.sjr_best_quartile,
+        sjr: j.sjr,
+        h_index: j.h_index,
+        url: j.scimago_link || j.url || ""
+      }));
+    }
+
+    return res.json({
+      status: "success",
+      type: t,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: finalLimit,
+        total_pages: Math.ceil(total / finalLimit)
+      },
+      data
+    });
+
+  } catch (err) {
+    console.error("❌ /data error:", err);
+
+    return res.status(500).json({
+      status: "error",
+      error: err.message || "Internal error"
+    });
+  }
+});
+
 // ================= STREAM =================
 router.post("/stream", async (req, res) => {
   try {
