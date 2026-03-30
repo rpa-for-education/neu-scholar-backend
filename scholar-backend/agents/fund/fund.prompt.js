@@ -1,4 +1,4 @@
-// fund.prompt.js - FINAL LOCKED (HARD FORMAT + REAL INSIGHT)
+// fund.prompt.js - FINAL LOCKED (HARD FORMAT + REAL INSIGHT + FIX LINK)
 
 export function buildFundPrompt(question, funds = [], history = []) {
   let context = `
@@ -114,6 +114,18 @@ Bạn là chuyên gia tư vấn quỹ nghiên cứu.
 
 `;
 
+  // ================= 🔥 FIX LINK (ADD - KHÔNG PHÁ LOGIC) =================
+  const getLink = (f) => {
+    return (
+      f.link ||
+      f.url ||
+      f.additional_info_url ||
+      f["LINK TO ADDITIONAL INFORMATION"] ||
+      f["OPPORTUNITY URL"] ||
+      ""
+    );
+  };
+
   // ================= HISTORY =================
   if (history.length) {
     context += "\n=== HISTORY ===\n";
@@ -133,7 +145,7 @@ Title: ${f.title}
 Agency: ${f.agency || "N/A"}
 Deadline: ${f.deadline || "N/A"}
 Funding: ${f.amount || "N/A"}
-Link: ${f.link || "N/A"}
+Link: ${getLink(f) || "N/A"}
 Summary: ${(f.text || "").slice(0, 180)}
 `;
     });
