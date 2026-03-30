@@ -1,4 +1,4 @@
-// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE + PENALTY FIX)
+// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE + HARD FILTER VN)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -47,14 +47,14 @@ function normalizeFunds(arr) {
   });
 }
 
-// ================= 🔥 INTENT MATCH (PATCH FINAL) =================
+// ================= 🔥 INTENT MATCH =================
 function relevanceScore(fund, query) {
   const t = (fund.title + " " + fund.text + " " + fund.agency).toLowerCase();
   const q = query.toLowerCase();
 
   let score = 0;
 
-  // ================= 🔥 ADD: NAFOSTED CORE =================
+  // Nafosted core
   if (
     (q.includes("cơ bản") || q.includes("basic")) &&
     (q.includes("việt") || q.includes("vietnam"))
@@ -64,11 +64,11 @@ function relevanceScore(fund, query) {
       t.includes("khoa học và công nghệ quốc gia") ||
       t.includes("quỹ phát triển khoa học")
     ) {
-      score += 10; // 🔥 đẩy lên top
+      score += 10;
     }
   }
 
-  // 🔥 BOOST Nafosted (giữ nguyên)
+  // Nafosted boost
   if (q.includes("nafosted")) {
     if (
       t.includes("nafosted") ||
@@ -79,13 +79,12 @@ function relevanceScore(fund, query) {
     }
   }
 
-  // 🔥 BOOST Vietnam (giữ nguyên)
+  // Vietnam boost
   if (q.includes("việt") || q.includes("vietnam")) {
     if (t.includes("vietnam") || t.includes("việt")) score += 1;
   }
 
-  // ================= 🔥 ADD: PENALTY COLLAB =================
-  // 👉 Fix FWO bug (cực kỳ quan trọng)
+  // Collaboration penalty
   if (q.includes("cơ bản") || q.includes("basic")) {
     if (
       t.includes("hợp tác") ||
@@ -93,9 +92,18 @@ function relevanceScore(fund, query) {
       t.includes("bilateral") ||
       t.includes("joint research")
     ) {
-      score -= 3; // 🔥 đẩy xuống
+      score -= 3;
     }
   }
+
+  // 🔥 OLD FUND PENALTY
+  try {
+    const d = new Date(fund.deadline);
+    if (!isNaN(d)) {
+      if (d.getFullYear() < 2022) score -= 2;
+      if (d > new Date()) score += 1;
+    }
+  } catch {}
 
   return score;
 }
@@ -167,7 +175,6 @@ function pickBestFund(funds, query) {
     const rb = relevanceScore(b, query);
 
     if (rb !== ra) return rb - ra;
-
     return b.score - a.score;
   });
 
@@ -243,6 +250,28 @@ export async function runFundAgent(req, question, model_id, topk = 5) {
     }
 
     let funds = normalizeFunds(raw);
+
+    // ================= 🔥 HARD FILTER VIETNAM =================
+    const q = question.toLowerCase();
+
+    if (q.includes("việt") || q.includes("vietnam")) {
+      const vnFunds = funds.filter(f => {
+        const t = (f.title + " " + f.text + " " + f.agency).toLowerCase();
+
+        return (
+          t.includes("vietnam") ||
+          t.includes("việt") ||
+          t.includes("nafosted") ||
+          t.includes("quỹ phát triển khoa học") ||
+          t.includes("khoa học và công nghệ quốc gia")
+        );
+      });
+
+      if (vnFunds.length > 0) {
+        funds = vnFunds;
+      }
+    }
+
     funds = stableSort(funds);
     funds = funds.slice(0, MAX_RETURN);
 
