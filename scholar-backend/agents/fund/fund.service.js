@@ -1,4 +1,4 @@
-// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE)
+// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE + PENALTY FIX)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -47,15 +47,14 @@ function normalizeFunds(arr) {
   });
 }
 
-// ================= 🔥 INTENT MATCH (PATCH) =================
+// ================= 🔥 INTENT MATCH (PATCH FINAL) =================
 function relevanceScore(fund, query) {
   const t = (fund.title + " " + fund.text + " " + fund.agency).toLowerCase();
   const q = query.toLowerCase();
 
   let score = 0;
 
-  // ================= 🔥 ADD (KHÔNG XÓA LOGIC CŨ) =================
-  // 👉 hiểu "nghiên cứu cơ bản tại Việt Nam" = Nafosted
+  // ================= 🔥 ADD: NAFOSTED CORE =================
   if (
     (q.includes("cơ bản") || q.includes("basic")) &&
     (q.includes("việt") || q.includes("vietnam"))
@@ -65,11 +64,11 @@ function relevanceScore(fund, query) {
       t.includes("khoa học và công nghệ quốc gia") ||
       t.includes("quỹ phát triển khoa học")
     ) {
-      score += 10; // 🔥 override mạnh
+      score += 10; // 🔥 đẩy lên top
     }
   }
 
-  // 🔥 BOOST mạnh Nafosted (GIỮ NGUYÊN)
+  // 🔥 BOOST Nafosted (giữ nguyên)
   if (q.includes("nafosted")) {
     if (
       t.includes("nafosted") ||
@@ -80,9 +79,22 @@ function relevanceScore(fund, query) {
     }
   }
 
-  // 🔥 ADD nhẹ cho Vietnam (KHÔNG XÓA)
+  // 🔥 BOOST Vietnam (giữ nguyên)
   if (q.includes("việt") || q.includes("vietnam")) {
     if (t.includes("vietnam") || t.includes("việt")) score += 1;
+  }
+
+  // ================= 🔥 ADD: PENALTY COLLAB =================
+  // 👉 Fix FWO bug (cực kỳ quan trọng)
+  if (q.includes("cơ bản") || q.includes("basic")) {
+    if (
+      t.includes("hợp tác") ||
+      t.includes("collaboration") ||
+      t.includes("bilateral") ||
+      t.includes("joint research")
+    ) {
+      score -= 3; // 🔥 đẩy xuống
+    }
   }
 
   return score;
@@ -148,7 +160,7 @@ function stableSort(funds) {
   });
 }
 
-// ================= 🔥 BEST PICK (GIỮ NGUYÊN, NHƯNG ĐÃ ĐƯỢC FIX QUA relevanceScore) =================
+// ================= BEST PICK =================
 function pickBestFund(funds, query) {
   const sorted = [...funds].sort((a, b) => {
     const ra = relevanceScore(a, query);
@@ -180,7 +192,7 @@ function renderFund(f, index, query) {
   return txt + "\n";
 }
 
-// ================= 🔥 INTRO HUMAN =================
+// ================= INTRO =================
 function buildIntro(question) {
   const q = question.toLowerCase();
 
