@@ -119,6 +119,14 @@ const payloadMap = {
     agency: doc.agency_name,
     amount: doc.funding_amount,
     country: doc.country,
+
+    // ================= 🔥 ADD (KHÔNG XÓA LOGIC CŨ) =================
+    url:
+      doc.url ||
+      doc.additional_info_url ||
+      doc["OPPORTUNITY URL"] ||
+      doc["LINK TO ADDITIONAL INFORMATION"] ||
+      "",
   }),
 
   conference: (doc) => ({
