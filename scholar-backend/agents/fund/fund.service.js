@@ -1,4 +1,4 @@
-// fund.service.js - FINAL HUMAN + SMART BEST (NO ROBOT TONE)
+// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -47,26 +47,42 @@ function normalizeFunds(arr) {
   });
 }
 
-// ================= 🔥 INTENT MATCH (UPGRADE) =================
+// ================= 🔥 INTENT MATCH (PATCH) =================
 function relevanceScore(fund, query) {
   const t = (fund.title + " " + fund.text + " " + fund.agency).toLowerCase();
   const q = query.toLowerCase();
 
   let score = 0;
 
-  // 🔥 BOOST mạnh Nafosted
+  // ================= 🔥 ADD (KHÔNG XÓA LOGIC CŨ) =================
+  // 👉 hiểu "nghiên cứu cơ bản tại Việt Nam" = Nafosted
+  if (
+    (q.includes("cơ bản") || q.includes("basic")) &&
+    (q.includes("việt") || q.includes("vietnam"))
+  ) {
+    if (
+      t.includes("nafosted") ||
+      t.includes("khoa học và công nghệ quốc gia") ||
+      t.includes("quỹ phát triển khoa học")
+    ) {
+      score += 10; // 🔥 override mạnh
+    }
+  }
+
+  // 🔥 BOOST mạnh Nafosted (GIỮ NGUYÊN)
   if (q.includes("nafosted")) {
     if (
       t.includes("nafosted") ||
       t.includes("khoa học và công nghệ quốc gia") ||
       t.includes("quỹ phát triển khoa học")
     ) {
-      score += 5; // 🔥 tăng mạnh
+      score += 5;
     }
   }
 
+  // 🔥 ADD nhẹ cho Vietnam (KHÔNG XÓA)
   if (q.includes("việt") || q.includes("vietnam")) {
-    if (t.includes("vietnam")) score += 1;
+    if (t.includes("vietnam") || t.includes("việt")) score += 1;
   }
 
   return score;
@@ -132,7 +148,7 @@ function stableSort(funds) {
   });
 }
 
-// ================= 🔥 BEST PICK =================
+// ================= 🔥 BEST PICK (GIỮ NGUYÊN, NHƯNG ĐÃ ĐƯỢC FIX QUA relevanceScore) =================
 function pickBestFund(funds, query) {
   const sorted = [...funds].sort((a, b) => {
     const ra = relevanceScore(a, query);
