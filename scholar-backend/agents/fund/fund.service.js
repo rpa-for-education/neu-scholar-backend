@@ -1,4 +1,4 @@
-// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE + HARD FILTER VN)
+// fund.service.js - FINAL HUMAN + SMART BEST (PATCH DOMAIN FIX - NO REMOVE + HARD FILTER VN + FIX URL)
 
 import { runFundSearch } from "./fund.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
@@ -39,7 +39,16 @@ function normalizeFunds(arr) {
       deadline: p.deadline || "",
       amount: p.amount || "",
       amount_num,
-      url: p.url || "",
+
+      // ================= 🔥 FIX URL (QUAN TRỌNG NHẤT) =================
+      url:
+        p.url ||
+        p.link ||
+        p.additional_info_url ||
+        p["LINK TO ADDITIONAL INFORMATION"] ||
+        p["OPPORTUNITY URL"] ||
+        "",
+
       text: p.text || "",
       score: Math.max(0, Math.min(1, Number(r.finalScore ?? r.score ?? 0))),
       _idx: idx
@@ -54,7 +63,6 @@ function relevanceScore(fund, query) {
 
   let score = 0;
 
-  // Nafosted core
   if (
     (q.includes("cơ bản") || q.includes("basic")) &&
     (q.includes("việt") || q.includes("vietnam"))
@@ -68,7 +76,6 @@ function relevanceScore(fund, query) {
     }
   }
 
-  // Nafosted boost
   if (q.includes("nafosted")) {
     if (
       t.includes("nafosted") ||
@@ -79,12 +86,10 @@ function relevanceScore(fund, query) {
     }
   }
 
-  // Vietnam boost
   if (q.includes("việt") || q.includes("vietnam")) {
     if (t.includes("vietnam") || t.includes("việt")) score += 1;
   }
 
-  // Collaboration penalty
   if (q.includes("cơ bản") || q.includes("basic")) {
     if (
       t.includes("hợp tác") ||
@@ -96,7 +101,6 @@ function relevanceScore(fund, query) {
     }
   }
 
-  // 🔥 OLD FUND PENALTY
   try {
     const d = new Date(fund.deadline);
     if (!isNaN(d)) {
@@ -191,7 +195,10 @@ function renderFund(f, index, query) {
   const money = formatMoney(f.amount, f.amount_num);
   if (money) txt += `💰 ${money}\n`;
 
-  if (f.url) txt += `🔎 ${f.url}\n`;
+  // ================= 🔥 FIX LINK HIỂN THỊ =================
+  if (f.url && f.url.startsWith("http")) {
+    txt += `🔎 ${f.url}\n`;
+  }
 
   const reason = buildReasoning(f, index, query);
   if (reason) txt += `${reason}\n`;
@@ -251,7 +258,6 @@ export async function runFundAgent(req, question, model_id, topk = 5) {
 
     let funds = normalizeFunds(raw);
 
-    // ================= 🔥 HARD FILTER VIETNAM =================
     const q = question.toLowerCase();
 
     if (q.includes("việt") || q.includes("vietnam")) {
