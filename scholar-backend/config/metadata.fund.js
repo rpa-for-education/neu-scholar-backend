@@ -27,9 +27,9 @@ export const FUND_METADATA = {
   domains: ["funding", "grant"],
 
   sample_prompts: [
-    "Quỹ tài trợ liên quan tới đổi mới và sáng tạo khởi nghiệp?",
-    "Hãy cho tôi một số chương trình tài trợ nghiên cứu cơ bản tại Việt Nam?",
     "Quỹ tài trợ cho nghiên cứu sinh ngành Hệ thống thông tin quản lý?",
+    "Hãy cho tôi một số chương trình tài trợ nghiên cứu cơ bản tại Việt Nam?",
+    "Quỹ tài trợ cho hoạt động đổi mới, sáng tạo, khởi nghiệp năm 2026",
     "Danh sách quỹ tài trợ cho các trường đại học khối ngành kinh tế?"
   ],
 
