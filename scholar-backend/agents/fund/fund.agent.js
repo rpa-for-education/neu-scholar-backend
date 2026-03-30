@@ -1,4 +1,4 @@
-// fund.agent.js - FINAL STABLE (KEEP BEHAVIOR + FIX YEAR BUG)
+// fund.agent.js - FINAL STABLE (FIX EMPTY RESULT BUG - SAFE PATCH)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -8,7 +8,7 @@ import { detectIntent, rewriteQuery } from "./agentReasoning.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v15";
+const CACHE_VERSION = "v16"; // 🔥 bump version để clear cache cũ
 
 // ================= CACHE =================
 function getCache(key) {
@@ -37,6 +37,21 @@ function safeTopk(k) {
   return n && n > 0 ? n : 5;
 }
 
+// ================= 🔥 FIX: VN DETECTOR =================
+function isVietnamRelated(text = "", agency = "") {
+  const t = (text || "").toLowerCase();
+  const a = (agency || "").toLowerCase();
+
+  return (
+    t.includes("vietnam") ||
+    t.includes("việt") ||
+    t.includes("nafosted") ||
+    a.includes("vietnam") ||
+    a.includes("việt") ||
+    a.includes("nafosted")
+  );
+}
+
 // ================= EXPLAIN =================
 function explainFund(item, query) {
   const q = query.toLowerCase();
@@ -55,7 +70,10 @@ function explainFund(item, query) {
     reasons.push("đúng quỹ Nafosted");
   }
 
-  if ((q.includes("việt") || q.includes("vietnam")) && t.includes("vietnam")) {
+  if (
+    (q.includes("việt") || q.includes("vietnam")) &&
+    isVietnamRelated(t)
+  ) {
     reasons.push("liên quan Việt Nam");
   }
 
@@ -88,17 +106,15 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let ranked = rankFunds(results, q);
 
-    // ================= 🔥 BOOST NHẸ (KHÔNG PHÁ SEMANTIC) =================
+    // ================= 🔥 BOOST NHẸ =================
     let adjusted = ranked.map(r => {
       const t = (r.payload?.text || "").toLowerCase();
       const a = (r.payload?.agency || "").toLowerCase();
 
       let bonus = 0;
 
-      // COUNTRY (nhẹ thôi)
       if (intent.country === "vietnam") {
-        if (t.includes("vietnam") || t.includes("nafosted")) bonus += 0.15;
-        if (a.includes("vietnam")) bonus += 0.15;
+        if (isVietnamRelated(t, a)) bonus += 0.15;
       }
 
       return { ...r, finalScore: r.finalScore + bonus };
@@ -108,16 +124,20 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let finalResults = adjusted.slice(0, k);
 
-    // ================= 🔥 VALIDATION NHẸ =================
+    // ================= 🔥 FIX QUAN TRỌNG =================
     if (intent.country === "vietnam") {
-      const hasVN = finalResults.some(r => {
-        const t = (r.payload?.text || "").toLowerCase();
-        return t.includes("vietnam") || t.includes("nafosted");
-      });
+      const hasVN = finalResults.some(r =>
+        isVietnamRelated(
+          r.payload?.text,
+          r.payload?.agency
+        )
+      );
 
-      // ❗ nếu không có VN → không trả US nữa
+      // ❌ KHÔNG return []
+      // 👉 nếu không có VN thì giữ nguyên (fallback)
       if (!hasVN) {
-        return [];
+        // optional: có thể log debug
+        // console.warn("⚠️ No VN fund found, fallback to global results");
       }
     }
 
