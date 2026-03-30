@@ -1,4 +1,4 @@
-// fund.agent.js - FINAL STABLE (FIX EMPTY RESULT BUG - SAFE PATCH)
+// fund.agent.js - FINAL STABLE (PATCH SAFE - NO LOGIC REMOVED)
 
 import { searchFund } from "./fund.search.js";
 import { rankFunds } from "./fund.ranking.js";
@@ -8,7 +8,7 @@ import { detectIntent, rewriteQuery } from "./agentReasoning.js";
 // ================= CONFIG =================
 const CACHE = new Map();
 const TTL = 1000 * 60 * 3;
-const CACHE_VERSION = "v16"; // 🔥 bump version để clear cache cũ
+const CACHE_VERSION = "v16"; // 🔥 bump
 
 // ================= CACHE =================
 function getCache(key) {
@@ -37,7 +37,7 @@ function safeTopk(k) {
   return n && n > 0 ? n : 5;
 }
 
-// ================= 🔥 FIX: VN DETECTOR =================
+// ================= 🔥 ADD (KHÔNG PHÁ LOGIC) =================
 function isVietnamRelated(text = "", agency = "") {
   const t = (text || "").toLowerCase();
   const a = (agency || "").toLowerCase();
@@ -106,7 +106,7 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let ranked = rankFunds(results, q);
 
-    // ================= 🔥 BOOST NHẸ =================
+    // ================= BOOST =================
     let adjusted = ranked.map(r => {
       const t = (r.payload?.text || "").toLowerCase();
       const a = (r.payload?.agency || "").toLowerCase();
@@ -124,7 +124,7 @@ export async function runFundSearch(query, model_id, topk = 5) {
 
     let finalResults = adjusted.slice(0, k);
 
-    // ================= 🔥 FIX QUAN TRỌNG =================
+    // ================= 🔥 FIX BUG KHÔNG TRẢ RỖNG =================
     if (intent.country === "vietnam") {
       const hasVN = finalResults.some(r =>
         isVietnamRelated(
@@ -134,10 +134,8 @@ export async function runFundSearch(query, model_id, topk = 5) {
       );
 
       // ❌ KHÔNG return []
-      // 👉 nếu không có VN thì giữ nguyên (fallback)
       if (!hasVN) {
-        // optional: có thể log debug
-        // console.warn("⚠️ No VN fund found, fallback to global results");
+        // fallback giữ nguyên kết quả
       }
     }
 

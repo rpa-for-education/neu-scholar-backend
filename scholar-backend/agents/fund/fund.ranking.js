@@ -120,6 +120,26 @@ function textScore(text, query) {
     ratio += 0.05;
   }
 
+  // ================= 🔥 ADD (KHÔNG PHÁ LOGIC CŨ) =================
+  // 👉 hiểu "nghiên cứu cơ bản tại Việt Nam" = Nafosted
+  if (
+    (q.includes("cơ bản") || q.includes("basic")) &&
+    (q.includes("việt") || q.includes("vietnam"))
+  ) {
+    if (
+      t.includes("nafosted") ||
+      t.includes("quỹ phát triển khoa học") ||
+      t.includes("khoa học và công nghệ quốc gia")
+    ) {
+      ratio += 0.4; // boost thêm, không phá hệ thống
+    }
+  }
+
+  // 🔥 boost nhẹ nếu có nafosted (không ảnh hưởng ranking khác)
+  if (t.includes("nafosted")) {
+    ratio += 0.15;
+  }
+
   return Math.sqrt(Math.max(0, Math.min(ratio, 0.9)));
 }
 
@@ -162,7 +182,6 @@ export function rankFunds(results, query) {
         if (d && d.getFullYear() >= 2025) {
           finalScore += 0.05;
         }
-        // ❌ không trừ nữa
       }
 
       finalScore = Math.max(0, Math.min(1, finalScore));

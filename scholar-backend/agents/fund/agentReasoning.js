@@ -24,21 +24,24 @@ export function detectIntent(query = "") {
     intent.year = parseInt(yearMatch[0]);
   }
 
-  // ===== KEYWORDS (GIỮ NGUYÊN NHẸ NHÀNG) =====
+  // ===== KEYWORDS (GIỮ NGUYÊN) =====
   if (q.includes("ai")) intent.keywords.push("ai");
   if (q.includes("y tế") || q.includes("health")) intent.keywords.push("health");
   if (q.includes("giáo dục")) intent.keywords.push("education");
   if (q.includes("cơ bản")) intent.keywords.push("basic research");
 
+  // ================= 🔥 ADD (KHÔNG PHÁ LOGIC) =================
+  if (q.includes("cơ bản") && (q.includes("việt") || q.includes("vietnam"))) {
+    intent.keywords.push("nafosted");
+  }
+
   return intent;
 }
 
 // ================= QUERY REWRITE =================
-// 🔥 RẤT QUAN TRỌNG: KHÔNG thêm YEAR vào query
 export function rewriteQuery(query, intent) {
   let expanded = query.toLowerCase();
 
-  // chỉ thêm nhẹ country (không spam)
   if (intent.country === "vietnam") {
     expanded += " vietnam nafosted";
   }
