@@ -13,7 +13,7 @@ dotenv.config();
 const client = new MongoClient(process.env.MONGODB_URI);
 const DB_NAME = process.env.DB_NAME || "fitneu";
 const COLLECTION = "conference";
-const URL = "https://easychair.org/cfp2/";
+const URL = "https://easychair.org/cfp/";
 
 /* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
