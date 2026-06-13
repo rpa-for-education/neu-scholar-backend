@@ -1,3 +1,4 @@
+// enrich_easychair.js - Crawler chuyên sâu cho các hội nghị trên EasyChair
 import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
@@ -183,8 +184,6 @@ async function run() {
 ⏭️ Skipped: ${skipped}
 🎯 ENRICH DONE
   `);
-
-  process.exit(0);
 }
 
 run();

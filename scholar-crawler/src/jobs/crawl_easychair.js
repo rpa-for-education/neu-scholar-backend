@@ -1,3 +1,4 @@
+// crawl_easychair.js - Crawler chính cho các hội nghị trên EasyChair
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { MongoClient } from "mongodb";
@@ -168,7 +169,24 @@ async function run() {
 
   console.log("🚀 Crawling...");
 
-  const { data } = await axios.get(URL);
+  let data;
+
+  try {
+    const res = await axios.get(URL, {
+      timeout: 30000,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    });
+
+    data = res.data;
+  } catch (err) {
+    console.error("EasyChair fetch failed:", err.code, err.message);
+    return;
+  }
   const $ = cheerio.load(data);
 
   const rows = $("table tbody tr");
