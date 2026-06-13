@@ -32,7 +32,7 @@ export const getJournals = async (req, res) => {
   }
 
   if (quartile && quartile.trim() !== "") {
-    query.sjr_best_quartile = quartile;
+    query.quartile = quartile;
   }
 
   const skip = (page - 1) * limit;
