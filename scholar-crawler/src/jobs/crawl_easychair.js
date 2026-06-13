@@ -155,111 +155,174 @@ function parseTopics(raw = "") {
     .filter(t => t.length > 3);
 }
 
-/* ================= MAIN ================= */
+// ================= MAIN =================
 async function run() {
-  await client.connect();
-  console.log("✅ MongoDB connected");
-
-  await initGeo();
-
-  const db = client.db(DB_NAME);
-  const col = db.collection(COLLECTION);
-
-  await col.createIndex({ _key: 1 }, { unique: true });
-
-  console.log("🚀 Crawling...");
-
-  let data;
-
   try {
+    await client.connect();
+    console.log("✅ MongoDB connected");
+
+    await initGeo();
+
+    const db = client.db(DB_NAME);
+    const col = db.collection(COLLECTION);
+
+    await col.createIndex(
+      { _key: 1 },
+      { unique: true }
+    );
+
+    console.log("🚀 Crawling...");
+
     const res = await axios.get(URL, {
       timeout: 30000,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137 Safari/537.36",
-        "Accept":
+        Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
 
-    data = res.data;
-  } catch (err) {
-    console.error("EasyChair fetch failed:", err.code, err.message);
-    return;
-  }
-  const $ = cheerio.load(data);
+    const $ = cheerio.load(res.data);
 
-  const rows = $("table tbody tr");
+    const rows = $("table tr");
 
-  let inserted = 0;
-  let updated = 0;
-
-  for (const row of rows.toArray()) {
-    const cols = $(row).find("td");
-    if (cols.length < 6) continue;
-
-    const linkEl = $(cols[0]).find("a").first();
-    if (!linkEl.length) continue;
-
-    const acronym = linkEl.text().trim();
-
-    // filter row rác
-    if (!acronym || acronym.length > 100 || acronym.includes("EasyChair")) {
-      continue;
-    }
-
-    const name = $(cols[1]).text().trim();
-    const location = $(cols[2]).text().trim();
-
-    const deadline = parseDate($(cols[3]).text().trim());
-    const start_date = parseDate($(cols[4]).text().trim());
-
-    const topics = parseTopics($(cols[5]).text());
-
-    let link = linkEl.attr("href");
-    if (link && !link.startsWith("http")) {
-      link = "https://easychair.org" + link;
-    }
-
-    const geo = extractLocation(location);
-
-    const _key = `${acronym}_${start_date}`;
-
-    const newDoc = {
-      _key,
-      acronym,
-      name,
-      location,
-      ...geo,
-      deadline,
-      start_date,
-      topics,
-      url: link
-    };
-
-    const newHash = hash(newDoc);
-
-    const res = await col.updateOne(
-      { _key },
-      {
-        $set: {
-          ...newDoc,
-          hash: newHash,
-          status: "pending",
-          updated_time: new Date()
-        }
-      },
-      { upsert: true }
+    console.log(
+      `📊 Rows found: ${rows.length}`
     );
 
-    if (res.upsertedCount) inserted++;
-    else if (res.modifiedCount) updated++;
+    let inserted = 0;
+    let updated = 0;
+
+    for (const row of rows.toArray()) {
+      const cols = $(row).find("td");
+
+      if (cols.length < 6) continue;
+
+      const linkEl = $(cols[0])
+        .find("a")
+        .first();
+
+      if (!linkEl.length) continue;
+
+      const acronym =
+        linkEl.text().trim();
+
+      if (
+        !acronym ||
+        acronym.length > 100 ||
+        acronym.includes("EasyChair")
+      ) {
+        continue;
+      }
+
+      const name = $(cols[1])
+        .text()
+        .trim();
+
+      const location = $(cols[2])
+        .text()
+        .trim();
+
+      const deadline = parseDate(
+        $(cols[3]).text().trim()
+      );
+
+      const start_date = parseDate(
+        $(cols[4]).text().trim()
+      );
+
+      const topics = parseTopics(
+        $(cols[5]).text()
+      );
+
+      let link = linkEl.attr("href");
+
+      if (
+        link &&
+        !link.startsWith("http")
+      ) {
+        link =
+          "https://easychair.org" +
+          link;
+      }
+
+      const geo =
+        extractLocation(location);
+
+      const _key =
+        `${acronym}_${start_date}`;
+
+      const newDoc = {
+        _key,
+        acronym,
+        name,
+        location,
+        ...geo,
+        deadline,
+        start_date,
+        topics,
+        url: link
+      };
+
+      const newHash = hash(newDoc);
+
+      const result =
+        await col.updateOne(
+          { _key },
+          {
+            $set: {
+              ...newDoc,
+              hash: newHash,
+              status: "pending",
+              updated_time:
+                new Date()
+            }
+          },
+          {
+            upsert: true
+          }
+        );
+
+      if (
+        result.upsertedCount
+      ) {
+        inserted++;
+      } else if (
+        result.modifiedCount
+      ) {
+        updated++;
+      }
+    }
+
+    console.log({
+      inserted,
+      updated
+    });
+
+    console.log("🎯 DONE");
+  } finally {
+    try {
+      await client.close();
+
+      console.log(
+        "🔒 MongoDB closed"
+      );
+    } catch (err) {
+      console.error(
+        "Mongo close error:",
+        err.message
+      );
+    }
   }
-
-  console.log({ inserted, updated });
-
-  console.log("🎯 DONE");
-  await client.close();
 }
 
-run();
+run().catch(err => {
+  console.error(
+    "❌ CRAWL ERROR"
+  );
+
+  console.error(err);
+
+  process.exit(1);
+});

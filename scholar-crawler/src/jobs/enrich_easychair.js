@@ -1,9 +1,10 @@
-// enrich_easychair.js - Crawler chuyên sâu cho các hội nghị trên EasyChair
+// enrich_easychair.js
+
 import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import { chromium } from "playwright";
-import { getDb } from "../services/mongo.js";
+import { getDb, closeDb } from "../services/mongo.js";
 
 /* ================= CONFIG ================= */
 const CONCURRENCY = 2;
@@ -15,7 +16,8 @@ function extractCFP($) {
   try {
     $("script, style, nav, footer, header").remove();
 
-    let text = $("body").text()
+    const text = $("body")
+      .text()
       .replace(/EasyChair.*?Log in/gi, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -31,11 +33,17 @@ function extractCFP($) {
 /* ================= DATE ================= */
 function extractDeadline(text) {
   try {
-    const match = text.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
+    const match = text.match(
+      /([A-Za-z]+ \d{1,2}, \d{4})/
+    );
+
     if (!match) return null;
 
     const d = new Date(match[1]);
-    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+
+    return isNaN(d)
+      ? null
+      : d.toISOString().slice(0, 10);
   } catch {
     return null;
   }
@@ -47,13 +55,18 @@ async function fetchAxios(url) {
     const res = await axios.get(url, {
       timeout: TIMEOUT,
       headers: {
-        "User-Agent": "Mozilla/5.0 Chrome/120",
-        "Accept": "text/html"
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137 Safari/537.36",
+        Accept: "text/html"
       },
       validateStatus: () => true
     });
 
-    if (!res.data || res.status >= 400 || res.data.length < 1000) {
+    if (
+      !res.data ||
+      res.status >= 400 ||
+      String(res.data).length < 1000
+    ) {
       throw new Error("Bad HTML");
     }
 
@@ -76,26 +89,44 @@ async function fetchPlaywright(url) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(url, { timeout: 30000 });
-    const html = await page.content();
-    await page.close();
-    return html;
+    await page.goto(url, {
+      timeout: 30000,
+      waitUntil: "domcontentloaded"
+    });
+
+    return await page.content();
   } catch {
-    await page.close();
     return null;
+  } finally {
+    await page.close();
   }
 }
 
 async function smartFetch(url) {
   let html = await fetchAxios(url);
-  if (html) return { html, source: "axios" };
+
+  if (html) {
+    return {
+      html,
+      source: "axios"
+    };
+  }
 
   console.log("⚠️ Playwright fallback:", url);
 
   html = await fetchPlaywright(url);
-  if (html) return { html, source: "playwright" };
 
-  return { html: null, source: "fail" };
+  if (html) {
+    return {
+      html,
+      source: "playwright"
+    };
+  }
+
+  return {
+    html: null,
+    source: "fail"
+  };
 }
 
 /* ================= MAIN ================= */
@@ -105,85 +136,148 @@ async function run() {
   const db = await getDb();
   const col = db.collection("conference");
 
-  const cursor = col.find({
-    $or: [
-      { status: { $exists: false } },
-      { status: { $ne: "done" } }
-    ]
-  }).limit(5000);
+  const totalPending =
+    await col.countDocuments({
+      $or: [
+        { status: { $exists: false } },
+        { status: { $ne: "done" } }
+      ]
+    });
 
-  const queue = new PQueue({ concurrency: CONCURRENCY });
+  console.log(
+    `📊 Pending conferences: ${totalPending}`
+  );
+
+  const cursor = col
+    .find({
+      $or: [
+        { status: { $exists: false } },
+        { status: { $ne: "done" } }
+      ]
+    })
+    .limit(5000);
+
+  const queue = new PQueue({
+    concurrency: CONCURRENCY
+  });
 
   let updated = 0;
   let skipped = 0;
+  let failed = 0;
 
   for await (const doc of cursor) {
     queue.add(async () => {
       try {
-        if (!doc.url) return;
+        if (!doc.url) {
+          skipped++;
+          return;
+        }
 
-        const { html, source } = await smartFetch(doc.url);
-        if (!html) return;
+        const { html, source } =
+          await smartFetch(doc.url);
+
+        if (!html) {
+          await col.updateOne(
+            { _id: doc._id },
+            {
+              $set: {
+                status: "failed",
+                updated_time: new Date()
+              }
+            }
+          );
+
+          failed++;
+          return;
+        }
 
         const $ = cheerio.load(html);
         const bodyText = $("body").text();
 
         const cfp_text = extractCFP($);
-        const newDeadline = extractDeadline(bodyText);
+        const newDeadline =
+          extractDeadline(bodyText);
 
         const update = {
           crawl_source: source,
-          updated_time: new Date()
+          updated_time: new Date(),
+          status: "done"
         };
 
         let needUpdate = false;
 
-        // ===== CFP =====
         if (cfp_text && !doc.cfp_text) {
           update.cfp_text = cfp_text;
           needUpdate = true;
         }
 
-        // ===== DEADLINE (QUAN TRỌNG) =====
-        if (newDeadline) {
-          if (!doc.deadline) {
-            update.deadline = newDeadline;
-            needUpdate = true;
-          } else if (doc.deadline !== newDeadline) {
-            // nếu khác → có thể log nhưng KHÔNG overwrite bừa
-            console.log("⚠️ Deadline mismatch:", doc.acronym);
-          }
+        if (newDeadline && !doc.deadline) {
+          update.deadline = newDeadline;
+          needUpdate = true;
         }
 
-        // ===== STATUS =====
-        if (needUpdate) {
-          update.status = "done";
-
-          await col.updateOne(
-            { _id: doc._id },
-            { $set: update }
+        if (
+          newDeadline &&
+          doc.deadline &&
+          doc.deadline !== newDeadline
+        ) {
+          console.log(
+            `⚠️ Deadline mismatch: ${doc.acronym}`
           );
+        }
 
+        await col.updateOne(
+          { _id: doc._id },
+          {
+            $set: update
+          }
+        );
+
+        if (needUpdate) {
           updated++;
-          console.log(`✅ ${updated} - ${doc.acronym}`);
+
+          console.log(
+            `✅ ${updated} - ${doc.acronym}`
+          );
         } else {
           skipped++;
         }
       } catch (err) {
-        console.log("❌", doc.url);
+        failed++;
+
+        console.error(
+          `❌ ${doc.acronym || doc.url}`
+        );
+
+        console.error(err.message);
       }
     });
   }
 
   await queue.onIdle();
 
-  if (browser) await browser.close();
+  if (browser) {
+    await browser.close();
+  }
 
   console.log(`
 🔄 Updated: ${updated}
 ⏭️ Skipped: ${skipped}
+❌ Failed: ${failed}
 🎯 ENRICH DONE
-  `);
+`);
 }
 
-run();
+run()
+  .then(async () => {
+    await closeDb();
+    process.exit(0);
+  })
+  .catch(async err => {
+    console.error("❌ ENRICH ERROR");
+    console.error(err);
+
+    await closeDb();
+
+    process.exit(1);
+  });

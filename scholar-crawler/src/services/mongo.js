@@ -18,10 +18,22 @@ export async function getDb() {
     });
 
     await client.connect();
+
     db = client.db(dbName);
 
-    console.log("✅ Mongo connected (crawler)");
+    console.log("✅ Mongo connected");
   }
 
   return db;
+}
+
+export async function closeDb() {
+  if (client) {
+    await client.close();
+
+    client = null;
+    db = null;
+
+    console.log("🔒 Mongo closed");
+  }
 }

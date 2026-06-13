@@ -1,3 +1,5 @@
+// import_conference_neu.js
+
 import fs from "fs";
 import csv from "csv-parser";
 import { MongoClient } from "mongodb";
@@ -8,20 +10,21 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
-/* ================= PATH (FIX LỖI ENOENT) ================= */
+/* ================= ENV CHECK ================= */
+if (!process.env.MONGODB_URI) {
+  throw new Error(
+    "❌ Missing MONGODB_URI in .env"
+  );
+}
+
+/* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 👉 đúng với structure của bạn
 const FILE_PATH = path.join(
   __dirname,
   "../data/data_hoi_thao_neu_2026.csv"
 );
-
-/* ================= ENV CHECK ================= */
-if (!process.env.MONGODB_URI) {
-  throw new Error("❌ Missing MONGODB_URI in .env");
-}
 
 /* ================= HASH ================= */
 function buildHash(doc) {
@@ -46,7 +49,7 @@ function buildHash(doc) {
     .digest("hex");
 }
 
-/* ================= PARSE ================= */
+/* ================= TOPICS ================= */
 function parseTopics(topics) {
   if (!topics) return [];
 
@@ -60,105 +63,173 @@ function parseTopics(topics) {
 async function run() {
   console.log("📂 Reading file:", FILE_PATH);
 
-  const client = new MongoClient(process.env.MONGODB_URI);
+  const client = new MongoClient(
+    process.env.MONGODB_URI
+  );
 
-  await client.connect();
-  console.log("✅ Mongo connected");
+  try {
+    await client.connect();
 
-  const col = client
-    .db(process.env.DB_NAME || "fitneu")
-    .collection("conference");
+    console.log("✅ Mongo connected");
 
-  const rows = [];
+    const col = client
+      .db(process.env.DB_NAME || "fitneu")
+      .collection("conference");
 
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(FILE_PATH)
-      .pipe(csv())
-      .on("data", (data) => rows.push(data))
-      .on("end", resolve)
-      .on("error", reject);
-  });
+    const rows = [];
 
-  console.log(`📊 Loaded rows: ${rows.length}`);
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(FILE_PATH)
+        .pipe(csv())
+        .on("data", data => rows.push(data))
+        .on("end", resolve)
+        .on("error", reject);
+    });
 
-  let inserted = 0;
-  let updated = 0;
-  let skipped = 0;
+    console.log(
+      `📊 Loaded rows: ${rows.length}`
+    );
 
-  for (const row of rows) {
-    try {
-      const topics = parseTopics(row.topics);
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
 
-      const baseDoc = {
-        _key: row._key,
-        acronym: row.acronym,
-        name: row.name,
-        location: row.location,
-        city: row.city,
-        country: row.country,
-        country_code: row.country_code,
-        continent: row.continent,
-        deadline: row.deadline || null,
-        start_date: row.start_date,
-        topics,
-        url: row.url || null
-      };
+    for (const row of rows) {
+      try {
+        const topics = parseTopics(
+          row.topics
+        );
 
-      const newHash = buildHash(baseDoc);
+        const baseDoc = {
+          _key: row._key,
+          acronym: row.acronym,
+          name: row.name,
+          location: row.location,
+          city: row.city,
+          country: row.country,
+          country_code: row.country_code,
+          continent: row.continent,
+          deadline:
+            row.deadline || null,
+          start_date:
+            row.start_date,
+          topics,
+          url: row.url || null
+        };
 
-      const existing = await col.findOne({ _key: row._key });
+        const newHash =
+          buildHash(baseDoc);
 
-      /* ================= INSERT ================= */
-      if (!existing) {
-        await col.insertOne({
-          ...baseDoc,
-          cfp_text: row.cfp_text || "",
-          crawl_source: row.crawl_source || "neu",
-          hash: newHash,
-          status: row.status || "pending",
-          created_time: new Date(),
-          updated_time: new Date()
-        });
+        const existing =
+          await col.findOne({
+            _key: row._key
+          });
 
-        inserted++;
-        continue;
-      }
-
-      /* ================= SKIP ================= */
-      if (existing.hash === newHash) {
-        skipped++;
-        continue;
-      }
-
-      /* ================= UPDATE ================= */
-      await col.updateOne(
-        { _key: row._key },
-        {
-          $set: {
+        /* ===== INSERT ===== */
+        if (!existing) {
+          await col.insertOne({
             ...baseDoc,
-            // ❗ không overwrite dữ liệu crawl
-            cfp_text: existing.cfp_text || row.cfp_text || "",
+            cfp_text:
+              row.cfp_text || "",
             crawl_source:
-              row.crawl_source || existing.crawl_source || "neu",
+              row.crawl_source ||
+              "neu",
             hash: newHash,
-            status: existing.status || "pending",
-            updated_time: new Date()
-          }
+            status:
+              row.status ||
+              "pending",
+            created_time:
+              new Date(),
+            updated_time:
+              new Date()
+          });
+
+          inserted++;
+          continue;
         }
-      );
 
-      updated++;
-    } catch (err) {
-      console.log("❌ Error row:", row._key);
+        /* ===== SKIP ===== */
+        if (
+          existing.hash ===
+          newHash
+        ) {
+          skipped++;
+          continue;
+        }
+
+        /* ===== UPDATE ===== */
+        await col.updateOne(
+          {
+            _key: row._key
+          },
+          {
+            $set: {
+              ...baseDoc,
+
+              // giữ dữ liệu crawl
+              cfp_text:
+                existing.cfp_text ||
+                row.cfp_text ||
+                "",
+
+              crawl_source:
+                row.crawl_source ||
+                existing.crawl_source ||
+                "neu",
+
+              hash: newHash,
+
+              status:
+                existing.status ||
+                "pending",
+
+              updated_time:
+                new Date()
+            }
+          }
+        );
+
+        updated++;
+      } catch (err) {
+        console.error(
+          "❌ Error row:",
+          row._key
+        );
+
+        console.error(err.message);
+      }
     }
+
+    console.log("\n🎯 DONE");
+    console.log(
+      "➕ Inserted:",
+      inserted
+    );
+    console.log(
+      "🔄 Updated:",
+      updated
+    );
+    console.log(
+      "⏭️ Skipped:",
+      skipped
+    );
+  } finally {
+    await client.close();
+
+    console.log("🔒 Mongo closed");
   }
-
-  console.log("\n🎯 DONE");
-  console.log("➕ Inserted:", inserted);
-  console.log("🔄 Updated:", updated);
-  console.log("⏭️ Skipped:", skipped);
-
-  await client.close();
 }
 
-run();
+run()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch(err => {
+    console.error(
+      "❌ IMPORT ERROR"
+    );
+
+    console.error(err);
+
+    process.exit(1);
+  });
