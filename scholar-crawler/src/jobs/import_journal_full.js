@@ -23,21 +23,32 @@ const FILE_PATH = path.join(
 const BATCH_SIZE = 500;
 
 /* ================= HELPERS ================= */
-const genKey = v =>
+const genKey = value =>
   crypto
     .createHash("md5")
-    .update(String(v))
+    .update(String(value))
     .digest("hex");
 
-const parseNum = v => {
-  if (!v) return null;
+const parseNum = value => {
+  if (!value) return null;
 
   const n = Number(
-    String(v).replace(/,/g, "")
+    String(value)
+      .replace(/"/g, "")
+      .replace(",", ".")
   );
 
-  return isNaN(n) ? null : n;
+  return Number.isNaN(n) ? null : n;
 };
+
+function normalizeRow(row) {
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [
+      k.trim().toLowerCase(),
+      v
+    ])
+  );
+}
 
 /* ================= MAIN ================= */
 async function run() {
@@ -47,8 +58,9 @@ async function run() {
   const db = await getDb();
   const col = db.collection("journal");
 
-  let batch = [];
   let total = 0;
+  let inserted = 0;
+  let batch = [];
 
   const stream = fs
     .createReadStream(FILE_PATH)
@@ -58,37 +70,78 @@ async function run() {
       })
     );
 
-  for await (const row of stream) {
+  for await (const rawRow of stream) {
+    const row = normalizeRow(rawRow);
+
     total++;
 
-    const u_key = genKey(
-      row.sourceid || row.title
-    );
+    const sourceId =
+      row.sourceid ||
+      row.issn ||
+      row.title;
+
+    const u_key = genKey(sourceId);
 
     batch.push({
       updateOne: {
-        filter: {
-          u_key
-        },
+        filter: { u_key },
+
         update: {
           $set: {
             u_key,
-            title: row.title,
-            publisher: row.publisher,
-            country: row.country,
+
+            sourceid: row.sourceid || null,
+            title: row.title || null,
+            type: row.type || null,
+            issn: row.issn || null,
+
+            publisher:
+              row.publisher || null,
+
+            country:
+              row.country || null,
+
+            region:
+              row.region || null,
+
             sjr: parseNum(row.sjr),
+
+            quartile:
+              row["sjr best quartile"] ||
+              null,
+
+            h_index: parseNum(
+              row["h index"]
+            ),
+
+            categories:
+              row.categories || null,
+
+            areas:
+              row.areas || null,
+
+            coverage:
+              row.coverage || null,
+
             updatedAt: new Date()
           },
+
           $setOnInsert: {
             createdAt: new Date()
           }
         },
+
         upsert: true
       }
     });
 
     if (batch.length >= BATCH_SIZE) {
-      await col.bulkWrite(batch);
+      const result =
+        await col.bulkWrite(batch);
+
+      inserted +=
+        result.upsertedCount || 0;
+
       batch = [];
     }
 
@@ -100,11 +153,19 @@ async function run() {
   }
 
   if (batch.length) {
-    await col.bulkWrite(batch);
+    const result =
+      await col.bulkWrite(batch);
+
+    inserted +=
+      result.upsertedCount || 0;
   }
 
   console.log(
     `📊 Total rows: ${total}`
+  );
+
+  console.log(
+    `➕ New records: ${inserted}`
   );
 
   console.log("🎯 JOURNAL DONE");
@@ -113,6 +174,9 @@ async function run() {
 run()
   .then(async () => {
     await closeDb();
+
+    console.log("🔒 Mongo closed");
+
     process.exit(0);
   })
   .catch(async err => {
@@ -122,7 +186,9 @@ run()
 
     console.error(err);
 
-    await closeDb();
+    try {
+      await closeDb();
+    } catch {}
 
     process.exit(1);
   });
