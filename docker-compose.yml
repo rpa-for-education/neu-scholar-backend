@@ -144,7 +144,16 @@ services:
 
     command: >
       sh -c "
-      echo '🚀 Crawler started...';
+      echo '🚀 Initial import...';
+
+      node src/jobs/import_conference_neu.js;
+      node src/jobs/import_journal_full.js;
+      node src/jobs/import_fund_full.js;
+      node src/jobs/import_fund_other_full.js;
+      node src/jobs/import_gsnn_full.js;
+
+      echo '✅ Import finished';
+
       while true; do
 
         echo '🌐 Crawl EasyChair...';
