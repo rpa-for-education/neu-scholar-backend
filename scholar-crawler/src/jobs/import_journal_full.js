@@ -1,9 +1,10 @@
+// import_journal_full.js
 import fs from "fs";
 import csv from "csv-parser";
 import crypto from "crypto";
 import { getDb } from "../services/mongo.js";
 
-const FILE_PATH = "./data/data_scimagojr 2024.csv";
+const FILE_PATH = "../data/data_scimagojr_2025.csv";
 const BATCH_SIZE = 500;
 
 const genKey = v =>

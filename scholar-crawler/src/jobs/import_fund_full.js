@@ -1,9 +1,10 @@
+// import_fund_full.js
 import fs from "fs";
 import csv from "csv-parser";
 import crypto from "crypto";
 import { getDb } from "../services/mongo.js";
 
-const FILE_PATH = "./data/grants-search-202603261431.csv";
+const FILE_PATH = "../data/grants-search-202606130703.csv";
 
 const genKey = v =>
   crypto.createHash("md5").update(String(v)).digest("hex");
