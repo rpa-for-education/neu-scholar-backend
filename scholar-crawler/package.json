@@ -3,7 +3,15 @@
   "type": "module",
   "scripts": {
     "crawl": "node src/jobs/crawl_easychair.js",
-    "enrich": "node src/jobs/enrich_easychair.js"
+    "enrich": "node src/jobs/enrich_easychair.js",
+
+    "import:conference": "node src/jobs/import_conference_neu.js",
+    "import:journal": "node src/jobs/import_journal_full.js",
+    "import:fund": "node src/jobs/import_fund_full.js",
+    "import:fund-other": "node src/jobs/import_fund_other_full.js",
+    "import:gsnn": "node src/jobs/import_gsnn_full.js",
+
+    "all": "npm run crawl && npm run enrich && npm run import:conference && npm run import:journal && npm run import:fund && npm run import:fund-other && npm run import:gsnn"
   },
   "dependencies": {
     "axios": "^1.7.2",
@@ -11,7 +19,6 @@
     "csv-parser": "^3.0.0",
     "mongodb": "^6.7.0",
     "dotenv": "^16.4.5",
-    "crypto": "^1.0.1",
     "p-queue": "^8.0.1",
     "playwright": "^1.44.0"
   }
