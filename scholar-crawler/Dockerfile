@@ -55,11 +55,21 @@ RUN npx playwright install chromium
 # 🚀 START (CRAWL + ENRICH LOOP)
 # ===========================================
 CMD ["sh", "-c", "\
-echo '🚀 Initial import...'; \
+echo 'JOURNAL'; \
 node src/jobs/import_journal_full.js; \
+echo 'AFTER JOURNAL'; \
+\
+echo 'GSNN'; \
 node src/jobs/import_journal_gsnn_full.js; \
+echo 'AFTER GSNN'; \
+\
+echo 'FUND'; \
 node src/jobs/import_fund_full.js; \
+echo 'AFTER FUND'; \
+\
+echo 'OTHER FUND'; \
 node src/jobs/import_fund_other_full.js; \
+echo 'AFTER OTHER FUND'; \
 \
 echo '🚀 Crawler started...'; \
 while true; do \
