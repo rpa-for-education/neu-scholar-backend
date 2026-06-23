@@ -1,5 +1,3 @@
-// import_fund_full.js
-
 import fs from "fs";
 import path from "path";
 import csv from "csv-parser";
@@ -24,11 +22,33 @@ const FILE_PATH = path.join(
 );
 
 /* ================= HASH ================= */
-const genKey = v =>
+const genKey = value =>
   crypto
     .createHash("md5")
-    .update(String(v))
+    .update(String(value))
     .digest("hex");
+
+/* ================= HELPERS ================= */
+function normalizeRow(row) {
+  const doc = {};
+
+  for (const [key, value] of Object.entries(
+    row
+  )) {
+    if (
+      value === undefined ||
+      value === null ||
+      value === ""
+    ) {
+      doc[key] = null;
+      continue;
+    }
+
+    doc[key] = value;
+  }
+
+  return doc;
+}
 
 /* ================= MAIN ================= */
 async function run() {
@@ -59,6 +79,21 @@ async function run() {
     const u_key = genKey(id);
     const now = new Date();
 
+    const doc = normalizeRow(row);
+
+    doc.u_key = u_key;
+
+    doc.title =
+      row.opportunity_title ||
+      row.title ||
+      null;
+
+    doc.agency =
+      row.agency_name ||
+      null;
+
+    doc.source = "grants_gov";
+
     batch.push({
       updateOne: {
         filter: {
@@ -66,13 +101,7 @@ async function run() {
         },
         update: {
           $set: {
-            u_key,
-            title:
-              row.opportunity_title ||
-              null,
-            agency:
-              row.agency_name ||
-              null,
+            ...doc,
             updatedAt: now
           },
           $setOnInsert: {

@@ -1,8 +1,7 @@
-// import_fund_other_full.js
-
 import fs from "fs";
 import path from "path";
 import csv from "csv-parser";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 
 import {
@@ -22,9 +21,41 @@ const FILE_PATH = path.join(
   "../data/data_other_funds.csv"
 );
 
+/* ================= HASH ================= */
+const genKey = value =>
+  crypto
+    .createHash("md5")
+    .update(String(value))
+    .digest("hex");
+
+/* ================= HELPERS ================= */
+function normalizeRow(row) {
+  const doc = {};
+
+  for (const [key, value] of Object.entries(
+    row
+  )) {
+    if (
+      value === undefined ||
+      value === null ||
+      value === ""
+    ) {
+      doc[key] = null;
+      continue;
+    }
+
+    doc[key] = value;
+  }
+
+  return doc;
+}
+
 /* ================= MAIN ================= */
 async function run() {
-  console.log("🚀 START OTHER FUND IMPORT");
+  console.log(
+    "🚀 START OTHER FUND IMPORT"
+  );
+
   console.log("📂 FILE:", FILE_PATH);
 
   const db = await getDb();
@@ -39,21 +70,41 @@ async function run() {
     .pipe(csv());
 
   for await (const row of stream) {
-    if (!row.url) {
+    const id =
+      row.opportunity_id ||
+      row.url;
+
+    if (!id) {
       skipped++;
       continue;
     }
 
+    const u_key = genKey(id);
     const now = new Date();
+
+    const doc = normalizeRow(row);
+
+    doc.u_key = u_key;
+
+    doc.title =
+      row.opportunity_title ||
+      row.title ||
+      null;
+
+    doc.agency =
+      row.agency_name ||
+      null;
+
+    doc.source = "other_funds";
 
     batch.push({
       updateOne: {
         filter: {
-          url: row.url
+          u_key
         },
         update: {
           $set: {
-            title: row.opportunity_title || null,
+            ...doc,
             updatedAt: now
           },
           $setOnInsert: {
@@ -95,7 +146,9 @@ async function run() {
     `⏭️ Skipped: ${skipped}`
   );
 
-  console.log("🎯 OTHER FUND DONE");
+  console.log(
+    "🎯 OTHER FUND DONE"
+  );
 }
 
 run()
