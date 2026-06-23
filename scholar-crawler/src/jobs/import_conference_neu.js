@@ -1,21 +1,16 @@
-// import_conference_neu.js
-
 import fs from "fs";
 import csv from "csv-parser";
-import { MongoClient } from "mongodb";
-import dotenv from "dotenv";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 
-dotenv.config();
+import {
+  getDb,
+  closeDb
+} from "../services/mongo.js";
 
-/* ================= ENV CHECK ================= */
-if (!process.env.MONGODB_URI) {
-  throw new Error(
-    "❌ Missing MONGODB_URI in .env"
-  );
-}
+/* ================= CONFIG ================= */
+const BATCH_SIZE = 500;
 
 /* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url);
@@ -26,210 +21,251 @@ const FILE_PATH = path.join(
   "../data/data_hoi_thao_neu_2026.csv"
 );
 
-/* ================= HASH ================= */
-function buildHash(doc) {
-  return crypto
+/* ================= HELPERS ================= */
+const genKey = value =>
+  crypto
     .createHash("md5")
-    .update(
-      JSON.stringify({
-        _key: doc._key,
-        acronym: doc.acronym,
-        name: doc.name,
-        location: doc.location,
-        city: doc.city,
-        country: doc.country,
-        country_code: doc.country_code,
-        continent: doc.continent,
-        deadline: doc.deadline,
-        start_date: doc.start_date,
-        topics: doc.topics,
-        url: doc.url
-      })
-    )
+    .update(String(value))
     .digest("hex");
-}
 
-/* ================= TOPICS ================= */
 function parseTopics(topics) {
   if (!topics) return [];
 
   return topics
     .split(",")
-    .map(t => t.trim().toLowerCase())
+    .map(item => item.trim())
     .filter(Boolean);
+}
+
+function normalizeRow(row) {
+  const doc = {};
+
+  for (const [key, value] of Object.entries(
+    row
+  )) {
+    const normalizedKey = key
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "");
+
+    doc[normalizedKey] =
+      value === ""
+        ? null
+        : value;
+  }
+
+  return doc;
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log("📂 Reading file:", FILE_PATH);
-
-  const client = new MongoClient(
-    process.env.MONGODB_URI
+  console.log(
+    "🚀 START NEU CONFERENCE IMPORT"
   );
 
-  try {
-    await client.connect();
+  console.log(
+    "📂 FILE:",
+    FILE_PATH
+  );
 
-    console.log("✅ Mongo connected");
+  const db = await getDb();
 
-    const col = client
-      .db(process.env.DB_NAME || "fitneu")
-      .collection("conference");
+  const col =
+    db.collection("conference");
 
-    const rows = [];
+  let processed = 0;
+  let inserted = 0;
+  let batch = [];
 
-    await new Promise((resolve, reject) => {
-      fs.createReadStream(FILE_PATH)
-        .pipe(csv())
-        .on("data", data => rows.push(data))
-        .on("end", resolve)
-        .on("error", reject);
+  const stream = fs
+    .createReadStream(FILE_PATH)
+    .pipe(csv());
+
+  for await (const rawRow of stream) {
+    const row =
+      normalizeRow(rawRow);
+
+    const sourceId =
+      row._key ||
+      row.acronym ||
+      row.name;
+
+    if (!sourceId) {
+      continue;
+    }
+
+    const u_key =
+      genKey(sourceId);
+
+    const now = new Date();
+
+    const doc = {
+      ...row,
+
+      u_key,
+
+      _key:
+        row._key || null,
+
+      acronym:
+        row.acronym ||
+        null,
+
+      name:
+        row.name || null,
+
+      location:
+        row.location ||
+        null,
+
+      city:
+        row.city || null,
+
+      country:
+        row.country ||
+        null,
+
+      country_code:
+        row.country_code ||
+        null,
+
+      continent:
+        row.continent ||
+        null,
+
+      deadline:
+        row.deadline ||
+        null,
+
+      start_date:
+        row.start_date ||
+        null,
+
+      topics:
+        parseTopics(
+          row.topics
+        ),
+
+      url:
+        row.url || null,
+
+      cfp_text:
+        row.cfp_text ||
+        null,
+
+      crawl_source:
+        row.crawl_source ||
+        "neu",
+
+      status:
+        row.status ||
+        "pending",
+
+      source:
+        "neu",
+
+      updatedAt: now
+    };
+
+    batch.push({
+      updateOne: {
+        filter: {
+          u_key
+        },
+
+        update: {
+          $set: doc,
+
+          $setOnInsert: {
+            createdAt: now
+          }
+        },
+
+        upsert: true
+      }
     });
 
-    console.log(
-      `📊 Loaded rows: ${rows.length}`
-    );
+    processed++;
 
-    let inserted = 0;
-    let updated = 0;
-    let skipped = 0;
-
-    for (const row of rows) {
-      try {
-        const topics = parseTopics(
-          row.topics
-        );
-
-        const baseDoc = {
-          _key: row._key,
-          acronym: row.acronym,
-          name: row.name,
-          location: row.location,
-          city: row.city,
-          country: row.country,
-          country_code: row.country_code,
-          continent: row.continent,
-          deadline:
-            row.deadline || null,
-          start_date:
-            row.start_date,
-          topics,
-          url: row.url || null
-        };
-
-        const newHash =
-          buildHash(baseDoc);
-
-        const existing =
-          await col.findOne({
-            _key: row._key
-          });
-
-        /* ===== INSERT ===== */
-        if (!existing) {
-          await col.insertOne({
-            ...baseDoc,
-            cfp_text:
-              row.cfp_text || "",
-            crawl_source:
-              row.crawl_source ||
-              "neu",
-            hash: newHash,
-            status:
-              row.status ||
-              "pending",
-            created_time:
-              new Date(),
-            updated_time:
-              new Date()
-          });
-
-          inserted++;
-          continue;
-        }
-
-        /* ===== SKIP ===== */
-        if (
-          existing.hash ===
-          newHash
-        ) {
-          skipped++;
-          continue;
-        }
-
-        /* ===== UPDATE ===== */
-        await col.updateOne(
+    if (
+      batch.length >=
+      BATCH_SIZE
+    ) {
+      const result =
+        await col.bulkWrite(
+          batch,
           {
-            _key: row._key
-          },
-          {
-            $set: {
-              ...baseDoc,
-
-              // giữ dữ liệu crawl
-              cfp_text:
-                existing.cfp_text ||
-                row.cfp_text ||
-                "",
-
-              crawl_source:
-                row.crawl_source ||
-                existing.crawl_source ||
-                "neu",
-
-              hash: newHash,
-
-              status:
-                existing.status ||
-                "pending",
-
-              updated_time:
-                new Date()
-            }
+            ordered: false
           }
         );
 
-        updated++;
-      } catch (err) {
-        console.error(
-          "❌ Error row:",
-          row._key
-        );
+      inserted +=
+        result.upsertedCount ||
+        0;
 
-        console.error(err.message);
-      }
+      batch = [];
     }
 
-    console.log("\n🎯 DONE");
-    console.log(
-      "➕ Inserted:",
-      inserted
-    );
-    console.log(
-      "🔄 Updated:",
-      updated
-    );
-    console.log(
-      "⏭️ Skipped:",
-      skipped
-    );
-  } finally {
-    await client.close();
-
-    console.log("🔒 Mongo closed");
+    if (
+      processed % 1000 ===
+      0
+    ) {
+      console.log(
+        `📊 Processed: ${processed}`
+      );
+    }
   }
+
+  if (batch.length) {
+    const result =
+      await col.bulkWrite(
+        batch,
+        {
+          ordered: false
+        }
+      );
+
+    inserted +=
+      result.upsertedCount ||
+      0;
+  }
+
+  console.log(
+    `📊 Total rows: ${processed}`
+  );
+
+  console.log(
+    `➕ New records: ${inserted}`
+  );
+
+  console.log(
+    "🎯 CONFERENCE DONE"
+  );
 }
 
 run()
-  .then(() => {
+  .then(async () => {
+    try {
+      await closeDb();
+    } catch {}
+
+    console.log(
+      "🔒 Mongo closed"
+    );
+
     process.exit(0);
   })
-  .catch(err => {
+  .catch(async err => {
     console.error(
-      "❌ IMPORT ERROR"
+      "❌ CONFERENCE IMPORT ERROR"
     );
 
     console.error(err);
+
+    try {
+      await closeDb();
+    } catch {}
 
     process.exit(1);
   });
