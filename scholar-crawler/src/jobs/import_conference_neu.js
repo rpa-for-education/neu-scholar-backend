@@ -5,8 +5,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import {
-  getDb,
-  closeDb
+getDb,
+closeDb
 } from "../services/mongo.js";
 
 /* ================= CONFIG ================= */
@@ -17,255 +17,298 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const FILE_PATH = path.join(
-  __dirname,
-  "../data/data_hoi_thao_neu_2026.csv"
+__dirname,
+"../data/data_hoi_thao_neu_2026.csv"
 );
 
 /* ================= HELPERS ================= */
 const genKey = value =>
-  crypto
-    .createHash("md5")
-    .update(String(value))
-    .digest("hex");
+crypto
+.createHash("md5")
+.update(String(value))
+.digest("hex");
 
 function parseTopics(topics) {
-  if (!topics) return [];
+if (!topics) return [];
 
-  return topics
-    .split(",")
-    .map(item => item.trim())
-    .filter(Boolean);
+return topics
+.split(",")
+.map(item => item.trim())
+.filter(Boolean);
 }
 
 function normalizeRow(row) {
-  const doc = {};
+const doc = {};
 
-  for (const [key, value] of Object.entries(
-    row
-  )) {
-    const normalizedKey = key
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_|_$/g, "");
+for (const [key, value] of Object.entries(row)) {
+const normalizedKey = key
+.trim()
+.toLowerCase()
+.replace(/[^a-z0-9]+/g, "*")
+.replace(/^*|_$/g, "");
 
-    doc[normalizedKey] =
-      value === ""
-        ? null
-        : value;
-  }
+```
+doc[normalizedKey] =
+  value === "" ? null : value;
+```
 
-  return doc;
+}
+
+return doc;
 }
 
 /* ================= MAIN ================= */
 async function run() {
-  console.log(
-    "🚀 START NEU CONFERENCE IMPORT"
+console.log(
+"🚀 START NEU CONFERENCE IMPORT"
+);
+
+console.log(
+"📂 FILE:",
+FILE_PATH
+);
+
+const db = await getDb();
+const col =
+db.collection("conference");
+
+/* ================= INDEX ================= */
+
+await col.createIndex(
+{ u_key: 1 },
+{ unique: true }
+);
+
+await col.createIndex({
+source: 1
+});
+
+await col.createIndex({
+status: 1
+});
+
+await col.createIndex({
+start_date: 1
+});
+
+await col.createIndex({
+deadline: 1
+});
+
+console.log("✅ Index ready");
+
+let processed = 0;
+let inserted = 0;
+let batch = [];
+
+const stream = fs
+.createReadStream(FILE_PATH)
+.pipe(csv());
+
+for await (const rawRow of stream) {
+const row =
+normalizeRow(rawRow);
+
+```
+const sourceId =
+  row._key ||
+  row.acronym ||
+  row.name;
+
+if (!sourceId) {
+  continue;
+}
+
+const u_key =
+  genKey(
+    `neu:${sourceId}`
   );
 
-  console.log(
-    "📂 FILE:",
-    FILE_PATH
-  );
+const now = new Date();
 
-  const db = await getDb();
+const doc = {
+  ...row,
 
-  const col =
-    db.collection("conference");
+  u_key,
 
-  let processed = 0;
-  let inserted = 0;
-  let batch = [];
+  _key:
+    row._key ||
+    sourceId,
 
-  const stream = fs
-    .createReadStream(FILE_PATH)
-    .pipe(csv());
+  acronym:
+    row.acronym ||
+    null,
 
-  for await (const rawRow of stream) {
-    const row =
-      normalizeRow(rawRow);
+  name:
+    row.name ||
+    null,
 
-    const sourceId =
-      row._key ||
-      row.acronym ||
-      row.name;
+  location:
+    row.location ||
+    null,
 
-    if (!sourceId) {
-      continue;
-    }
+  city:
+    row.city ||
+    null,
 
-    const u_key =
-      genKey(sourceId);
+  country:
+    row.country ||
+    null,
 
-    const now = new Date();
+  country_code:
+    row.country_code ||
+    null,
 
-    const doc = {
-      ...row,
+  continent:
+    row.continent ||
+    null,
 
-      u_key,
+  deadline:
+    row.deadline ||
+    null,
 
-      _key:
-        row._key || null,
+  start_date:
+    row.start_date ||
+    null,
 
-      acronym:
-        row.acronym ||
-        null,
+  topics:
+    parseTopics(
+      row.topics
+    ),
 
-      name:
-        row.name || null,
+  url:
+    row.url ||
+    null,
 
-      location:
-        row.location ||
-        null,
+  cfp_text:
+    row.cfp_text ||
+    null,
 
-      city:
-        row.city || null,
+  crawl_source:
+    "neu",
 
-      country:
-        row.country ||
-        null,
+  source:
+    "neu",
 
-      country_code:
-        row.country_code ||
-        null,
+  status:
+    "completed",
 
-      continent:
-        row.continent ||
-        null,
+  is_enriched:
+    true,
 
-      deadline:
-        row.deadline ||
-        null,
+  updatedAt:
+    now
+};
 
-      start_date:
-        row.start_date ||
-        null,
+batch.push({
+  updateOne: {
+    filter: {
+      u_key
+    },
 
-      topics:
-        parseTopics(
-          row.topics
-        ),
+    update: {
+      $set: doc,
 
-      url:
-        row.url || null,
-
-      cfp_text:
-        row.cfp_text ||
-        null,
-
-      crawl_source:
-        row.crawl_source ||
-        "neu",
-
-      status:
-        row.status ||
-        "pending",
-
-      source:
-        "neu",
-
-      updatedAt: now
-    };
-
-    batch.push({
-      updateOne: {
-        filter: {
-          u_key
-        },
-
-        update: {
-          $set: doc,
-
-          $setOnInsert: {
-            createdAt: now
-          }
-        },
-
-        upsert: true
+      $setOnInsert: {
+        createdAt: now
       }
-    });
+    },
 
-    processed++;
-
-    if (
-      batch.length >=
-      BATCH_SIZE
-    ) {
-      const result =
-        await col.bulkWrite(
-          batch,
-          {
-            ordered: false
-          }
-        );
-
-      inserted +=
-        result.upsertedCount ||
-        0;
-
-      batch = [];
-    }
-
-    if (
-      processed % 1000 ===
-      0
-    ) {
-      console.log(
-        `📊 Processed: ${processed}`
-      );
-    }
+    upsert: true
   }
+});
 
-  if (batch.length) {
-    const result =
-      await col.bulkWrite(
-        batch,
-        {
-          ordered: false
-        }
-      );
+processed++;
 
-    inserted +=
-      result.upsertedCount ||
-      0;
-  }
+if (
+  batch.length >=
+  BATCH_SIZE
+) {
+  const result =
+    await col.bulkWrite(
+      batch,
+      {
+        ordered: false
+      }
+    );
 
+  inserted +=
+    result.upsertedCount ||
+    0;
+
+  batch = [];
+}
+
+if (
+  processed % 1000 ===
+  0
+) {
   console.log(
-    `📊 Total rows: ${processed}`
+    `📊 Processed: ${processed}`
   );
+}
+```
 
-  console.log(
-    `➕ New records: ${inserted}`
-  );
+}
 
-  console.log(
-    "🎯 CONFERENCE DONE"
-  );
+if (batch.length) {
+const result =
+await col.bulkWrite(
+batch,
+{
+ordered: false
+}
+);
+
+```
+inserted +=
+  result.upsertedCount ||
+  0;
+```
+
+}
+
+console.log(
+`📊 Total rows: ${processed}`
+);
+
+console.log(
+`➕ New records: ${inserted}`
+);
+
+console.log(
+"🎯 CONFERENCE DONE"
+);
 }
 
 run()
-  .then(async () => {
-    try {
-      await closeDb();
-    } catch {}
+.then(async () => {
+try {
+await closeDb();
+} catch {}
 
-    console.log(
-      "🔒 Mongo closed"
-    );
+```
+console.log(
+  "🔒 Mongo closed"
+);
 
-    process.exit(0);
-  })
-  .catch(async err => {
-    console.error(
-      "❌ CONFERENCE IMPORT ERROR"
-    );
+process.exit(0);
+```
 
-    console.error(err);
+})
+.catch(async err => {
+console.error(
+"❌ CONFERENCE IMPORT ERROR"
+);
 
-    try {
-      await closeDb();
-    } catch {}
+```
+console.error(err);
 
-    process.exit(1);
-  });
+try {
+  await closeDb();
+} catch {}
+
+process.exit(1);
+```
+
+});
