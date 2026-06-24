@@ -4,17 +4,23 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import PQueue from "p-queue";
 import { chromium } from "playwright";
-import { getDb, closeDb } from "../services/mongo.js";
+
+import {
+  getDb,
+  closeDb
+} from "../services/mongo.js";
 
 /* ================= CONFIG ================= */
+
 const CONCURRENCY = 2;
 const TIMEOUT = 20000;
 const MAX_CFP_LENGTH = 30000;
 
 /* ================= CFP ================= */
+
 function extractCFP($) {
   try {
-    $("script, style, nav, footer, header").remove();
+    $("script,style,nav,footer,header").remove();
 
     const text = $("body")
       .text()
@@ -22,7 +28,9 @@ function extractCFP($) {
       .replace(/\s+/g, " ")
       .trim();
 
-    if (text.length < 200) return null;
+    if (text.length < 200) {
+      return null;
+    }
 
     return text.slice(0, MAX_CFP_LENGTH);
   } catch {
@@ -31,25 +39,33 @@ function extractCFP($) {
 }
 
 /* ================= DATE ================= */
+
 function extractDeadline(text) {
   try {
     const match = text.match(
       /([A-Za-z]+ \d{1,2}, \d{4})/
     );
 
-    if (!match) return null;
+    if (!match) {
+      return null;
+    }
 
     const d = new Date(match[1]);
 
-    return isNaN(d)
-      ? null
-      : d.toISOString().slice(0, 10);
+    if (isNaN(d)) {
+      return null;
+    }
+
+    return d
+      .toISOString()
+      .slice(0, 10);
   } catch {
     return null;
   }
 }
 
 /* ================= FETCH ================= */
+
 async function fetchAxios(url) {
   try {
     const res = await axios.get(url, {
@@ -112,7 +128,10 @@ async function smartFetch(url) {
     };
   }
 
-  console.log("⚠️ Playwright fallback:", url);
+  console.log(
+    "⚠️ Playwright fallback:",
+    url
+  );
 
   html = await fetchPlaywright(url);
 
@@ -130,31 +149,33 @@ async function smartFetch(url) {
 }
 
 /* ================= MAIN ================= */
+
 async function run() {
-  console.log("🤖 Enrich incremental...");
+  console.log(
+    "🤖 Enrich EasyChair CFP..."
+  );
 
   const db = await getDb();
-  const col = db.collection("conference");
+
+  const col =
+    db.collection("conference");
+
+  const filter = {
+    source: "easychair",
+    status: "pending"
+  };
 
   const totalPending =
-    await col.countDocuments({
-      $or: [
-        { status: { $exists: false } },
-        { status: { $ne: "done" } }
-      ]
-    });
+    await col.countDocuments(
+      filter
+    );
 
   console.log(
     `📊 Pending conferences: ${totalPending}`
   );
 
   const cursor = col
-    .find({
-      $or: [
-        { status: { $exists: false } },
-        { status: { $ne: "done" } }
-      ]
-    })
+    .find(filter)
     .limit(5000);
 
   const queue = new PQueue({
@@ -173,16 +194,25 @@ async function run() {
           return;
         }
 
-        const { html, source } =
-          await smartFetch(doc.url);
+        const {
+          html,
+          source
+        } = await smartFetch(
+          doc.url
+        );
 
         if (!html) {
           await col.updateOne(
-            { _id: doc._id },
+            {
+              u_key:
+                doc.u_key
+            },
             {
               $set: {
-                status: "failed",
-                updated_time: new Date()
+                status:
+                  "failed",
+                updatedAt:
+                  new Date()
               }
             }
           );
@@ -191,35 +221,62 @@ async function run() {
           return;
         }
 
-        const $ = cheerio.load(html);
-        const bodyText = $("body").text();
+        const $ =
+          cheerio.load(html);
 
-        const cfp_text = extractCFP($);
+        const bodyText =
+          $("body").text();
+
+        const cfp_text =
+          extractCFP($);
+
         const newDeadline =
-          extractDeadline(bodyText);
+          extractDeadline(
+            bodyText
+          );
 
         const update = {
-          crawl_source: source,
-          updated_time: new Date(),
-          status: "done"
+          crawl_source:
+            source,
+
+          updatedAt:
+            new Date(),
+
+          status:
+            "completed",
+
+          is_enriched:
+            true
         };
 
-        let needUpdate = false;
+        let needUpdate =
+          false;
 
-        if (cfp_text && !doc.cfp_text) {
-          update.cfp_text = cfp_text;
+        if (
+          cfp_text &&
+          !doc.cfp_text
+        ) {
+          update.cfp_text =
+            cfp_text;
+
           needUpdate = true;
         }
 
-        if (newDeadline && !doc.deadline) {
-          update.deadline = newDeadline;
+        if (
+          newDeadline &&
+          !doc.deadline
+        ) {
+          update.deadline =
+            newDeadline;
+
           needUpdate = true;
         }
 
         if (
           newDeadline &&
           doc.deadline &&
-          doc.deadline !== newDeadline
+          doc.deadline !==
+            newDeadline
         ) {
           console.log(
             `⚠️ Deadline mismatch: ${doc.acronym}`
@@ -227,7 +284,10 @@ async function run() {
         }
 
         await col.updateOne(
-          { _id: doc._id },
+          {
+            u_key:
+              doc.u_key
+          },
           {
             $set: update
           }
@@ -249,7 +309,9 @@ async function run() {
           `❌ ${doc.acronym || doc.url}`
         );
 
-        console.error(err.message);
+        console.error(
+          err.message
+        );
       }
     });
   }
@@ -270,14 +332,22 @@ async function run() {
 
 run()
   .then(async () => {
-    await closeDb();
+    try {
+      await closeDb();
+    } catch {}
+
     process.exit(0);
   })
   .catch(async err => {
-    console.error("❌ ENRICH ERROR");
+    console.error(
+      "❌ ENRICH ERROR"
+    );
+
     console.error(err);
 
-    await closeDb();
+    try {
+      await closeDb();
+    } catch {}
 
     process.exit(1);
   });
