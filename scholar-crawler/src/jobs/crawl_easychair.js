@@ -166,10 +166,48 @@ async function run() {
     const db = client.db(DB_NAME);
     const col = db.collection(COLLECTION);
 
+    /* ================= INDEX ================= */
+
+    // Xóa index cũ nếu tồn tại
+    try {
+      await col.dropIndex("_key_1");
+
+      console.log(
+        "🗑️ Old _key index removed"
+      );
+    } catch {}
+
+    // Unique index nhưng bỏ qua document không có _key
     await col.createIndex(
       { _key: 1 },
-      { unique: true }
+      {
+        unique: true,
+        partialFilterExpression: {
+          _key: {
+            $exists: true,
+            $ne: null
+          }
+        }
+      }
     );
+
+    await col.createIndex({
+      deadline: 1
+    });
+
+    await col.createIndex({
+      start_date: 1
+    });
+
+    await col.createIndex({
+      country: 1
+    });
+
+    await col.createIndex({
+      continent: 1
+    });
+
+    console.log("✅ Index ready");
 
     console.log("🚀 Crawling...");
 
