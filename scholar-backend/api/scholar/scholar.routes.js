@@ -100,12 +100,18 @@ async function handleAsk(req, res) {
       sources.push({
         id: `C${i + 1}`,
         type: "conference",
-        title: c.name,
-        url: getConferenceUrl(c), // ✅ đúng
+        title:
+          c.name ||
+          c.title ||
+          c.acronym ||
+          "Untitled conference",
+        url: getConferenceUrl(c),
         metadata: {
           year: c.year,
           country: c.country,
-          deadline: c.deadline
+          deadline: c.deadline,
+          start_date: c.start_date,
+          score: c.finalScore ?? c.score ?? null
         }
       });
     });
