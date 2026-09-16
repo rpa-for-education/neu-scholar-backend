@@ -30,7 +30,8 @@ async function handleAsk(req, res) {
       query,
       message,
       model_id = "qwen3-4b",
-      topk
+      topk,
+      context = {}
     } = req.body || {};
 
     const rawInput = question ?? prompt ?? query ?? message;
@@ -45,6 +46,19 @@ async function handleAsk(req, res) {
         error: "Missing question"
       });
     }
+
+
+    // ================= DEBUG CONTEXT =================
+    console.log("\n======================================");
+    console.log("🆔 SESSION:", session_id);
+    console.log("❓ QUESTION:", finalQuestion);
+
+    console.log(
+      "🧠 MEMORY:",
+      JSON.stringify(context.history || [], null, 2)
+    );
+
+    console.log("======================================\n");
 
     const result = await runScholarAgent(
       req,

@@ -31,7 +31,7 @@ QUY TẮC:
       context += `${h.role === "user" ? "User" : "Assistant"}: ${h.content}\n`;
     });
   }
-  colsole.log("=== PROMPT ===\n", context);
+  // colsole.log("=== PROMPT ===\n", context);
 
   // ================= 🔥 STATUS =================
   function getStatus(c) {
