@@ -249,7 +249,11 @@ function formatFinalAnswer(answer, conferences, journals, analysis) {
 }
 
 // ================= MAIN =================
-export async function runAgent(question, topk = FINAL_TOPK) {
+export async function runAgent(
+  question,
+  topk = FINAL_TOPK,
+  history = []
+) {
   const start = Date.now();
 
   try {
@@ -280,6 +284,7 @@ export async function runAgent(question, topk = FINAL_TOPK) {
       journals,
       domain,
       analysis,
+      history,
       responseTimeMs: Date.now() - start
     };
 

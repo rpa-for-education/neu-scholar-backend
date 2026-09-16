@@ -60,11 +60,36 @@ async function handleAsk(req, res) {
 
     console.log("======================================\n");
 
+
+
+    // ================= MEMORY FROM PORTAL =================
+    const history = Array.isArray(context?.history)
+      ? context.history
+          .filter(
+            h =>
+              h &&
+              ["user", "assistant"].includes(h.role) &&
+              typeof h.content === "string" &&
+              h.content.trim()
+          )
+          .slice(-10)
+      : [];
+
+    console.log("\n========== SCHOLAR REQUEST ==========");
+    console.log("🆔 SESSION:", session_id);
+    console.log("❓ QUESTION:", finalQuestion);
+    console.log("🧠 MEMORY ITEMS:", history.length);
+    console.log("🧠 MEMORY:", JSON.stringify(history, null, 2));
+    console.log("=====================================\n");
+
+
+
     const result = await runScholarAgent(
       req,
       finalQuestion,
       model_id,
-      topk
+      topk,
+      history 
     );
 
     // ================= BUILD SOURCES =================

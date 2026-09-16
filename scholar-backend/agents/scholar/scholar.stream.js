@@ -3,6 +3,10 @@ import fetch from "node-fetch";
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 import { buildScholarPrompt } from "./scholar.prompt.js";
+import {
+  normalizeHistory,
+  buildContextualQuestion
+} from "../shared/memory.js";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
 const TIMEOUT = 15000;
@@ -27,6 +31,16 @@ export async function streamScholar(req, res, question, topk = 5) {
 
   // 🔥 heartbeat
   let heartbeat = null;
+
+  // ================= PORTAL MEMORY =================
+  const history = Array.isArray(req.body?.context?.history)
+    ? req.body.context.history
+    : [];
+
+  console.log(
+    "🧠 STREAM MEMORY:",
+    JSON.stringify(history, null, 2)
+  );
 
   try {
     // ================= SSE HEADER =================
@@ -58,7 +72,20 @@ export async function streamScholar(req, res, question, topk = 5) {
     res.write(`data: 🔍 Đang tìm dữ liệu...\n\n`);
 
     // ================= RUN AGENT =================
-    result = await runAgent(question, topk);
+    const history = normalizeHistory(
+      req.body?.context?.history || []
+    );
+
+    const contextualQuestion = buildContextualQuestion(
+      question,
+      history
+    );
+
+    result = await runAgent(
+      contextualQuestion,
+      topk,
+      history
+    );
 
     if (closed) return;
 
@@ -74,7 +101,7 @@ export async function streamScholar(req, res, question, topk = 5) {
       question,
       result.conferences,
       result.journals,
-      []
+      history
     );
 
     // ================= STREAM =================
