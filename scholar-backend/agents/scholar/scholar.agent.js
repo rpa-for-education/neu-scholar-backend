@@ -1,4 +1,4 @@
-// scholar.agent.js
+// agents/scholar/scholar.agent.js
 import { searchConferenceJournalByVector } from "./scholar.search.js";
 import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
 import { rankItems, smartFilter } from "./scholar.ranking.js";

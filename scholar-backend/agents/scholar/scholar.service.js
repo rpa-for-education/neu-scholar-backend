@@ -1,5 +1,4 @@
-// scholar.service.js (ENHANCED ANSWER)
-
+// agents/scholar/scholar.service.js
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 

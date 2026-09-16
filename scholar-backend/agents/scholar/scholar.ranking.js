@@ -1,4 +1,4 @@
-// scholar.ranking.js
+// agents/scholar/scholar.ranking.js
 
 const WEIGHTS = {
   vector: 0.5,

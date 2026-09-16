@@ -1,4 +1,4 @@
-// scholar.stream.js
+// agents/scholar/scholar.stream.js
 import fetch from "node-fetch";
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";

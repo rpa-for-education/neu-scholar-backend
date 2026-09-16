@@ -1,3 +1,4 @@
+// api/scholar/scholar.routes.js
 import express from "express";
 import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
 import { streamScholar } from "../../agents/scholar/scholar.stream.js";

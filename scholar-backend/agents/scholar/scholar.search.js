@@ -1,4 +1,4 @@
-// scholar.search.js
+// agents/scholar/scholar.search.js
 import { qdrantClient as qdrant } from "../../db/qdrant.js";
 import {
   detectDomain,

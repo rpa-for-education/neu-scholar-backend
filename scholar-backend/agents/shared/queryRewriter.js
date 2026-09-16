@@ -1,4 +1,4 @@
-// agent/queryRewriter.js
+// agents/shared/queryRewriter.js
 import { callLLMJson } from "./llm.js";
 
 export async function rewriteQuery(question) {

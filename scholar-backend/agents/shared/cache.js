@@ -1,4 +1,4 @@
-// shared/cache.js
+// agents/shared/cache.js
 
 const CACHE = new Map();
 

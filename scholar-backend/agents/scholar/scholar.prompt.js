@@ -1,4 +1,4 @@
-// scholar.prompt.js
+// agents/scholar/scholar.prompt.js
 export function buildScholarPrompt(
   question,
   conferences = [],
@@ -31,6 +31,7 @@ QUY TẮC:
       context += `${h.role === "user" ? "User" : "Assistant"}: ${h.content}\n`;
     });
   }
+  colsole.log("=== PROMPT ===\n", context);
 
   // ================= 🔥 STATUS =================
   function getStatus(c) {

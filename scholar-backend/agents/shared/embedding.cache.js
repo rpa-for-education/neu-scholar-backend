@@ -1,3 +1,4 @@
+// agents/shared/embedding.cache.js
 const CACHE = new Map();
 const TTL = 1000 * 60 * 60; // 1h
 

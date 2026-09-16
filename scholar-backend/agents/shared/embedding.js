@@ -1,4 +1,4 @@
-// ./shared/embedding.js
+// agents/shared/embedding.js
 
 const TIMEOUT = 2500;
 const MAX_RETRIES = 1;

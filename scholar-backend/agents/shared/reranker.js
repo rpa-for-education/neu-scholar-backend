@@ -1,4 +1,4 @@
-// agent/reranker.js
+// agents/shared/reranker.js
 import { callLLMJson } from "./llm.js";
 
 export async function rerankAdvanced(query, items) {
