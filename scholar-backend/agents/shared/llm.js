@@ -1,8 +1,5 @@
 // agents/shared/llm.js
 
-import axios from "axios";
-
-
 // =====================================================
 // CONFIG
 // =====================================================
@@ -12,36 +9,22 @@ const OLLAMA_LLM_BASE = (
   "http://101.96.66.232:8037/ollama"
 ).replace(/\/+$/, "");
 
-
 const OLLAMA_LLM_SECKEY =
-  process.env.OLLAMA_LLM_SECKEY ||
-  "research";
-
+  process.env.OLLAMA_LLM_SECKEY || "";
 
 const DEFAULT_MODEL =
   process.env.OLLAMA_LLM_MODEL ||
   "qwen2.5:14b-instruct-ctx16k";
 
+const DEFAULT_MODEL_ID = "qwen2.5-14b";
 
-const DEFAULT_MODEL_ID =
-  "qwen2.5-14b";
-
-
-/**
- * Timeout phía Node.
- *
- * Postman đã xác nhận Qwen2.5 14B có thể trả một
- * non-streaming response trong khoảng 9 giây.
- *
- * 60 giây vẫn được giữ để có đủ dư địa cho prompt dài hơn.
- */
 const LLM_TIMEOUT =
-  Number(process.env.LLM_TIMEOUT_MS) ||
-  60000;
+  Number(process.env.LLM_TIMEOUT_MS) || 60000;
 
 
 // =====================================================
 // MODEL MAP
+// Giữ nguyên export để tương thích code hiện tại.
 // =====================================================
 
 export const modelMap = {
@@ -57,369 +40,201 @@ export const modelMap = {
 // =====================================================
 
 function normalizePrompt(prompt) {
-  if (typeof prompt !== "string") {
-    return "";
-  }
-
-  return prompt.trim();
+  return typeof prompt === "string"
+    ? prompt.trim()
+    : "";
 }
 
 
-function getPromptStats(prompt) {
-  const chars =
-    prompt?.length || 0;
-
-  const bytes =
-    Buffer.byteLength(
-      prompt || "",
-      "utf8"
-    );
+function promptStats(prompt) {
+  const chars = prompt.length;
+  const bytes = Buffer.byteLength(prompt, "utf8");
 
   return {
     chars,
     bytes,
-    kb:
-      (bytes / 1024)
-        .toFixed(2)
+    kb: (bytes / 1024).toFixed(2)
   };
 }
 
 
-function nsToMs(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    !Number.isFinite(Number(value))
-  ) {
+function safeJSONParse(text) {
+  if (typeof text !== "string" || !text.trim()) {
     return null;
   }
 
-  return Number(value) / 1_000_000;
+  const clean = text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  // JSON trực tiếp
+  try {
+    return JSON.parse(clean);
+  } catch {
+    // tiếp tục fallback
+  }
+
+  // Tìm JSON object hoặc array trong response
+  const match = clean.match(
+    /\{[\s\S]*\}|\[[\s\S]*\]/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+
+function getErrorMessage(data, fallback) {
+  if (
+    data &&
+    typeof data === "object" &&
+    typeof data.error === "string" &&
+    data.error.trim()
+  ) {
+    return data.error;
+  }
+
+  return fallback;
 }
 
 
 // =====================================================
-// LOW LEVEL OLLAMA CALL
+// LOW-LEVEL OLLAMA CALL
+//
+// Native fetch thay Axios.
+//
+// QUAN TRỌNG:
+// - stream:false
+// - không temperature
+// - không num_ctx
+// - không num_predict
+//
+// Giữ request gần nhất với request Postman đã test.
 // =====================================================
 
-async function callOllamaRaw(
-  prompt,
-  model
-) {
-
-  const start =
-    Date.now();
-
-
-  const finalPrompt =
-    normalizePrompt(prompt);
-
+async function callOllamaRaw(prompt, model) {
+  const finalPrompt = normalizePrompt(prompt);
 
   if (!finalPrompt) {
+    throw new Error("LLM prompt is empty");
+  }
+
+  if (!OLLAMA_LLM_SECKEY) {
     throw new Error(
-      "LLM prompt is empty"
+      "OLLAMA_LLM_SECKEY is not configured"
     );
   }
 
-
   const finalModel =
-    model ||
-    DEFAULT_MODEL;
-
+    model || DEFAULT_MODEL;
 
   const url =
     `${OLLAMA_LLM_BASE}/api/generate`;
 
-
   const stats =
-    getPromptStats(
-      finalPrompt
-    );
-
-
-  // ===================================================
-  // PAYLOAD
-  // ===================================================
-  //
-  // QUAN TRỌNG:
-  //
-  // Ollama /api/generate mặc định stream=true.
-  //
-  // Nhưng Scholar Agent hiện cần một JSON response hoàn
-  // chỉnh để đọc:
-  //
-  //     response.data.response
-  //
-  // Vì vậy BẮT BUỘC gửi stream:false.
-  //
-  // Đây cũng chính là request đã được kiểm tra thành công
-  // trực tiếp với Ollama/Postman.
-  //
-  // Tạm thời KHÔNG thêm:
-  //
-  // - temperature
-  // - num_ctx
-  // - num_predict
-  //
-  // để request Node giống request Postman nhất có thể.
-  // ===================================================
+    promptStats(finalPrompt);
 
   const payload = {
-    model:
-      finalModel,
-
-    prompt:
-      finalPrompt,
-
-    stream:
-      false
+    model: finalModel,
+    prompt: finalPrompt,
+    stream: false
   };
 
+  const start = Date.now();
 
-  // ===================================================
-  // DEBUG REQUEST
-  // ===================================================
-
-  console.log(
-    "\n========== LLM REQUEST =========="
-  );
-
-  console.log(
-    "🌐 URL:",
-    url
-  );
-
-  console.log(
-    "🧠 MODEL:",
-    finalModel
-  );
-
-  console.log(
-    "📏 PROMPT CHARS:",
-    stats.chars
-  );
-
-  console.log(
-    "📦 PROMPT SIZE:",
-    `${stats.kb} KB`
-  );
-
-  console.log(
-    "⏱️ TIMEOUT:",
-    `${LLM_TIMEOUT} ms`
-  );
-
-  console.log(
-    "🔌 PROXY:",
-    "disabled"
-  );
-
-  console.log(
-    "📤 PAYLOAD MODE:",
-    "non-streaming"
-  );
-
-  console.log(
-    "🌊 STREAM:",
-    payload.stream
-  );
-
-  console.log(
-    "🚀 Sending request to LLM..."
-  );
-
-  console.log(
-    "=================================\n"
-  );
-
+  console.log("\n========== LLM REQUEST ==========");
+  console.log("🌐 URL:", url);
+  console.log("🧠 MODEL:", finalModel);
+  console.log("📏 PROMPT CHARS:", stats.chars);
+  console.log("📦 PROMPT SIZE:", `${stats.kb} KB`);
+  console.log("⏱️ TIMEOUT:", `${LLM_TIMEOUT} ms`);
+  console.log("🚚 TRANSPORT: native fetch");
+  console.log("🌊 STREAM: false");
+  console.log("🚀 Sending request to LLM...");
+  console.log("=================================\n");
 
   try {
+    const response = await fetch(url, {
+      method: "POST",
 
-    // =================================================
-    // HTTP REQUEST
-    // =================================================
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-ollama-seckey": OLLAMA_LLM_SECKEY
+      },
 
-    const res =
-      await axios.post(
-        url,
-        payload,
-        {
-          headers: {
-            "Content-Type":
-              "application/json",
+      body: JSON.stringify(payload),
 
-            "Accept":
-              "application/json",
-
-            "x-ollama-seckey":
-              OLLAMA_LLM_SECKEY
-          },
-
-
-          /**
-           * Không sử dụng HTTP_PROXY / HTTPS_PROXY
-           * của environment.
-           */
-          proxy:
-            false,
-
-
-          /**
-           * Axios phải parse response thành JSON object.
-           */
-          responseType:
-            "json",
-
-
-          timeout:
-            LLM_TIMEOUT,
-
-
-          maxContentLength:
-            Infinity,
-
-
-          maxBodyLength:
-            Infinity,
-
-
-          /**
-           * Không tự coi HTTP >= 400 là response hợp lệ.
-           */
-          validateStatus:
-            status =>
-              status >= 200 &&
-              status < 300
-        }
-      );
-
-
-    // =================================================
-    // RESPONSE
-    // =================================================
+      signal: AbortSignal.timeout(
+        LLM_TIMEOUT
+      )
+    });
 
     const latency =
       Date.now() - start;
 
+    // Đọc text trước để có thể log lỗi JSON rõ hơn.
+    const raw =
+      await response.text();
 
-    const data =
-      res?.data &&
-      typeof res.data === "object"
-        ? res.data
+    let data = null;
+
+    try {
+      data = raw
+        ? JSON.parse(raw)
         : {};
+    } catch {
+      throw new Error(
+        `Ollama returned invalid JSON (HTTP ${response.status})`
+      );
+    }
 
+    if (!response.ok) {
+      throw new Error(
+        getErrorMessage(
+          data,
+          `Ollama HTTP ${response.status}`
+        )
+      );
+    }
 
     const content =
       typeof data.response === "string"
         ? data.response
         : "";
 
-
-    console.log(
-      "\n========== LLM RESPONSE =========="
-    );
-
-    console.log(
-      "✅ RESPONSE RECEIVED"
-    );
-
-    console.log(
-      "📡 HTTP STATUS:",
-      res.status
-    );
-
-    console.log(
-      "⏱️ LATENCY:",
-      `${latency} ms`
-    );
-
-    console.log(
-      "📥 RESPONSE CHARS:",
-      content.length
-    );
-
+    console.log("\n========== LLM RESPONSE ==========");
+    console.log("✅ RESPONSE RECEIVED");
+    console.log("📡 HTTP STATUS:", response.status);
+    console.log("⏱️ LATENCY:", `${latency} ms`);
+    console.log("📥 RESPONSE CHARS:", content.length);
     console.log(
       "🔢 PROMPT TOKENS:",
-      data.prompt_eval_count ??
-      "N/A"
+      data.prompt_eval_count ?? "N/A"
     );
-
     console.log(
       "🔢 OUTPUT TOKENS:",
-      data.eval_count ??
-      "N/A"
+      data.eval_count ?? "N/A"
     );
-
     console.log(
       "🏁 DONE:",
-      data.done ??
-      "N/A"
+      data.done ?? "N/A"
     );
-
     console.log(
       "🏁 REASON:",
-      data.done_reason ??
-      "N/A"
+      data.done_reason ?? "N/A"
     );
-
-
-    const totalDurationMs =
-      nsToMs(
-        data.total_duration
-      );
-
-    const loadDurationMs =
-      nsToMs(
-        data.load_duration
-      );
-
-    const promptEvalDurationMs =
-      nsToMs(
-        data.prompt_eval_duration
-      );
-
-    const evalDurationMs =
-      nsToMs(
-        data.eval_duration
-      );
-
-
-    console.log(
-      "⏱️ TOTAL DURATION:",
-      totalDurationMs !== null
-        ? `${totalDurationMs.toFixed(2)} ms`
-        : "N/A"
-    );
-
-    console.log(
-      "⏱️ LOAD DURATION:",
-      loadDurationMs !== null
-        ? `${loadDurationMs.toFixed(2)} ms`
-        : "N/A"
-    );
-
-    console.log(
-      "⏱️ PROMPT EVAL DURATION:",
-      promptEvalDurationMs !== null
-        ? `${promptEvalDurationMs.toFixed(2)} ms`
-        : "N/A"
-    );
-
-    console.log(
-      "⏱️ EVAL DURATION:",
-      evalDurationMs !== null
-        ? `${evalDurationMs.toFixed(2)} ms`
-        : "N/A"
-    );
-
-    console.log(
-      "==================================\n"
-    );
-
-
-    // =================================================
-    // VALIDATE RESPONSE
-    // =================================================
+    console.log("==================================\n");
 
     if (!content.trim()) {
       console.warn(
@@ -427,153 +242,87 @@ async function callOllamaRaw(
       );
     }
 
-
-    if (
-      data.done === false
-    ) {
-      console.warn(
-        "⚠️ Ollama returned done=false even though stream=false"
-      );
-    }
-
-
     return {
       content,
-
       latency,
 
       model:
-        data.model ||
-        finalModel,
+        data.model || finalModel,
 
       done:
-        data.done ??
-        null,
+        data.done ?? null,
 
       doneReason:
-        data.done_reason ||
-        null,
+        data.done_reason ?? null,
 
       promptTokens:
-        data.prompt_eval_count ??
-        null,
+        data.prompt_eval_count ?? null,
 
       outputTokens:
-        data.eval_count ??
-        null,
+        data.eval_count ?? null,
 
       totalDuration:
-        data.total_duration ??
-        null,
+        data.total_duration ?? null,
 
       loadDuration:
-        data.load_duration ??
-        null,
+        data.load_duration ?? null,
 
       promptEvalDuration:
-        data.prompt_eval_duration ??
-        null,
+        data.prompt_eval_duration ?? null,
 
       evalDuration:
-        data.eval_duration ??
-        null
+        data.eval_duration ?? null
     };
 
-
   } catch (err) {
-
-    // =================================================
-    // ERROR
-    // =================================================
-
     const latency =
       Date.now() - start;
 
+    const timeout =
+      err?.name === "TimeoutError" ||
+      err?.name === "AbortError";
 
-    console.error(
-      "\n========== LLM ERROR =========="
-    );
-
+    console.error("\n========== LLM ERROR ==========");
     console.error(
       "❌ FAILED AFTER:",
       `${latency} ms`
     );
-
-    console.error(
-      "❌ URL:",
-      url
-    );
-
-    console.error(
-      "❌ MODEL:",
-      finalModel
-    );
-
+    console.error("❌ URL:", url);
+    console.error("❌ MODEL:", finalModel);
     console.error(
       "❌ PROMPT CHARS:",
       stats.chars
     );
-
     console.error(
       "❌ PROMPT SIZE:",
       `${stats.kb} KB`
     );
-
     console.error(
-      "❌ STREAM:",
-      false
+      "❌ TYPE:",
+      timeout ? "TIMEOUT" : err?.name
     );
-
-    console.error(
-      "❌ STATUS:",
-      err.response?.status ??
-      "(no response)"
-    );
-
-    console.error(
-      "❌ CODE:",
-      err.code ||
-      "(none)"
-    );
-
     console.error(
       "❌ MESSAGE:",
-      err.message ||
-      "(no message)"
+      err?.message || "Unknown error"
     );
 
-
-    if (err.response?.data) {
-      console.error(
-        "❌ RESPONSE DATA:",
-        err.response.data
-      );
-    }
-
-
-    if (err.cause) {
+    if (err?.cause) {
       console.error(
         "❌ CAUSE:",
         err.cause
       );
     }
 
+    console.error("===============================\n");
 
-    console.error(
-      "===============================\n"
-    );
-
-
-    const serverError =
-      typeof err.response?.data?.error ===
-      "string"
-        ? err.response.data.error
-        : null;
-
+    if (timeout) {
+      throw new Error(
+        `Ollama timeout after ${LLM_TIMEOUT}ms`
+      );
+    }
 
     throw new Error(
-      serverError ||
-      err.message ||
+      err?.message ||
       "Ollama request failed"
     );
   }
@@ -581,186 +330,99 @@ async function callOllamaRaw(
 
 
 // =====================================================
-// SAFE JSON PARSE
-// =====================================================
-
-function safeJSONParse(text) {
-
-  if (
-    typeof text !== "string" ||
-    !text.trim()
-  ) {
-    return null;
-  }
-
-
-  const clean =
-    text
-      .trim()
-
-      .replace(
-        /^```json\s*/i,
-        ""
-      )
-
-      .replace(
-        /^```\s*/,
-        ""
-      )
-
-      .replace(
-        /\s*```$/,
-        ""
-      )
-
-      .trim();
-
-
-  // ===================================================
-  // DIRECT JSON
-  // ===================================================
-
-  try {
-    return JSON.parse(
-      clean
-    );
-
-  } catch {
-    // tiếp tục fallback
-  }
-
-
-  // ===================================================
-  // EXTRACT JSON OBJECT / ARRAY
-  // ===================================================
-
-  const match =
-    clean.match(
-      /\{[\s\S]*\}|\[[\s\S]*\]/
-    );
-
-
-  if (!match) {
-    return null;
-  }
-
-
-  try {
-    return JSON.parse(
-      match[0]
-    );
-
-  } catch {
-    return null;
-  }
-}
-
-
-// =====================================================
 // GENERIC LLM CALL
+//
+// Contract giữ nguyên:
+// {
+//   provider,
+//   model_id,
+//   model,
+//   latency,
+//   answer,
+//   usage,
+//   done,
+//   done_reason,
+//   error?
+// }
 // =====================================================
 
 export async function callLLM(
   prompt,
   model_id = DEFAULT_MODEL_ID
 ) {
-
-  // ===================================================
-  // MODEL RESOLUTION
-  // ===================================================
-
   const finalModelId =
     modelMap[model_id]
       ? model_id
       : DEFAULT_MODEL_ID;
 
-
-  if (
-    finalModelId !== model_id
-  ) {
-
+  if (finalModelId !== model_id) {
     console.warn(
-      `⚠️ Unknown model_id=${model_id}, fallback → ${finalModelId}`
+      `⚠️ Unknown model_id=${model_id}, ` +
+      `fallback → ${finalModelId}`
     );
   }
 
-
-  const info =
-    modelMap[
-      finalModelId
-    ];
-
-
   const model =
-    info?.model ||
+    modelMap[finalModelId]?.model ||
     DEFAULT_MODEL;
-
 
   console.log(
     `⚡ callLLM → model_id=${finalModelId} | model=${model}`
   );
 
-
   try {
-
-    const res =
+    const result =
       await callOllamaRaw(
         prompt,
         model
       );
 
-
     return {
-      provider:
-        "ollama",
+      provider: "ollama",
 
       model_id:
         finalModelId,
 
       model:
-        res.model ||
-        model,
+        result.model || model,
 
       latency:
-        res.latency,
+        result.latency,
 
       answer:
-        res.content ||
-        "",
+        result.content || "",
 
       usage: {
         prompt_tokens:
-          res.promptTokens,
+          result.promptTokens,
 
         output_tokens:
-          res.outputTokens
+          result.outputTokens
       },
 
       done:
-        res.done,
+        result.done,
 
       done_reason:
-        res.doneReason
+        result.doneReason
     };
 
-
   } catch (err) {
-
     console.error(
       "❌ LLM error:",
       err.message
     );
 
+    // ===============================================
+    // DETERMINISTIC FALLBACK CONTRACT
+    //
+    // Không throw ra ngoài.
+    // Scholar/Fund service nhận answer="" và tự dùng
+    // deterministic answer hiện có.
+    // ===============================================
 
-    /**
-     * Không làm crash Scholar/Fund Agent.
-     *
-     * Scholar/Fund Agent phía trên có thể sử dụng
-     * deterministic fallback nếu LLM gặp lỗi.
-     */
     return {
-      provider:
-        "ollama",
+      provider: "ollama",
 
       model_id:
         finalModelId,
@@ -774,11 +436,8 @@ export async function callLLM(
         "",
 
       usage: {
-        prompt_tokens:
-          null,
-
-        output_tokens:
-          null
+        prompt_tokens: null,
+        output_tokens: null
       },
 
       done:
@@ -802,7 +461,6 @@ export async function callLLMJson(
   prompt,
   model_id = DEFAULT_MODEL_ID
 ) {
-
   const strictPrompt = `
 You MUST return valid JSON only.
 
@@ -816,42 +474,34 @@ Rules:
 ${prompt}
 `.trim();
 
-
-  const res =
+  const result =
     await callLLM(
       strictPrompt,
       model_id
     );
 
-
-  if (!res?.answer) {
-
+  if (!result?.answer) {
     throw new Error(
-      res?.error ||
+      result?.error ||
       "LLM returned empty response"
     );
   }
 
-
   const parsed =
     safeJSONParse(
-      res.answer
+      result.answer
     );
 
-
-  if (!parsed) {
-
+  if (parsed === null) {
     console.error(
       "❌ JSON parse failed. Raw:",
-      res.answer
+      result.answer
     );
-
 
     throw new Error(
       "LLM JSON parse failed"
     );
   }
-
 
   return parsed;
 }
@@ -859,25 +509,20 @@ ${prompt}
 
 // =====================================================
 // QUERY REWRITE
+//
+// Giữ nguyên export và hành vi fallback.
 // =====================================================
 
 export async function rewriteQueryLLM(
   question,
   model_id = DEFAULT_MODEL_ID
 ) {
+  const originalQuestion =
+    String(question || "").trim();
 
-  if (
-    !question ||
-    !String(question).trim()
-  ) {
+  if (!originalQuestion) {
     return [];
   }
-
-
-  const originalQuestion =
-    String(question)
-      .trim();
-
 
   const prompt = `
 Rewrite the following user query into 3 optimized academic search queries.
@@ -909,52 +554,36 @@ Return exactly this JSON structure:
 }
 `.trim();
 
-
   try {
-
     const data =
       await callLLMJson(
         prompt,
         model_id
       );
 
-
     const queries =
-      Array.isArray(
-        data?.queries
-      )
+      Array.isArray(data?.queries)
         ? data.queries
             .filter(
               q =>
-                typeof q ===
-                  "string" &&
+                typeof q === "string" &&
                 q.trim()
             )
             .map(
-              q =>
-                q.trim()
+              q => q.trim()
             )
-            .slice(
-              0,
-              3
-            )
+            .slice(0, 3)
         : [];
-
 
     return queries.length
       ? queries
-      : [
-          originalQuestion
-        ];
-
+      : [originalQuestion];
 
   } catch (err) {
-
     console.warn(
       "⚠️ rewrite fallback:",
       err.message
     );
-
 
     return [
       originalQuestion
@@ -965,6 +594,8 @@ Return exactly this JSON structure:
 
 // =====================================================
 // RERANK
+//
+// Giữ nguyên export và hành vi.
 // =====================================================
 
 export async function rerankLLM(
@@ -972,7 +603,6 @@ export async function rerankLLM(
   items,
   model_id = DEFAULT_MODEL_ID
 ) {
-
   if (
     !Array.isArray(items) ||
     !items.length
@@ -980,75 +610,48 @@ export async function rerankLLM(
     return items || [];
   }
 
-
-  /**
-   * Chỉ đưa tối đa 15 candidate vào LLM.
-   */
   const candidates =
-    items.slice(
-      0,
-      15
-    );
-
+    items.slice(0, 15);
 
   const itemText =
     candidates
-      .map(
-        (it, i) => {
+      .map((item, index) => {
+        const title =
+          item?.title ||
+          item?.name ||
+          item?.acronym ||
+          "Untitled";
 
-          const title =
-            it?.title ||
-            it?.name ||
-            it?.acronym ||
-            "Untitled";
+        let topics = "";
 
+        if (Array.isArray(item?.topics)) {
+          topics =
+            item.topics.join(", ");
 
-          const topics =
-            Array.isArray(
-              it?.topics
-            )
-              ? it.topics.join(
-                  ", "
-                )
+        } else if (
+          Array.isArray(item?.areas)
+        ) {
+          topics =
+            item.areas.join(", ");
 
-              : Array.isArray(
-                  it?.areas
-                )
-                ? it.areas.join(
-                    ", "
-                  )
+        } else if (
+          Array.isArray(item?.categories)
+        ) {
+          topics =
+            item.categories.join(", ");
 
-                : Array.isArray(
-                    it?.categories
-                  )
-                  ? it.categories.join(
-                      ", "
-                    )
-
-                  : Array.isArray(
-                      it?.fields
-                    )
-                    ? it.fields.join(
-                        ", "
-                      )
-
-                    : "";
-
-
-          return (
-            `[${i}] ${title}` +
-            (
-              topics
-                ? ` | ${topics}`
-                : ""
-            )
-          );
+        } else if (
+          Array.isArray(item?.fields)
+        ) {
+          topics =
+            item.fields.join(", ");
         }
-      )
-      .join(
-        "\n"
-      );
 
+        return topics
+          ? `[${index}] ${title} | ${topics}`
+          : `[${index}] ${title}`;
+      })
+      .join("\n");
 
   const prompt = `
 You are an academic search reranking system.
@@ -1068,82 +671,52 @@ Example:
 [2, 0, 1]
 `.trim();
 
-
   try {
-
     const order =
       await callLLMJson(
         prompt,
         model_id
       );
 
-
-    if (
-      !Array.isArray(order)
-    ) {
+    if (!Array.isArray(order)) {
       return items;
     }
-
 
     const used =
       new Set();
 
+    const reranked = [];
 
-    const reranked =
-      order
-        .filter(
-          index =>
-            Number.isInteger(
-              index
-            ) &&
-            index >= 0 &&
-            index <
-              candidates.length &&
-            !used.has(
-              index
-            )
-        )
-        .map(
-          index => {
-
-            used.add(
-              index
-            );
-
-            return candidates[
-              index
-            ];
-          }
+    for (const index of order) {
+      if (
+        Number.isInteger(index) &&
+        index >= 0 &&
+        index < candidates.length &&
+        !used.has(index)
+      ) {
+        used.add(index);
+        reranked.push(
+          candidates[index]
         );
+      }
+    }
 
-
-    /**
-     * Nếu LLM bỏ sót candidate,
-     * giữ lại theo thứ tự ranking cũ.
-     */
+    // Candidate bị LLM bỏ sót:
+    // giữ ranking ban đầu.
     candidates.forEach(
       (item, index) => {
-
-        if (
-          !used.has(index)
-        ) {
-          reranked.push(
-            item
-          );
+        if (!used.has(index)) {
+          reranked.push(item);
         }
       }
     );
 
-
-    /**
-     * Nếu đầu vào > 15 items,
-     * giữ nguyên phần còn lại.
-     */
+    // Nếu input > 15:
+    // giữ nguyên phần còn lại.
     if (
       items.length >
       candidates.length
     ) {
-
       reranked.push(
         ...items.slice(
           candidates.length
@@ -1151,17 +724,13 @@ Example:
       );
     }
 
-
     return reranked;
 
-
   } catch (err) {
-
     console.warn(
       "⚠️ rerank fallback:",
       err.message
     );
-
 
     return items;
   }

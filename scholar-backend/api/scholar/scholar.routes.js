@@ -1,11 +1,7 @@
 // api/scholar/scholar.routes.js
 
 import express from "express";
-
-import {
-  runScholarAgent
-} from "../../agents/scholar/scholar.service.js";
-
+import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
 
 const router = express.Router();
 
@@ -14,84 +10,221 @@ const router = express.Router();
 // CONFIG
 // =====================================================
 
-// Scholar Agent hiện chỉ sử dụng LLM mới.
-// Không nhận model cũ từ Portal.
-const SCHOLAR_MODEL_ID =
-  "qwen2.5-14b";
+const SCHOLAR_MODEL_ID = "qwen2.5-14b";
+
+const MAX_TOPK = 5;
+const MAX_HISTORY = 10;
+
+/**
+ * Khoảng thời gian giữ kết quả vừa hoàn thành.
+ *
+ * Mục đích:
+ * - chặn retry xảy ra ngay sau khi request đầu tiên vừa xong
+ * - tránh Portal gọi / và /stream gần như đồng thời nhưng lệch vài ms
+ *
+ * Đây KHÔNG phải cache dài hạn.
+ */
+const RECENT_RESULT_TTL_MS =
+  Number(process.env.SCHOLAR_DEDUP_TTL_MS) || 5000;
 
 
 // =====================================================
-// UTILS
+// IN-FLIGHT DEDUPLICATION
 // =====================================================
 
-function safeTopk(topk) {
-  const n =
-    Number(topk);
+/**
+ * key -> Promise
+ *
+ * Khi một Scholar request đang chạy, các request giống hệt
+ * sẽ await cùng Promise thay vì chạy runScholarAgent() lần nữa.
+ */
+const inFlight = new Map();
 
-  return (
-    Number.isFinite(n) &&
-    n > 0
-  )
-    ? Math.min(
-        Math.floor(n),
-        5
-      )
-    : 5;
+
+/**
+ * Cache rất ngắn cho request vừa hoàn thành.
+ *
+ * key -> {
+ *   result,
+ *   expiresAt
+ * }
+ */
+const recentResults = new Map();
+
+
+// =====================================================
+// REQUEST UTILS
+// =====================================================
+
+function safeTopk(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n) || n <= 0) {
+    return MAX_TOPK;
+  }
+
+  return Math.min(
+    Math.floor(n),
+    MAX_TOPK
+  );
 }
 
 
-// =====================================================
-// QUESTION
-// =====================================================
-
 function getQuestion(body = {}) {
-  const {
-    question,
-    prompt,
-    query,
-    message
-  } = body;
-
-
-  const rawInput =
-    question ??
-    prompt ??
-    query ??
-    message ??
+  const raw =
+    body.question ??
+    body.prompt ??
+    body.query ??
+    body.message ??
     "";
 
-
-  return typeof rawInput === "string"
-    ? rawInput.trim()
+  return typeof raw === "string"
+    ? raw.trim()
     : "";
 }
 
 
-// =====================================================
-// HISTORY FROM PORTAL
-// =====================================================
-
 function getHistory(context = {}) {
-  if (
-    !Array.isArray(
-      context?.history
-    )
-  ) {
+  if (!Array.isArray(context?.history)) {
     return [];
   }
 
-
   return context.history
     .filter(
-      h =>
-        h &&
-        ["user", "assistant"].includes(
-          h.role
-        ) &&
-        typeof h.content === "string" &&
-        h.content.trim()
+      item =>
+        item &&
+        ["user", "assistant"].includes(item.role) &&
+        typeof item.content === "string" &&
+        item.content.trim()
     )
-    .slice(-10);
+    .slice(-MAX_HISTORY);
+}
+
+
+/**
+ * Session là thành phần quan trọng nhất của dedup key.
+ *
+ * Nếu Portal không gửi session_id, fallback sang user/user_id.
+ * Không dùng một key global vì hai người khác nhau có thể hỏi
+ * cùng một câu hỏi.
+ */
+function getRequestIdentity(body = {}) {
+  return String(
+    body.session_id ??
+    body.user_id ??
+    body.user ??
+    "anonymous"
+  ).trim();
+}
+
+
+function normalizeKeyPart(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+
+function buildDedupKey({
+  body,
+  question,
+  topk
+}) {
+  const identity =
+    getRequestIdentity(body);
+
+  return [
+    normalizeKeyPart(identity),
+    normalizeKeyPart(question),
+    SCHOLAR_MODEL_ID,
+    String(topk)
+  ].join("::");
+}
+
+
+// =====================================================
+// LOGGING
+// =====================================================
+
+function logRequest({
+  sessionId,
+  question,
+  topk,
+  history,
+  context,
+  endpoint
+}) {
+  console.log(
+    "\n========== SCHOLAR REQUEST =========="
+  );
+
+  console.log("🔗 ENDPOINT:", endpoint);
+  console.log(
+    "🆔 SESSION:",
+    sessionId || "(none)"
+  );
+  console.log("❓ QUESTION:", question);
+  console.log("🤖 MODEL:", SCHOLAR_MODEL_ID);
+  console.log("🔢 TOPK:", topk);
+  console.log("🧠 MEMORY ITEMS:", history.length);
+
+  console.log(
+    "👤 USER:",
+    context?.user_profile?.full_name ||
+    "(none)"
+  );
+
+  console.log(
+    "📌 PROJECT:",
+    context?.project_info?.name ||
+    context?.project ||
+    "(none)"
+  );
+
+  console.log(
+    "📄 DOCUMENTS:",
+    Array.isArray(
+      context?.extra_data?.document
+    )
+      ? context.extra_data.document.length
+      : 0
+  );
+
+  console.log(
+    "=====================================\n"
+  );
+}
+
+
+// =====================================================
+// META
+// =====================================================
+
+function buildMeta(result) {
+  return {
+    response_time_ms:
+      result?.responseTimeMs ?? null,
+
+    domain:
+      result?.domain || "general",
+
+    model_id:
+      result?.model?.model_id ||
+      SCHOLAR_MODEL_ID,
+
+    model:
+      result?.model?.model || null,
+
+    llm_latency_ms:
+      result?.model?.latency ?? null,
+
+    prompt_tokens:
+      result?.model?.prompt_tokens ?? null,
+
+    output_tokens:
+      result?.model?.output_tokens ?? null
+  };
 }
 
 
@@ -109,11 +242,9 @@ function applyFirstTurnGreeting(
       ? answer.trim()
       : "";
 
-
   if (!finalAnswer) {
     return "";
   }
-
 
   const fullName =
     context
@@ -122,33 +253,20 @@ function applyFirstTurnGreeting(
       ?.trim() ||
     "";
 
-
-  const isFirstTurn =
-    history.length === 0;
-
-
   if (
-    !isFirstTurn ||
+    history.length !== 0 ||
     !fullName
   ) {
     return finalAnswer;
   }
 
-
-  const normalized =
-    finalAnswer
-      .toLowerCase();
-
-
-  // Tránh LLM và backend cùng chào.
   if (
-    normalized.startsWith(
-      "xin chào"
-    )
+    finalAnswer
+      .toLowerCase()
+      .startsWith("xin chào")
   ) {
     return finalAnswer;
   }
-
 
   return (
     `Xin chào ${fullName},\n\n` +
@@ -158,227 +276,223 @@ function applyFirstTurnGreeting(
 
 
 // =====================================================
-// DEBUG REQUEST
+// DEDUP CORE
 // =====================================================
 
-function logRequest({
-  session_id,
+function getRecentResult(key) {
+  const cached =
+    recentResults.get(key);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() >= cached.expiresAt) {
+    recentResults.delete(key);
+    return null;
+  }
+
+  return cached.result;
+}
+
+
+function saveRecentResult(key, result) {
+  recentResults.set(key, {
+    result,
+    expiresAt:
+      Date.now() + RECENT_RESULT_TTL_MS
+  });
+
+  /**
+   * Không cần timer riêng cho từng request.
+   * Cleanup opportunistic để tránh Map tăng mãi.
+   */
+  if (recentResults.size > 100) {
+    const now = Date.now();
+
+    for (
+      const [cachedKey, cached]
+      of recentResults
+    ) {
+      if (now >= cached.expiresAt) {
+        recentResults.delete(cachedKey);
+      }
+    }
+  }
+}
+
+
+/**
+ * Đây là điểm DUY NHẤT route gọi runScholarAgent().
+ *
+ * /, /ask và /stream đều phải đi qua hàm này.
+ */
+async function runDeduplicated({
+  req,
   question,
   topk,
-  history,
-  context
+  history
 }) {
-  console.log(
-    "\n========== SCHOLAR REQUEST =========="
-  );
+  const body =
+    req.body || {};
 
+  const key =
+    buildDedupKey({
+      body,
+      question,
+      topk
+    });
 
-  console.log(
-    "🆔 SESSION:",
-    session_id || "(none)"
-  );
+  // -----------------------------------------------
+  // 1. Request vừa hoàn thành
+  // -----------------------------------------------
 
+  const recent =
+    getRecentResult(key);
 
-  console.log(
-    "❓ QUESTION:",
-    question
-  );
+  if (recent) {
+    console.log(
+      "♻️ SCHOLAR DEDUP: recent result reused"
+    );
 
+    return recent;
+  }
 
-  console.log(
-    "🤖 MODEL:",
-    SCHOLAR_MODEL_ID
-  );
+  // -----------------------------------------------
+  // 2. Request đang chạy
+  // -----------------------------------------------
 
+  const running =
+    inFlight.get(key);
 
-  console.log(
-    "🔢 TOPK:",
-    topk
-  );
+  if (running) {
+    console.log(
+      "🔁 SCHOLAR DEDUP: joining in-flight request"
+    );
 
+    return await running;
+  }
 
-  console.log(
-    "🧠 MEMORY ITEMS:",
-    history.length
-  );
-
-
-  console.log(
-    "👤 USER:",
-    context
-      ?.user_profile
-      ?.full_name ||
-    "(none)"
-  );
-
-
-  console.log(
-    "📌 PROJECT:",
-    context
-      ?.project_info
-      ?.name ||
-    context?.project ||
-    "(none)"
-  );
-
+  // -----------------------------------------------
+  // 3. Request mới
+  // -----------------------------------------------
 
   console.log(
-    "📄 DOCUMENTS:",
-    Array.isArray(
-      context
-        ?.extra_data
-        ?.document
-    )
-      ? context.extra_data.document.length
-      : 0
+    "🆕 SCHOLAR DEDUP: starting new request"
   );
 
+  const promise =
+    runScholarAgent(
+      req,
+      question,
+      SCHOLAR_MODEL_ID,
+      topk,
+      history
+    );
 
-  console.log(
-    "=====================================\n"
+  inFlight.set(
+    key,
+    promise
   );
+
+  try {
+    const result =
+      await promise;
+
+    saveRecentResult(
+      key,
+      result
+    );
+
+    return result;
+
+  } finally {
+    /**
+     * Chỉ xóa nếu Map vẫn chứa chính Promise này.
+     */
+    if (
+      inFlight.get(key) === promise
+    ) {
+      inFlight.delete(key);
+    }
+  }
 }
 
 
 // =====================================================
-// RESPONSE META
+// PREPARE SCHOLAR REQUEST
 // =====================================================
 
-function buildMeta(result) {
+function prepareRequest(req) {
+  const body =
+    req.body || {};
+
+  const context =
+    body.context || {};
+
+  const question =
+    getQuestion(body);
+
+  const topk =
+    safeTopk(body.topk);
+
+  const history =
+    getHistory(context);
+
   return {
-    response_time_ms:
-      result?.responseTimeMs ??
-      null,
-
-    domain:
-      result?.domain ||
-      "general",
-
-    model_id:
-      result?.model?.model_id ||
-      SCHOLAR_MODEL_ID,
-
-    model:
-      result?.model?.model ||
-      null,
-
-    llm_latency_ms:
-      result?.model?.latency ??
-      null,
-
-    prompt_tokens:
-      result?.model?.prompt_tokens ??
-      null,
-
-    output_tokens:
-      result?.model?.output_tokens ??
-      null
+    body,
+    context,
+    question,
+    topk,
+    history,
+    sessionId:
+      body.session_id ?? null
   };
 }
 
 
 // =====================================================
-// CORE ASK
+// NORMAL JSON RESPONSE
+// Used by POST / and POST /ask
 // =====================================================
 
-async function handleAsk(
-  req,
-  res
-) {
+async function handleAsk(req, res) {
   try {
+    const prepared =
+      prepareRequest(req);
 
     const {
-      session_id,
+      body,
+      context,
+      question,
       topk,
-      context = {}
-    } = req.body || {};
+      history,
+      sessionId
+    } = prepared;
 
-
-    // =================================================
-    // QUESTION
-    // =================================================
-
-    const finalQuestion =
-      getQuestion(
-        req.body || {}
-      );
-
-
-    if (!finalQuestion) {
-      return res
-        .status(400)
-        .json({
-          status:
-            "error",
-
-          error:
-            "Missing question"
-        });
+    if (!question) {
+      return res.status(400).json({
+        status: "error",
+        error: "Missing question"
+      });
     }
 
-
-    // =================================================
-    // TOP K
-    // =================================================
-
-    const finalTopk =
-      safeTopk(topk);
-
-
-    // =================================================
-    // HISTORY
-    // =================================================
-
-    const history =
-      getHistory(context);
-
-
-    // =================================================
-    // DEBUG
-    // =================================================
-
     logRequest({
-      session_id,
-      question:
-        finalQuestion,
-      topk:
-        finalTopk,
+      sessionId,
+      question,
+      topk,
       history,
-      context
+      context,
+      endpoint: req.originalUrl
     });
 
-
-    // =================================================
-    // RUN SCHOLAR AGENT
-    //
-    // Luồng duy nhất:
-    //
-    // route
-    //   ↓
-    // scholar.service.js
-    //   ↓
-    // runAgent / Qdrant
-    //   ↓
-    // buildScholarPrompt
-    //   ↓
-    // shared/llm.js
-    //   ↓
-    // qwen2.5:14b-instruct-ctx16k
-    // =================================================
-
     const result =
-      await runScholarAgent(
+      await runDeduplicated({
         req,
-        finalQuestion,
-        SCHOLAR_MODEL_ID,
-        finalTopk,
+        question,
+        topk,
         history
-      );
-
-
-    // =================================================
-    // GREETING
-    // =================================================
+      });
 
     const finalAnswer =
       applyFirstTurnGreeting(
@@ -387,36 +501,9 @@ async function handleAsk(
         history
       );
 
-
-    const fullName =
-      context
-        ?.user_profile
-        ?.full_name
-        ?.trim() ||
-      "";
-
-
-    console.log(
-      "👤 FULL NAME:",
-      fullName ||
-      "(empty)"
-    );
-
-
-    console.log(
-      "🆕 FIRST TURN:",
-      history.length === 0
-    );
-
-
-    // =================================================
-    // RESPONSE
-    // =================================================
-
     return res.json({
       session_id:
-        session_id ??
-        null,
+        sessionId,
 
       status:
         "success",
@@ -427,40 +514,31 @@ async function handleAsk(
       answer:
         finalAnswer,
 
-      // Sources chỉ build tại service.
       sources:
-        result?.sources ||
-        [],
+        result?.sources || [],
 
       meta:
         buildMeta(result)
     });
 
-
   } catch (err) {
-
     console.error(
       "❌ Scholar error:",
       err
     );
 
-
-    return res
-      .status(500)
-      .json({
-        status:
-          "error",
-
-        error:
-          err?.message ||
-          "Internal error"
-      });
+    return res.status(500).json({
+      status: "error",
+      error:
+        err?.message ||
+        "Internal error"
+    });
   }
 }
 
 
 // =====================================================
-// ROUTES
+// POST /
 // =====================================================
 
 router.post(
@@ -469,6 +547,10 @@ router.post(
 );
 
 
+// =====================================================
+// POST /ask
+// =====================================================
+
 router.post(
   "/ask",
   handleAsk
@@ -476,159 +558,113 @@ router.post(
 
 
 // =====================================================
-// DATA API
+// GET /data
 // =====================================================
 
 router.get(
   "/data",
   async (req, res) => {
     try {
-
       const {
         type,
         limit = 20,
         page = 1
       } = req.query;
 
-
-      const t =
+      const normalizedType =
         String(type || "")
+          .trim()
           .toLowerCase();
-
 
       if (
         ![
           "conferences",
           "journals"
-        ].includes(t)
+        ].includes(normalizedType)
       ) {
-        return res
-          .status(400)
-          .json({
-            status:
-              "error",
-
-            error:
-              "type must be 'conferences' or 'journals'"
-          });
+        return res.status(400).json({
+          status: "error",
+          error:
+            "type must be 'conferences' or 'journals'"
+        });
       }
 
+      // ---------------------------------------------
+      // Pagination
+      // ---------------------------------------------
 
-      // =================================================
-      // PAGINATION
-      // =================================================
-
-      const parsedLimit =
+      const rawLimit =
         Number(limit);
-
 
       const finalLimit =
         Math.min(
-          Number.isFinite(
-            parsedLimit
-          ) &&
-          parsedLimit > 0
-            ? Math.floor(
-                parsedLimit
-              )
+          Number.isFinite(rawLimit) &&
+          rawLimit > 0
+            ? Math.floor(rawLimit)
             : 20,
           100
         );
 
-
-      const parsedPage =
+      const rawPage =
         Number(page);
 
-
       const finalPage =
-        Number.isFinite(
-          parsedPage
-        ) &&
-        parsedPage > 0
-          ? Math.floor(
-              parsedPage
-            )
+        Number.isFinite(rawPage) &&
+        rawPage > 0
+          ? Math.floor(rawPage)
           : 1;
-
 
       const skip =
         (finalPage - 1) *
         finalLimit;
 
+      // ---------------------------------------------
+      // MongoDB
+      // ---------------------------------------------
 
-      // =================================================
-      // DATABASE
-      // =================================================
-
-      const {
-        getDb
-      } = await import(
-        "../../db/mongo.js"
-      );
-
+      const { getDb } =
+        await import(
+          "../../db/mongo.js"
+        );
 
       const db =
         await getDb();
 
-
       const collectionName =
-        t === "conferences"
+        normalizedType === "conferences"
           ? "conference"
           : "journal";
 
-
-      const col =
+      const collection =
         db.collection(
           collectionName
         );
 
-
-      const [
-        items,
-        total
-      ] =
+      const [items, total] =
         await Promise.all([
-
-          col
+          collection
             .find({})
             .skip(skip)
             .limit(finalLimit)
             .toArray(),
 
-          col.countDocuments({})
+          collection
+            .countDocuments({})
         ]);
 
+      // ---------------------------------------------
+      // Response mapping
+      // ---------------------------------------------
 
-      let data = [];
-
-
-      // =================================================
-      // CONFERENCES
-      // =================================================
-
-      if (
-        t === "conferences"
-      ) {
-        data =
-          items.map(
-            c => ({
-              id:
-                c._id,
-
-              name:
-                c.name,
-
-              acronym:
-                c.acronym,
-
-              year:
-                c.year,
-
-              country:
-                c.country,
-
-              deadline:
-                c.deadline,
+      const data =
+        normalizedType === "conferences"
+          ? items.map(c => ({
+              id: c._id,
+              name: c.name,
+              acronym: c.acronym,
+              year: c.year,
+              country: c.country,
+              deadline: c.deadline,
 
               url:
                 c.cfp_link ||
@@ -636,213 +672,119 @@ router.get(
                 c.link ||
                 c.website ||
                 ""
-            })
-          );
-      }
+            }))
 
-
-      // =================================================
-      // JOURNALS
-      // =================================================
-
-      if (
-        t === "journals"
-      ) {
-        data =
-          items.map(
-            j => ({
-              id:
-                j._id,
-
-              title:
-                j.title,
-
-              publisher:
-                j.publisher,
+          : items.map(j => ({
+              id: j._id,
+              title: j.title,
+              publisher: j.publisher,
 
               quartile:
                 j.sjr_best_quartile,
 
-              sjr:
-                j.sjr,
-
-              h_index:
-                j.h_index,
+              sjr: j.sjr,
+              h_index: j.h_index,
 
               url:
                 j.scimago_link ||
                 j.url ||
                 ""
-            })
-          );
-      }
-
-
-      // =================================================
-      // RESPONSE
-      // =================================================
+            }));
 
       return res.json({
-        status:
-          "success",
+        status: "success",
 
         type:
-          t,
+          normalizedType,
 
         pagination: {
           total,
-
-          page:
-            finalPage,
-
-          limit:
-            finalLimit,
+          page: finalPage,
+          limit: finalLimit,
 
           total_pages:
             Math.ceil(
-              total /
-              finalLimit
+              total / finalLimit
             )
         },
 
         data
       });
 
-
     } catch (err) {
-
       console.error(
         "❌ /data error:",
         err
       );
 
+      return res.status(500).json({
+        status: "error",
 
-      return res
-        .status(500)
-        .json({
-          status:
-            "error",
-
-          error:
-            err?.message ||
-            "Internal error"
-        });
+        error:
+          err?.message ||
+          "Internal error"
+      });
     }
   }
 );
 
 
 // =====================================================
-// STREAM
+// POST /stream
 //
-// QUAN TRỌNG:
-// Không import / gọi scholar.stream.js cũ.
+// Vẫn giữ contract SSE hiện tại.
 //
-// Endpoint này sử dụng chính Scholar Agent mới.
-// Vì callLLM hiện dùng stream:false,
-// đây là SSE response sau khi LLM hoàn thành,
-// chưa phải token-by-token streaming.
+// LƯU Ý:
+// Đây chưa phải token-by-token streaming.
+// Nó sử dụng cùng Scholar result với / và /ask.
+//
+// Nếu cùng request đang chạy:
+// → JOIN Promise hiện có
+// → KHÔNG gọi Qwen lần thứ hai.
 // =====================================================
 
 router.post(
   "/stream",
   async (req, res) => {
-
     try {
+      const prepared =
+        prepareRequest(req);
 
       const {
-        session_id,
+        context,
+        question,
         topk,
-        context = {}
-      } = req.body || {};
+        history,
+        sessionId
+      } = prepared;
 
+      // ---------------------------------------------
+      // SSE headers
+      // ---------------------------------------------
 
-      // =================================================
-      // QUESTION
-      // =================================================
-
-      const finalQuestion =
-        getQuestion(
-          req.body || {}
-        );
-
-
-      if (!finalQuestion) {
-
-        res.status(400);
-
-        res.setHeader(
-          "Content-Type",
-          "text/event-stream; charset=utf-8"
-        );
-
-
-        res.write(
-          `data: ${JSON.stringify({
-            status:
-              "error",
-
-            error:
-              "Missing question"
-          })}\n\n`
-        );
-
-
-        res.write(
-          "data: [DONE]\n\n"
-        );
-
-
-        return res.end();
-      }
-
-
-      // =================================================
-      // TOP K
-      // =================================================
-
-      const finalTopk =
-        safeTopk(topk);
-
-
-      // =================================================
-      // HISTORY
-      // =================================================
-
-      const history =
-        getHistory(context);
-
-
-      // =================================================
-      // SSE HEADERS
-      // =================================================
-
-      res.status(200);
-
+      res.status(
+        question ? 200 : 400
+      );
 
       res.setHeader(
         "Content-Type",
         "text/event-stream; charset=utf-8"
       );
 
-
       res.setHeader(
         "Cache-Control",
         "no-cache, no-transform"
       );
-
 
       res.setHeader(
         "Connection",
         "keep-alive"
       );
 
-
       res.setHeader(
         "X-Accel-Buffering",
         "no"
       );
-
 
       if (
         typeof res.flushHeaders ===
@@ -851,69 +793,54 @@ router.post(
         res.flushHeaders();
       }
 
+      // ---------------------------------------------
+      // Validation
+      // ---------------------------------------------
 
-      // =================================================
-      // DEBUG
-      // =================================================
-
-      console.log(
-        "\n========== SCHOLAR STREAM REQUEST =========="
-      );
-
-
-      console.log(
-        "🆔 SESSION:",
-        session_id ||
-        "(none)"
-      );
-
-
-      console.log(
-        "❓ QUESTION:",
-        finalQuestion
-      );
-
-
-      console.log(
-        "🤖 MODEL:",
-        SCHOLAR_MODEL_ID
-      );
-
-
-      console.log(
-        "🔢 TOPK:",
-        finalTopk
-      );
-
-
-      console.log(
-        "🧠 MEMORY ITEMS:",
-        history.length
-      );
-
-
-      console.log(
-        "============================================\n"
-      );
-
-
-      // =================================================
-      // RUN SAME NEW SCHOLAR AGENT
-      // =================================================
-
-      const result =
-        await runScholarAgent(
-          req,
-          finalQuestion,
-          SCHOLAR_MODEL_ID,
-          finalTopk,
-          history
+      if (!question) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            status: "error",
+            error: "Missing question"
+          })}\n\n`
         );
 
+        res.write(
+          "data: [DONE]\n\n"
+        );
 
-      // =================================================
-      // GREETING
-      // =================================================
+        return res.end();
+      }
+
+      // ---------------------------------------------
+      // Logging
+      // ---------------------------------------------
+
+      logRequest({
+        sessionId,
+        question,
+        topk,
+        history,
+        context,
+        endpoint: req.originalUrl
+      });
+
+      console.log(
+        "🌊 SSE MODE: buffered result"
+      );
+
+      // ---------------------------------------------
+      // SAME DEDUP CORE AS / AND /ask
+      // ---------------------------------------------
+
+      const result =
+        await runDeduplicated({
+          req,
+          question,
+          topk,
+          history
+        });
 
       const finalAnswer =
         applyFirstTurnGreeting(
@@ -922,76 +849,57 @@ router.post(
           history
         );
 
-
-      // =================================================
-      // SSE CONTENT
-      // =================================================
+      // ---------------------------------------------
+      // Content
+      // ---------------------------------------------
 
       res.write(
         `data: ${JSON.stringify({
-          type:
-            "content",
-
-          content:
-            finalAnswer
+          type: "content",
+          content: finalAnswer
         })}\n\n`
       );
 
-
-      // =================================================
-      // SSE SOURCES
-      // =================================================
+      // ---------------------------------------------
+      // Sources
+      // ---------------------------------------------
 
       res.write(
         `data: ${JSON.stringify({
-          type:
-            "sources",
-
+          type: "sources",
           sources:
-            result?.sources ||
-            []
+            result?.sources || []
         })}\n\n`
       );
 
-
-      // =================================================
-      // SSE META
-      // =================================================
+      // ---------------------------------------------
+      // Meta
+      // ---------------------------------------------
 
       res.write(
         `data: ${JSON.stringify({
-          type:
-            "meta",
-
-          meta:
-            buildMeta(result)
+          type: "meta",
+          meta: buildMeta(result)
         })}\n\n`
       );
 
-
-      // =================================================
-      // DONE
-      // =================================================
+      // ---------------------------------------------
+      // Done
+      // ---------------------------------------------
 
       res.write(
         "data: [DONE]\n\n"
       );
 
-
       return res.end();
 
-
     } catch (err) {
-
       console.error(
         "❌ Stream Scholar error:",
         err
       );
 
-
-      if (
-        !res.headersSent
-      ) {
+      if (!res.headersSent) {
         res.status(500);
 
         res.setHeader(
@@ -1000,11 +908,9 @@ router.post(
         );
       }
 
-
       res.write(
         `data: ${JSON.stringify({
-          type:
-            "error",
+          type: "error",
 
           error:
             err?.message ||
@@ -1012,11 +918,9 @@ router.post(
         })}\n\n`
       );
 
-
       res.write(
         "data: [DONE]\n\n"
       );
-
 
       return res.end();
     }
