@@ -1,9 +1,24 @@
 // agents/scholar/scholar.service.js
+
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
+
 import {
   normalizeHistory
 } from "../shared/memory.js";
+
+import {
+  buildLLMContext
+} from "../shared/context.js";
+
+import {
+  buildScholarPrompt
+} from "./scholar.prompt.js";
+
+import {
+  callLLM
+} from "../shared/llm.js";
+
 
 export async function runScholarAgent(
   req,
@@ -15,99 +30,91 @@ export async function runScholarAgent(
   const start = Date.now();
 
   try {
-    // ================= MEMORY =================
-    const normalizedHistory = normalizeHistory(history);
+    // =====================================================
+    // 1. MEMORY / CONTEXT
+    // =====================================================
 
-    console.log("\n========== SCHOLAR AGENT ==========");
-    console.log("🧠 HISTORY ITEMS:", normalizedHistory.length);
-    console.log("🔎 SEARCH QUESTION:", question);
-    console.log("===================================\n");
+    const normalizedHistory =
+      normalizeHistory(history);
 
-    // ================= SEARCH =================
-    const result = await runAgent(question, topk);
+    const llmContext =
+      buildLLMContext(req);
 
-    const conferences = result?.conferences || [];
-    const journals = result?.journals || [];
+    // Ưu tiên history đã normalize từ route/service
+    // để tránh hai nguồn history không đồng nhất
+    llmContext.history = normalizedHistory;
 
-    console.log("📊 SEARCH:", conferences.length, journals.length);
+    console.log(
+      "\n========== SCHOLAR AGENT =========="
+    );
 
-    // ================= NO DATA =================
-    if (!conferences.length && !journals.length) {
-      return {
-        answer: "Không tìm thấy dữ liệu phù hợp trong hệ thống.",
-        conferences: [],
-        journals: [],
-        sources: [],
-        domain: "empty",
-        responseTimeMs: Date.now() - start
-      };
-    }
+    console.log(
+      "🧠 HISTORY ITEMS:",
+      llmContext.history.length
+    );
 
-    const total = conferences.length + journals.length;
+    console.log(
+      "👤 PROFILE:",
+      llmContext.profile?.full_name || "(none)"
+    );
 
-    let answer = result?.answer || "";
+    console.log(
+      "📌 PROJECT:",
+      llmContext.project?.name || "(none)"
+    );
 
-    // ================= 🔥 SMART ANSWER =================
-    if (!answer || answer.length < 20) {
+    console.log(
+      "📄 DOCUMENTS:",
+      llmContext.docs.length
+    );
 
-      // ================= BASIC =================
-      if (conferences.length && journals.length) {
-        answer = `Tìm thấy ${total} kết quả gồm hội thảo và tạp chí liên quan đến "${question}".`;
-      } else if (conferences.length) {
-        answer = `Tìm thấy ${conferences.length} hội thảo phù hợp với "${question}".`;
-      } else {
-        answer = `Tìm thấy ${journals.length} tạp chí phù hợp với "${question}".`;
-      }
+    console.log(
+      "🔎 SEARCH QUESTION:",
+      question
+    );
 
-      // ================= 🔥 INSIGHT (PRO LEVEL) =================
-      const now = Date.now();
+    console.log(
+      "===================================\n"
+    );
 
-      const openCFP = conferences.filter(c => {
-        const d = safeTime(c.deadline);
-        return d && d > now;
-      });
 
-      const upcoming = conferences.filter(c => {
-        const d = safeTime(c.start_date);
-        return d && d > now;
-      });
+    // =====================================================
+    // 2. SEARCH
+    //
+    // question
+    //    ↓
+    // runAgent
+    //    ↓
+    // scholar.search.js
+    //    ↓
+    // embedding.js
+    //    ↓
+    // Qdrant
+    // =====================================================
 
-      const topScore =
-        Math.max(
-          ...conferences.map(c => c.finalScore || 0),
-          ...journals.map(j => j.finalScore || 0)
-        ) || 0;
+    const result =
+      await runAgent(
+        question,
+        topk
+      );
 
-      // 🔥 Insight block
-      let insight = [];
+    const conferences =
+      result?.conferences || [];
 
-      if (topScore > 0.75) {
-        insight.push("Các kết quả có mức độ liên quan cao.");
-      } else if (topScore > 0.5) {
-        insight.push("Kết quả có mức độ liên quan khá.");
-      } else {
-        insight.push("Kết quả mang tính tham khảo.");
-      }
+    const journals =
+      result?.journals || [];
 
-      if (openCFP.length) {
-        insight.push(`${openCFP.length} hội thảo vẫn đang mở nhận bài.`);
-      }
+    console.log(
+      "📊 SEARCH:",
+      conferences.length,
+      journals.length
+    );
 
-      if (upcoming.length) {
-        insight.push(`${upcoming.length} hội thảo sắp diễn ra.`);
-      }
 
-      // 🔥 thêm 1 insight ranking
-      if (conferences.length > 3) {
-        insight.push("Danh sách đã được ưu tiên theo độ phù hợp.");
-      }
+    // =====================================================
+    // 3. URL HELPERS
+    // =====================================================
 
-      if (insight.length) {
-        answer += "\n\n👉 " + insight.join(" ");
-      }
-    }
-
-    // ================= URL =================
     function buildConferenceUrl(c) {
       return (
         c.cfp_link ||
@@ -119,113 +126,372 @@ export async function runScholarAgent(
     }
 
     function buildJournalUrl(j) {
-      return j.url || j.scimago_link || "";
+      return (
+        j.url ||
+        j.scimago_link ||
+        ""
+      );
     }
 
-    // ================= SAFE DATE =================
+
+    // =====================================================
+    // 4. SAFE DATE
+    // =====================================================
+
     function safeTime(dateStr) {
-      if (!dateStr) return null;
-      const t = new Date(dateStr).getTime();
-      return isNaN(t) ? null : t;
-    }
-
-    // ================= STATUS =================
-    function getConferenceStatus(c) {
-      const now = Date.now();
-
-      const deadline = safeTime(c.deadline);
-      const start = safeTime(c.start_date);
-
-      if (deadline) {
-        const diff = (deadline - now) / (1000 * 60 * 60 * 24);
-
-        if (diff > 30) return "submission_open";
-        if (diff > 0) return "submission_soon";
+      if (!dateStr) {
+        return null;
       }
 
-      if (deadline && deadline < now) {
-        if (start) {
-          const diffStart = (start - now) / (1000 * 60 * 60 * 24);
+      const t =
+        new Date(dateStr).getTime();
 
-          if (diffStart > 0) return "upcoming_event";
+      return isNaN(t)
+        ? null
+        : t;
+    }
+
+
+    // =====================================================
+    // 5. CONFERENCE STATUS
+    // =====================================================
+
+    function getConferenceStatus(c) {
+      const now =
+        Date.now();
+
+      const deadline =
+        safeTime(c.deadline);
+
+      const start =
+        safeTime(c.start_date);
+
+      if (deadline) {
+        const diff =
+          (deadline - now) /
+          (1000 * 60 * 60 * 24);
+
+        if (diff > 30) {
+          return "submission_open";
+        }
+
+        if (diff > 0) {
+          return "submission_soon";
+        }
+      }
+
+      if (
+        deadline &&
+        deadline < now
+      ) {
+        if (start) {
+          const diffStart =
+            (start - now) /
+            (1000 * 60 * 60 * 24);
+
+          if (diffStart > 0) {
+            return "upcoming_event";
+          }
+
           return "past_event";
         }
+
         return "submission_closed";
       }
 
-      if (!deadline && start) {
-        const diff = (start - now) / (1000 * 60 * 60 * 24);
+      if (
+        !deadline &&
+        start
+      ) {
+        const diff =
+          (start - now) /
+          (1000 * 60 * 60 * 24);
 
-        if (diff > 0) return "upcoming_event";
+        if (diff > 0) {
+          return "upcoming_event";
+        }
+
         return "past_event";
       }
 
       return "unknown";
     }
 
-    // ================= BUILD SOURCES =================
+
+    // =====================================================
+    // 6. BUILD SOURCES
+    // =====================================================
+
     const sources = [
-      ...conferences.map((c, i) => ({
-        id: `C${i + 1}`,
-        type: "conference",
-        title: c.name || c.title,
-        url: buildConferenceUrl(c),
+      ...conferences.map(
+        (c, i) => ({
+          id: `C${i + 1}`,
 
-        metadata: {
-          ...(c.country && { country: c.country }),
-          ...(c.city && { city: c.city }),
-          ...(c.deadline && { deadline: c.deadline }),
-          ...(c.start_date && { start_date: c.start_date }),
-          conference_status: getConferenceStatus(c),
-          ...(c.fields?.length && { fields: c.fields }),
-          score: c.finalScore ?? 0
-        }
-      })),
+          type: "conference",
 
-      ...journals.map((j, i) => ({
-        id: `J${i + 1}`,
-        type: "journal",
-        title: j.title,
-        url: buildJournalUrl(j),
+          title:
+            c.name ||
+            c.title ||
+            c.acronym ||
+            "Untitled conference",
 
-        metadata: {
-          ...(j.sjr_best_quartile && { quartile: j.sjr_best_quartile }),
-          ...(j.publisher && { publisher: j.publisher }),
-          ...(j.country && { country: j.country }),
-          ...(j.fields?.length && { fields: j.fields }),
-          score: j.finalScore ?? 0
-        }
-      }))
+          url:
+            buildConferenceUrl(c),
+
+          metadata: {
+            ...(c.country && {
+              country: c.country
+            }),
+
+            ...(c.city && {
+              city: c.city
+            }),
+
+            ...(c.deadline && {
+              deadline: c.deadline
+            }),
+
+            ...(c.start_date && {
+              start_date: c.start_date
+            }),
+
+            conference_status:
+              getConferenceStatus(c),
+
+            ...(c.fields?.length && {
+              fields: c.fields
+            }),
+
+            score:
+              c.finalScore ?? 0
+          }
+        })
+      ),
+
+      ...journals.map(
+        (j, i) => ({
+          id: `J${i + 1}`,
+
+          type: "journal",
+
+          title:
+            j.title ||
+            "Untitled journal",
+
+          url:
+            buildJournalUrl(j),
+
+          metadata: {
+            ...(j.sjr_best_quartile && {
+              quartile:
+                j.sjr_best_quartile
+            }),
+
+            ...(j.publisher && {
+              publisher:
+                j.publisher
+            }),
+
+            ...(j.country && {
+              country:
+                j.country
+            }),
+
+            ...(j.fields?.length && {
+              fields:
+                j.fields
+            }),
+
+            score:
+              j.finalScore ?? 0
+          }
+        })
+      )
     ];
 
-    console.log("📦 SOURCES:", sources.length);
+    console.log(
+      "📦 SOURCES:",
+      sources.length
+    );
 
-    // ================= HISTORY =================
-    try {
-      addToHistory(req, question, answer);
-    } catch {
-      console.warn("⚠️ Cannot save history");
+
+    // =====================================================
+    // 7. BUILD LLM PROMPT
+    //
+    // Profile
+    // Project
+    // Documents
+    // History
+    // Conference / Journal results
+    // Current question
+    // =====================================================
+
+    const prompt =
+      buildScholarPrompt(
+        question,
+        conferences,
+        journals,
+        llmContext
+      );
+
+    console.log(
+      "🤖 CALLING LLM..."
+    );
+
+
+    // =====================================================
+    // 8. CALL LLM
+    // =====================================================
+
+    const llmResult =
+      await callLLM(
+        prompt,
+        model_id
+      );
+
+    console.log(
+      "🤖 LLM MODEL:",
+      llmResult?.model || "(unknown)"
+    );
+
+    console.log(
+      "⏱️ LLM LATENCY:",
+      llmResult?.latency ?? "N/A",
+      "ms"
+    );
+
+
+    // =====================================================
+    // 9. FINAL ANSWER
+    // =====================================================
+
+    let answer =
+      llmResult?.answer?.trim() ||
+      "";
+
+
+    // =====================================================
+    // 10. FALLBACK
+    //
+    // Nếu LLM lỗi thì dùng answer deterministic
+    // từ runAgent.
+    // =====================================================
+
+    if (!answer) {
+      answer =
+        result?.answer?.trim() ||
+        "";
     }
+
+
+    // =====================================================
+    // 11. FINAL FALLBACK
+    // =====================================================
+
+    if (!answer) {
+      if (
+        !conferences.length &&
+        !journals.length
+      ) {
+        answer =
+          "Không tìm thấy dữ liệu phù hợp trong hệ thống.";
+      } else {
+        const total =
+          conferences.length +
+          journals.length;
+
+        if (
+          conferences.length &&
+          journals.length
+        ) {
+          answer =
+            `Tìm thấy ${total} kết quả gồm hội thảo và tạp chí liên quan đến "${question}".`;
+
+        } else if (
+          conferences.length
+        ) {
+          answer =
+            `Tìm thấy ${conferences.length} hội thảo phù hợp với "${question}".`;
+
+        } else {
+          answer =
+            `Tìm thấy ${journals.length} tạp chí phù hợp với "${question}".`;
+        }
+      }
+    }
+
+
+    // =====================================================
+    // 12. SAVE HISTORY
+    // =====================================================
+
+    try {
+      addToHistory(
+        req,
+        question,
+        answer
+      );
+
+    } catch {
+      console.warn(
+        "⚠️ Cannot save history"
+      );
+    }
+
+
+    // =====================================================
+    // 13. RESPONSE
+    // =====================================================
 
     return {
       answer,
+
       conferences,
       journals,
+
       sources,
-      domain: result?.domain || "general",
-      responseTimeMs: Date.now() - start
+
+      domain:
+        result?.domain ||
+        "general",
+
+      model: {
+        model_id:
+          llmResult?.model_id ||
+          model_id,
+
+        model:
+          llmResult?.model ||
+          null,
+
+        latency:
+          llmResult?.latency ??
+          null
+      },
+
+      responseTimeMs:
+        Date.now() - start
     };
 
   } catch (err) {
-    console.error("❌ Scholar agent crash:", err);
+
+    console.error(
+      "❌ Scholar agent crash:",
+      err
+    );
 
     return {
-      answer: "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
+      answer:
+        "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
+
       conferences: [],
       journals: [],
       sources: [],
+
       domain: "error",
-      responseTimeMs: Date.now() - start
+
+      responseTimeMs:
+        Date.now() - start
     };
   }
 }
