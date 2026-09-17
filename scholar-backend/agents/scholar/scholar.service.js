@@ -1,7 +1,6 @@
 // agents/scholar/scholar.service.js
 
 import { runAgent } from "./scholar.agent.js";
-import { addToHistory } from "../../middlewares/session.js";
 
 import {
   normalizeHistory
@@ -12,12 +11,96 @@ import {
 } from "../shared/context.js";
 
 import {
+  rewriteQuery
+} from "../shared/queryRewriter.js";
+
+import {
   buildScholarPrompt
 } from "./scholar.prompt.js";
 
 import {
   callLLM
 } from "../shared/llm.js";
+
+
+// =====================================================
+// HELPERS
+// =====================================================
+
+function buildConferenceUrl(c) {
+  return (
+    c?.cfp_link ||
+    c?.url ||
+    c?.link ||
+    c?.website ||
+    ""
+  );
+}
+
+
+function buildJournalUrl(j) {
+  return (
+    j?.scimago_link ||
+    j?.url ||
+    ""
+  );
+}
+
+
+function safeTime(dateStr) {
+  if (!dateStr) {
+    return null;
+  }
+
+  const time =
+    new Date(dateStr).getTime();
+
+  return Number.isFinite(time)
+    ? time
+    : null;
+}
+
+
+function getConferenceStatus(c) {
+  const now =
+    Date.now();
+
+  const deadline =
+    safeTime(c?.deadline);
+
+  const start =
+    safeTime(c?.start_date);
+
+  if (deadline !== null) {
+    const diffDays =
+      (deadline - now) /
+      (1000 * 60 * 60 * 24);
+
+    if (diffDays > 30) {
+      return "submission_open";
+    }
+
+    if (diffDays > 0) {
+      return "submission_soon";
+    }
+
+    if (start !== null) {
+      return start > now
+        ? "upcoming_event"
+        : "past_event";
+    }
+
+    return "submission_closed";
+  }
+
+  if (start !== null) {
+    return start > now
+      ? "upcoming_event"
+      : "past_event";
+  }
+
+  return "unknown";
+}
 
 
 // =====================================================
@@ -47,8 +130,11 @@ export async function runScholarAgent(
       buildLLMContext(req);
 
 
-    // History do Portal truyền vào route là nguồn chính.
-    // Normalize lại trước khi đưa vào prompt.
+    /*
+     * Portal context.history là nguồn hội thoại chính.
+     *
+     * Không sử dụng express-session history trong Scholar.
+     */
     llmContext.history =
       normalizedHistory;
 
@@ -76,11 +162,11 @@ export async function runScholarAgent(
 
     console.log(
       "📄 DOCUMENTS:",
-      llmContext.docs.length
+      llmContext.docs?.length || 0
     );
 
     console.log(
-      "🔎 SEARCH QUESTION:",
+      "💬 ORIGINAL QUESTION:",
       question
     );
 
@@ -90,28 +176,85 @@ export async function runScholarAgent(
       "(default)"
     );
 
+
+    // =====================================================
+    // 2. CONTEXTUAL QUERY REWRITE
+    //
+    // Ví dụ:
+    //
+    // History:
+    //   User: Cho tôi tạp chí Q1 về công nghệ giáo dục
+    //
+    // Current:
+    //   Q2 thì sao?
+    //
+    // Standalone:
+    //   Cho tôi tạp chí Q2 về công nghệ giáo dục
+    //
+    // Lưu ý:
+    // - standaloneQuestion chỉ dùng cho retrieval.
+    // - question gốc vẫn dùng cho prompt cuối.
+    // =====================================================
+
+    let standaloneQuestion =
+      question;
+
+    try {
+      const rewritten =
+        await rewriteQuery(
+          question,
+          normalizedHistory
+        );
+
+      if (
+        typeof rewritten === "string" &&
+        rewritten.trim()
+      ) {
+        standaloneQuestion =
+          rewritten.trim();
+      }
+
+    } catch (err) {
+      console.warn(
+        "⚠️ QUERY REWRITE FAILED:",
+        err?.message || err
+      );
+
+      standaloneQuestion =
+        question;
+    }
+
+
+    console.log(
+      "🔄 STANDALONE QUESTION:",
+      standaloneQuestion
+    );
+
     console.log(
       "===================================\n"
     );
 
 
     // =====================================================
-    // 2. SCHOLAR SEARCH
+    // 3. SCHOLAR SEARCH
     //
-    // question
-    //    ↓
+    // standaloneQuestion
+    //        ↓
     // scholar.agent.js
-    //    ↓
+    //        ↓
     // scholar.search.js
-    //    ↓
+    //        ↓
     // embedding.js
-    //    ↓
+    //        ↓
     // Qdrant
+    //
+    // QUAN TRỌNG:
+    // Không search bằng question gốc đối với follow-up.
     // =====================================================
 
     const result =
       await runAgent(
-        question,
+        standaloneQuestion,
         topk
       );
 
@@ -136,127 +279,7 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 3. URL HELPERS
-    // =====================================================
-
-    function buildConferenceUrl(c) {
-      return (
-        c?.cfp_link ||
-        c?.url ||
-        c?.link ||
-        c?.website ||
-        ""
-      );
-    }
-
-
-    function buildJournalUrl(j) {
-      return (
-        j?.scimago_link ||
-        j?.url ||
-        ""
-      );
-    }
-
-
-    // =====================================================
-    // 4. SAFE DATE
-    // =====================================================
-
-    function safeTime(dateStr) {
-
-      if (!dateStr) {
-        return null;
-      }
-
-
-      const time =
-        new Date(dateStr)
-          .getTime();
-
-
-      return Number.isFinite(time)
-        ? time
-        : null;
-    }
-
-
-    // =====================================================
-    // 5. CONFERENCE STATUS
-    // =====================================================
-
-    function getConferenceStatus(c) {
-
-      const now =
-        Date.now();
-
-
-      const deadline =
-        safeTime(c?.deadline);
-
-
-      const start =
-        safeTime(c?.start_date);
-
-
-      // -----------------------------------------
-      // Có deadline
-      // -----------------------------------------
-
-      if (deadline !== null) {
-
-        const diffDays =
-          (deadline - now) /
-          (1000 * 60 * 60 * 24);
-
-
-        if (diffDays > 30) {
-          return "submission_open";
-        }
-
-
-        if (diffDays > 0) {
-          return "submission_soon";
-        }
-
-
-        // Deadline đã qua
-        if (start !== null) {
-
-          if (start > now) {
-            return "upcoming_event";
-          }
-
-
-          return "past_event";
-        }
-
-
-        return "submission_closed";
-      }
-
-
-      // -----------------------------------------
-      // Không có deadline nhưng có event date
-      // -----------------------------------------
-
-      if (start !== null) {
-
-        if (start > now) {
-          return "upcoming_event";
-        }
-
-
-        return "past_event";
-      }
-
-
-      return "unknown";
-    }
-
-
-    // =====================================================
-    // 6. BUILD SOURCES
+    // 4. BUILD SOURCES
     // =====================================================
 
     const sources = [
@@ -421,16 +444,23 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 7. BUILD LLM PROMPT
+    // 5. BUILD FINAL LLM PROMPT
     //
-    // Bao gồm:
-    // - user profile
+    // QUAN TRỌNG:
+    //
+    // Dùng QUESTION GỐC ở đây.
+    //
+    // Prompt nhận:
+    // - profile
     // - project
     // - documents
     // - conversation history
-    // - conference results
-    // - journal results
-    // - current question
+    // - retrieved conferences
+    // - retrieved journals
+    // - original current question
+    //
+    // standaloneQuestion KHÔNG thay thế câu hỏi người dùng
+    // trong bước generation.
     // =====================================================
 
     const prompt =
@@ -449,7 +479,7 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 8. CALL LLM
+    // 6. CALL LLM
     // =====================================================
 
     console.log(
@@ -514,7 +544,7 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 9. FINAL ANSWER
+    // 7. FINAL ANSWER
     //
     // Ưu tiên:
     //
@@ -530,7 +560,7 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 10. FALLBACK TO DETERMINISTIC ANSWER
+    // 8. FALLBACK TO DETERMINISTIC ANSWER
     // =====================================================
 
     if (!answer) {
@@ -550,7 +580,7 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 11. FINAL FALLBACK
+    // 9. FINAL FALLBACK
     // =====================================================
 
     if (!answer) {
@@ -589,28 +619,10 @@ export async function runScholarAgent(
 
 
     // =====================================================
-    // 12. SAVE LOCAL HISTORY
-    // =====================================================
-
-    try {
-
-      addToHistory(
-        req,
-        question,
-        answer
-      );
-
-    } catch (err) {
-
-      console.warn(
-        "⚠️ Cannot save history:",
-        err?.message || err
-      );
-    }
-
-
-    // =====================================================
-    // 13. RESPONSE
+    // 10. RESPONSE
+    //
+    // Không addToHistory().
+    // Portal context.history là nguồn memory chính.
     // =====================================================
 
     return {
@@ -687,24 +699,24 @@ export async function runScholarAgent(
       domain:
         "error",
 
-      model:
-        {
-          model_id:
-            model_id ||
-            null,
+      model: {
 
-          model:
-            null,
+        model_id:
+          model_id ||
+          null,
 
-          latency:
-            null,
+        model:
+          null,
 
-          prompt_tokens:
-            null,
+        latency:
+          null,
 
-          output_tokens:
-            null
-        },
+        prompt_tokens:
+          null,
+
+        output_tokens:
+          null
+      },
 
       responseTimeMs:
         Date.now() - start

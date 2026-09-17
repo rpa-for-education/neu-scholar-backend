@@ -1,7 +1,14 @@
 // agents/fund/fund.service.js
 
 import { runFundSearch } from "./fund.agent.js";
-import { addToHistory } from "../../middlewares/session.js";
+
+import {
+  normalizeHistory
+} from "../shared/memory.js";
+
+import {
+  rewriteQuery
+} from "../shared/queryRewriter.js";
 
 
 // =====================================================
@@ -27,16 +34,21 @@ function normalizeText(value) {
 
 
 function normalizeLower(value) {
-  return normalizeText(value).toLowerCase();
+  return normalizeText(value)
+    .toLowerCase();
 }
 
 
 function fundSearchText(fund) {
-  return normalizeLower([
-    fund?.title,
-    fund?.agency,
-    fund?.text
-  ].filter(Boolean).join(" "));
+  return normalizeLower(
+    [
+      fund?.title,
+      fund?.agency,
+      fund?.text
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
 }
 
 
@@ -60,8 +72,9 @@ function parseAmount(value) {
     return value;
   }
 
-  const text = normalizeLower(value)
-    .replace(/,/g, "");
+  const text =
+    normalizeLower(value)
+      .replace(/,/g, "");
 
   if (!text) {
     return 0;
@@ -81,7 +94,9 @@ function parseAmount(value) {
     return 0;
   }
 
-  if (/\b(billion|bn)\b/.test(text)) {
+  if (
+    /\b(billion|bn)\b/.test(text)
+  ) {
     return number * 1e9;
   }
 
@@ -103,13 +118,16 @@ function parseAmount(value) {
 }
 
 
-function formatMoney(amount, amountNum) {
+function formatMoney(
+  amount,
+  amountNum
+) {
   const raw =
     normalizeText(amount);
 
-  /**
-   * Nếu DB đã có chuỗi tiền tệ rõ ràng thì ưu tiên
-   * hiển thị nguyên bản để không tự suy diễn USD.
+  /*
+   * Nếu DB đã có chuỗi tiền tệ rõ ràng thì
+   * giữ nguyên để không tự suy diễn đơn vị.
    */
   if (
     raw &&
@@ -134,9 +152,14 @@ function formatMoney(amount, amountNum) {
 // NORMALIZE FUND
 // =====================================================
 
-function normalizeFund(result, index) {
+function normalizeFund(
+  result,
+  index
+) {
   const payload =
-    result?.payload || result || {};
+    result?.payload ||
+    result ||
+    {};
 
   const amount =
     payload.funding_amount ??
@@ -158,11 +181,15 @@ function normalizeFund(result, index) {
     Number.isFinite(rawScore)
       ? Math.max(
           0,
-          Math.min(1, rawScore)
+          Math.min(
+            1,
+            rawScore
+          )
         )
       : 0;
 
   return {
+
     title:
       normalizeText(
         payload.opportunity_title ||
@@ -340,11 +367,13 @@ function relevanceScore(
 
   let relevance = 0;
 
-  // -----------------------------------------------
+
+  // ---------------------------------------------------
   // Vietnam / NAFOSTED
-  // -----------------------------------------------
+  // ---------------------------------------------------
 
   if (isVietnamQuery(q)) {
+
     if (isNafostedFund(fund)) {
       relevance += 10;
     }
@@ -358,6 +387,7 @@ function relevanceScore(
     }
   }
 
+
   if (
     q.includes("nafosted") &&
     isNafostedFund(fund)
@@ -365,11 +395,15 @@ function relevanceScore(
     relevance += 8;
   }
 
-  // -----------------------------------------------
-  // Basic research
-  // -----------------------------------------------
 
-  if (isBasicResearchQuery(q)) {
+  // ---------------------------------------------------
+  // Basic research
+  // ---------------------------------------------------
+
+  if (
+    isBasicResearchQuery(q)
+  ) {
+
     if (
       text.includes("basic research") ||
       text.includes("nghiên cứu cơ bản")
@@ -377,7 +411,7 @@ function relevanceScore(
       relevance += 5;
     }
 
-    /**
+    /*
      * Với câu hỏi nghiên cứu cơ bản nói chung,
      * bilateral/collaboration không nên tự động
      * được ưu tiên.
@@ -392,14 +426,16 @@ function relevanceScore(
     }
   }
 
-  // -----------------------------------------------
+
+  // ---------------------------------------------------
   // Deadline
-  // -----------------------------------------------
+  // ---------------------------------------------------
 
   const deadline =
     safeTime(fund?.deadline);
 
   if (deadline !== null) {
+
     const year =
       new Date(deadline)
         .getFullYear();
@@ -408,10 +444,14 @@ function relevanceScore(
       relevance -= 2;
     }
 
-    if (deadline > Date.now()) {
+    if (
+      deadline >
+      Date.now()
+    ) {
       relevance += 1;
     }
   }
+
 
   return relevance;
 }
@@ -429,14 +469,16 @@ function applyHardFilters(
     return [];
   }
 
-  /**
+  /*
    * HARD FILTER:
    *
-   * Khi người dùng yêu cầu Việt Nam/NAFOSTED,
+   * Khi standalone query yêu cầu Việt Nam/NAFOSTED,
    * tuyệt đối không fallback sang quỹ Mỹ hoặc
    * quốc gia khác chỉ vì vector similarity cao.
    */
-  if (isVietnamQuery(question)) {
+  if (
+    isVietnamQuery(question)
+  ) {
     return funds.filter(
       isVietnamFund
     );
@@ -465,6 +507,7 @@ function rankFunds(
         )
     }))
     .sort((a, b) => {
+
       // 1. Intent relevance
       if (
         b._relevance !==
@@ -476,10 +519,18 @@ function rankFunds(
         );
       }
 
+
       // 2. Vector/final score
-      if (b.score !== a.score) {
-        return b.score - a.score;
+      if (
+        b.score !==
+        a.score
+      ) {
+        return (
+          b.score -
+          a.score
+        );
       }
+
 
       // 3. Funding amount
       if (
@@ -492,8 +543,12 @@ function rankFunds(
         );
       }
 
+
       // 4. Stable original order
-      return a._idx - b._idx;
+      return (
+        a._idx -
+        b._idx
+      );
     });
 }
 
@@ -509,11 +564,6 @@ function buildReasoning(
 ) {
   const reasons = [];
 
-  if (index === 0) {
-    reasons.push(
-      "phù hợp nhất với nhu cầu"
-    );
-  }
 
   if (
     relevanceScore(
@@ -526,6 +576,7 @@ function buildReasoning(
     );
   }
 
+
   const deadlineInfo =
     getDeadlineInfo(
       fund.deadline
@@ -537,6 +588,15 @@ function buildReasoning(
     );
   }
 
+
+  /*
+   * Không tự gọi kết quả đầu tiên là
+   * "phù hợp nhất với nhu cầu".
+   *
+   * Thứ tự đã được ranking xác định,
+   * nhưng không cần đưa ra khẳng định
+   * định tính quá mạnh trong phần render.
+   */
   return reasons.length
     ? `👉 ${reasons.join(", ")}`
     : "";
@@ -554,11 +614,13 @@ function renderFund(
 ) {
   const lines = [];
 
+
   if (fund.title) {
     lines.push(
       `🎓 **${fund.title}**`
     );
   }
+
 
   if (fund.agency) {
     lines.push(
@@ -566,11 +628,13 @@ function renderFund(
     );
   }
 
+
   const money =
     formatMoney(
       fund.amount,
       fund.amount_num
     );
+
 
   if (money) {
     lines.push(
@@ -578,20 +642,25 @@ function renderFund(
     );
   }
 
+
   if (fund.deadline) {
     lines.push(
       `📅 ${fund.deadline}`
     );
   }
 
+
   if (
     fund.url &&
-    /^https?:\/\//i.test(fund.url)
+    /^https?:\/\//i.test(
+      fund.url
+    )
   ) {
     lines.push(
       `🔎 ${fund.url}`
     );
   }
+
 
   const reason =
     buildReasoning(
@@ -600,9 +669,13 @@ function renderFund(
       question
     );
 
+
   if (reason) {
-    lines.push(reason);
+    lines.push(
+      reason
+    );
   }
+
 
   return lines.join("\n");
 }
@@ -616,19 +689,26 @@ function buildIntro(question) {
   const q =
     normalizeLower(question);
 
-  if (q.includes("nafosted")) {
+
+  if (
+    q.includes("nafosted")
+  ) {
     return (
-      "Dưới đây là các cơ hội NAFOSTED " +
-      "phù hợp nhất được tìm thấy trong hệ thống."
+      "Các kết quả đầu tiên có liên quan trực tiếp " +
+      "đến NAFOSTED theo dữ liệu hiện có."
     );
   }
 
-  if (isVietnamQuery(q)) {
+
+  if (
+    isVietnamQuery(q)
+  ) {
     return (
-      "Dưới đây là các cơ hội tài trợ liên quan " +
-      "đến Việt Nam được tìm thấy trong hệ thống."
+      "Các kết quả sau liên quan đến Việt Nam " +
+      "theo dữ liệu hiện có."
     );
   }
+
 
   if (
     q.includes("ai") ||
@@ -637,14 +717,15 @@ function buildIntro(question) {
     q.includes("dữ liệu")
   ) {
     return (
-      "Dưới đây là các cơ hội tài trợ phù hợp " +
-      "nhất với hướng nghiên cứu được yêu cầu."
+      "Các cơ hội sau được sắp xếp theo mức độ " +
+      "liên quan với hướng nghiên cứu được yêu cầu."
     );
   }
 
+
   return (
-    "Dưới đây là các cơ hội tài trợ phù hợp " +
-    "nhất được tìm thấy trong hệ thống."
+    "Các cơ hội sau được sắp xếp theo mức độ " +
+    "liên quan với yêu cầu."
   );
 }
 
@@ -658,7 +739,10 @@ function buildAnswer(
   question
 ) {
   if (!funds.length) {
-    if (isVietnamQuery(question)) {
+
+    if (
+      isVietnamQuery(question)
+    ) {
       return (
         "Không tìm thấy cơ hội tài trợ liên quan " +
         "đến Việt Nam phù hợp với yêu cầu trong dữ liệu hiện có."
@@ -666,14 +750,13 @@ function buildAnswer(
     }
 
     return (
-      "Không tìm thấy quỹ phù hợp với yêu cầu của bạn."
+      "Không tìm thấy quỹ phù hợp với yêu cầu trong dữ liệu hiện có."
     );
   }
 
+
   const lines = [
     buildIntro(question),
-    "",
-    "🔥 **Quỹ nổi bật nhất:**",
     "",
     renderFund(
       funds[0],
@@ -681,6 +764,7 @@ function buildAnswer(
       question
     )
   ];
+
 
   funds
     .slice(1)
@@ -698,6 +782,7 @@ function buildAnswer(
         );
       }
     );
+
 
   return lines
     .filter(
@@ -718,50 +803,147 @@ export async function runFundAgent(
   req,
   question,
   model_id,
-  topk = MAX_RETURN
+  topk = MAX_RETURN,
+  history = []
 ) {
   const start =
     Date.now();
 
+
   try {
-    const finalTopk =
-      Math.min(
-        Math.max(
-          Number(topk) || MAX_RETURN,
-          1
-        ),
-        MAX_RETURN
-      );
+
+    // ===================================================
+    // 1. NORMALIZE HISTORY
+    //
+    // Portal context.history là nguồn hội thoại chính.
+    // Không sử dụng express-session history trong Fund.
+    // ===================================================
+
+    const normalizedHistory =
+      normalizeHistory(history);
+
 
     console.log(
       "\n========== FUND AGENT =========="
     );
 
     console.log(
-      "❓ QUESTION:",
+      "🧠 HISTORY ITEMS:",
+      normalizedHistory.length
+    );
+
+    console.log(
+      "💬 ORIGINAL QUESTION:",
       question
     );
 
     console.log(
       "🤖 MODEL:",
-      model_id || "(none)"
+      model_id ||
+      "(none)"
     );
+
+
+    // ===================================================
+    // 2. CONTEXTUAL QUERY REWRITE
+    //
+    // Ví dụ:
+    //
+    // History:
+    //   User: Tìm quỹ tài trợ AI tại Việt Nam
+    //
+    // Current:
+    //   Còn của Mỹ?
+    //
+    // Standalone:
+    //   Tìm quỹ tài trợ AI tại Mỹ
+    //
+    // standaloneQuestion được dùng cho:
+    // - retrieval
+    // - intent detection
+    // - hard filter
+    // - ranking
+    // - deterministic answer
+    // ===================================================
+
+    let standaloneQuestion =
+      normalizeText(question);
+
+
+    try {
+
+      const rewritten =
+        await rewriteQuery(
+          question,
+          normalizedHistory
+        );
+
+
+      if (
+        typeof rewritten === "string" &&
+        rewritten.trim()
+      ) {
+        standaloneQuestion =
+          rewritten.trim();
+      }
+
+    } catch (err) {
+
+      console.warn(
+        "⚠️ FUND QUERY REWRITE FAILED:",
+        err?.message || err
+      );
+
+      standaloneQuestion =
+        normalizeText(question);
+    }
+
+
+    console.log(
+      "🔄 STANDALONE QUESTION:",
+      standaloneQuestion
+    );
+
+
+    // ===================================================
+    // 3. TOPK
+    // ===================================================
+
+    const finalTopk =
+      Math.min(
+        Math.max(
+          Number(topk) ||
+          MAX_RETURN,
+          1
+        ),
+        MAX_RETURN
+      );
+
 
     console.log(
       "🔢 TOPK:",
       finalTopk
     );
 
-    // -----------------------------------------------
-    // 1. Retrieval
-    // -----------------------------------------------
+    console.log(
+      "================================\n"
+    );
+
+
+    // ===================================================
+    // 4. RETRIEVAL
+    //
+    // QUAN TRỌNG:
+    // Search bằng standaloneQuestion.
+    // ===================================================
 
     const raw =
       await runFundSearch(
-        question,
+        standaloneQuestion,
         model_id,
         finalTopk
       );
+
 
     console.log(
       "📊 FUND SEARCH:",
@@ -770,92 +952,103 @@ export async function runFundAgent(
         : 0
     );
 
-    // -----------------------------------------------
-    // 2. Normalize
-    // -----------------------------------------------
+
+    // ===================================================
+    // 5. NORMALIZE
+    // ===================================================
 
     let funds =
       normalizeFunds(raw);
 
-    // -----------------------------------------------
-    // 3. Hard filters
-    // -----------------------------------------------
+
+    // ===================================================
+    // 6. HARD FILTERS
+    //
+    // QUAN TRỌNG:
+    // Intent phải đọc standaloneQuestion,
+    // không đọc câu follow-up thiếu ngữ cảnh.
+    // ===================================================
 
     funds =
       applyHardFilters(
         funds,
-        question
+        standaloneQuestion
       );
+
 
     console.log(
       "🌏 AFTER HARD FILTER:",
       funds.length
     );
 
-    // -----------------------------------------------
-    // 4. Ranking
-    // -----------------------------------------------
+
+    // ===================================================
+    // 7. RANKING
+    //
+    // Ranking cũng dùng standaloneQuestion.
+    // ===================================================
 
     funds =
       rankFunds(
         funds,
-        question
+        standaloneQuestion
       )
         .slice(
           0,
           MAX_RETURN
         );
 
+
     console.log(
       "📦 FINAL FUNDS:",
       funds.length
     );
 
-    // -----------------------------------------------
-    // 5. Answer
-    // -----------------------------------------------
+
+    // ===================================================
+    // 8. ANSWER
+    //
+    // Fund hiện tại là deterministic.
+    //
+    // Vì vậy answer nên dùng standaloneQuestion để
+    // buildIntro / reasoning hiểu đầy đủ intent.
+    //
+    // Nếu sau này Fund dùng buildFundPrompt + LLM,
+    // generation LLM phải nhận question GỐC + history.
+    // ===================================================
 
     const answer =
       buildAnswer(
         funds,
-        question
+        standaloneQuestion
       );
 
-    // -----------------------------------------------
-    // 6. History
-    // -----------------------------------------------
 
-    try {
-      addToHistory(
-        req,
-        question,
-        answer
-      );
-    } catch (err) {
-      console.warn(
-        "⚠️ Cannot save Fund history:",
-        err?.message || err
-      );
-    }
-
-    // -----------------------------------------------
-    // 7. Response
-    // -----------------------------------------------
+    // ===================================================
+    // 9. RESPONSE
+    //
+    // Không addToHistory().
+    // Portal context.history là nguồn memory chính.
+    // ===================================================
 
     return {
+
       answer,
+
       funds,
 
       domain:
         "fund",
 
-      /**
+      /*
        * Fund service hiện deterministic sau retrieval.
        * Không khai báo latency/token LLM giả.
        */
       model: {
+
         model_id:
-          model_id || null,
+          model_id ||
+          null,
 
         model:
           null,
@@ -874,24 +1067,31 @@ export async function runFundAgent(
         Date.now() - start
     };
 
+
   } catch (err) {
+
     console.error(
       "❌ Fund agent error:",
       err
     );
 
+
     return {
+
       answer:
         "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
 
-      funds: [],
+      funds:
+        [],
 
       domain:
         "error",
 
       model: {
+
         model_id:
-          model_id || null,
+          model_id ||
+          null,
 
         model:
           null,
