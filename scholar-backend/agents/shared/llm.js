@@ -19,7 +19,6 @@ const OLLAMA_LLM_SECKEY =
 
 const DEFAULT_MODEL =
   process.env.OLLAMA_LLM_MODEL ||
-  process.env.OLLAMA_MODEL ||
   "qwen2.5:14b-instruct-ctx16k";
 
 
@@ -27,19 +26,15 @@ const DEFAULT_MODEL_ID =
   "qwen2.5-14b";
 
 
+/**
+ * Timeout của một lần gọi LLM.
+ *
+ * Không đặt quá cao vì Scholar Agent đã có deterministic fallback.
+ * Nếu LLM không phản hồi trong thời gian này, trả fallback thay vì
+ * giữ HTTP request của Portal quá lâu.
+ */
 const LLM_TIMEOUT =
-  Number(process.env.LLM_TIMEOUT_MS) ||
-  120000;
-
-
-const LLM_NUM_CTX =
-  Number(process.env.LLM_NUM_CTX) ||
-  16384;
-
-
-const LLM_TEMPERATURE =
-  Number(process.env.LLM_TEMPERATURE) ||
-  0.2;
+  Number(process.env.LLM_TIMEOUT_MS) || 60000;
 
 
 // =====================================================
@@ -49,7 +44,7 @@ const LLM_TEMPERATURE =
 export const modelMap = {
   "qwen2.5-14b": {
     provider: "ollama",
-    model: "qwen2.5:14b-instruct-ctx16k"
+    model: DEFAULT_MODEL
   }
 };
 
@@ -80,8 +75,7 @@ function getPromptStats(prompt) {
   return {
     chars,
     bytes,
-    kb:
-      (bytes / 1024).toFixed(2)
+    kb: (bytes / 1024).toFixed(2)
   };
 }
 
@@ -94,11 +88,14 @@ async function callOllamaRaw(
   prompt,
   model
 ) {
+
   const start =
     Date.now();
 
+
   const finalPrompt =
     normalizePrompt(prompt);
+
 
   if (!finalPrompt) {
     throw new Error(
@@ -148,18 +145,18 @@ async function callOllamaRaw(
   );
 
   console.log(
-    "🪟 NUM_CTX:",
-    LLM_NUM_CTX
-  );
-
-  console.log(
-    "🌡️ TEMPERATURE:",
-    LLM_TEMPERATURE
-  );
-
-  console.log(
     "⏱️ TIMEOUT:",
     `${LLM_TIMEOUT} ms`
+  );
+
+  console.log(
+    "🔌 PROXY:",
+    "disabled"
+  );
+
+  console.log(
+    "📤 PAYLOAD MODE:",
+    "minimal"
   );
 
   console.log(
@@ -175,6 +172,22 @@ async function callOllamaRaw(
 
     // =================================================
     // HTTP REQUEST
+    //
+    // Cố ý giữ payload tối giản để giống request curl
+    // đã được xác nhận hoạt động tốt:
+    //
+    // {
+    //   model: "...",
+    //   prompt: "..."
+    // }
+    //
+    // Không ép:
+    // - stream
+    // - temperature
+    // - num_ctx
+    // - num_predict
+    //
+    // Ollama sẽ sử dụng cấu hình mặc định của model.
     // =================================================
 
     const res =
@@ -186,18 +199,7 @@ async function callOllamaRaw(
             finalModel,
 
           prompt:
-            finalPrompt,
-
-          stream:
-            false,
-
-          options: {
-            temperature:
-              LLM_TEMPERATURE,
-
-            num_ctx:
-              LLM_NUM_CTX
-          }
+            finalPrompt
         },
 
         {
@@ -209,12 +211,27 @@ async function callOllamaRaw(
               OLLAMA_LLM_SECKEY
           },
 
+
+          /**
+           * Quan trọng:
+           *
+           * Không để Axios tự động sử dụng HTTP_PROXY /
+           * HTTPS_PROXY từ environment của container.
+           *
+           * Endpoint Ollama ở mạng nội bộ/được chỉ định
+           * trực tiếp nên request phải đi thẳng.
+           */
+          proxy:
+            false,
+
+
           timeout:
             LLM_TIMEOUT,
 
-          // Không giới hạn response body mặc định của axios
+
           maxContentLength:
             Infinity,
+
 
           maxBodyLength:
             Infinity
@@ -245,6 +262,11 @@ async function callOllamaRaw(
     );
 
     console.log(
+      "📡 HTTP STATUS:",
+      res.status
+    );
+
+    console.log(
       "⏱️ LATENCY:",
       `${latency} ms`
     );
@@ -257,31 +279,49 @@ async function callOllamaRaw(
     console.log(
       "🔢 PROMPT TOKENS:",
       res.data?.prompt_eval_count ??
-      "N/A"
+        "N/A"
     );
 
     console.log(
       "🔢 OUTPUT TOKENS:",
       res.data?.eval_count ??
-      "N/A"
+        "N/A"
     );
 
     console.log(
       "🏁 DONE:",
       res.data?.done ??
-      "N/A"
+        "N/A"
     );
 
     console.log(
       "🏁 REASON:",
       res.data?.done_reason ??
-      "N/A"
+        "N/A"
     );
 
     console.log(
       "⏱️ TOTAL DURATION:",
       res.data?.total_duration ??
-      "N/A"
+        "N/A"
+    );
+
+    console.log(
+      "⏱️ LOAD DURATION:",
+      res.data?.load_duration ??
+        "N/A"
+    );
+
+    console.log(
+      "⏱️ PROMPT EVAL DURATION:",
+      res.data?.prompt_eval_duration ??
+        "N/A"
+    );
+
+    console.log(
+      "⏱️ EVAL DURATION:",
+      res.data?.eval_duration ??
+        "N/A"
     );
 
     console.log(
@@ -371,6 +411,11 @@ async function callOllamaRaw(
     console.error(
       "❌ PROMPT CHARS:",
       stats.chars
+    );
+
+    console.error(
+      "❌ PROMPT SIZE:",
+      `${stats.kb} KB`
     );
 
     console.error(
@@ -517,6 +562,7 @@ export async function callLLM(
   if (
     finalModelId !== model_id
   ) {
+
     console.warn(
       `⚠️ Unknown model_id=${model_id}, fallback → ${finalModelId}`
     );
@@ -587,9 +633,12 @@ export async function callLLM(
     );
 
 
-    // Không crash toàn Scholar Agent.
-    // scholar.service.js sẽ fallback sang
-    // deterministic result.answer.
+    /**
+     * Không làm crash Scholar/Fund Agent.
+     *
+     * Agent phía trên có thể sử dụng deterministic
+     * fallback khi LLM không phản hồi.
+     */
     return {
       provider:
         "ollama",
@@ -612,6 +661,12 @@ export async function callLLM(
         output_tokens:
           null
       },
+
+      done:
+        false,
+
+      done_reason:
+        null,
 
       error:
         err.message
@@ -651,6 +706,7 @@ ${prompt}
 
 
   if (!res?.answer) {
+
     throw new Error(
       res?.error ||
       "LLM returned empty response"
@@ -699,6 +755,10 @@ export async function rewriteQueryLLM(
   }
 
 
+  const originalQuestion =
+    String(question).trim();
+
+
   const prompt = `
 Rewrite the following user query into 3 optimized academic search queries.
 
@@ -716,7 +776,7 @@ Requirements:
 - Do not invent new constraints
 
 User question:
-"${String(question).trim()}"
+"${originalQuestion}"
 
 Return exactly this JSON structure:
 
@@ -758,7 +818,7 @@ Return exactly this JSON structure:
 
     return queries.length
       ? queries
-      : [question];
+      : [originalQuestion];
 
 
   } catch (err) {
@@ -770,7 +830,7 @@ Return exactly this JSON structure:
 
 
     return [
-      String(question).trim()
+      originalQuestion
     ];
   }
 }
@@ -794,7 +854,7 @@ export async function rerankLLM(
   }
 
 
-  // Giới hạn để tránh prompt rerank quá lớn
+  // Chỉ đưa tối đa 15 candidate vào reranker.
   const candidates =
     items.slice(0, 15);
 
@@ -814,20 +874,26 @@ export async function rerankLLM(
           const topics =
             Array.isArray(it?.topics)
               ? it.topics.join(", ")
+
               : Array.isArray(it?.areas)
                 ? it.areas.join(", ")
+
                 : Array.isArray(it?.categories)
                   ? it.categories.join(", ")
+
                   : Array.isArray(it?.fields)
                     ? it.fields.join(", ")
+
                     : "";
 
 
           return (
             `[${i}] ${title}` +
-            (topics
-              ? ` | ${topics}`
-              : "")
+            (
+              topics
+                ? ` | ${topics}`
+                : ""
+            )
           );
         }
       )
@@ -882,17 +948,21 @@ Example:
             index < candidates.length &&
             !used.has(index)
         )
-        .map(index => {
-          used.add(index);
+        .map(
+          index => {
 
-          return candidates[index];
-        });
+            used.add(index);
+
+            return candidates[index];
+          }
+        );
 
 
     // Nếu LLM bỏ sót candidate,
     // giữ lại theo thứ tự ranking cũ.
     candidates.forEach(
       (item, index) => {
+
         if (!used.has(index)) {
           reranked.push(item);
         }
@@ -906,6 +976,7 @@ Example:
       items.length >
       candidates.length
     ) {
+
       reranked.push(
         ...items.slice(
           candidates.length
