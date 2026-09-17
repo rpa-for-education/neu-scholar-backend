@@ -7,86 +7,51 @@ const COL = "fund";
 // ================= GET ALL =================
 
 export const getFunds = async (req, res) => {
+  const t0 = performance.now();
 
   const db = await getDb();
 
-  const {
-    search,
-    page = 1,
-    limit = 10
-  } = req.query;
+  const { search, page = 1, limit = 10 } = req.query;
 
   const query = {};
 
-  // ================= SEARCH =================
-
-  if (search && search.trim() !== "") {
-
-    const keyword = search.trim();
-
+  if (search) {
     query.$or = [
-
-      {
-        opportunity_title: {
-          $regex: keyword,
-          $options: "i"
-        }
-      },
-
-      {
-        agency_name: {
-          $regex: keyword,
-          $options: "i"
-        }
-      },
-
-      {
-        text: {
-          $regex: keyword,
-          $options: "i"
-        }
-      }
-
+      { opportunity_title: { $regex: search, $options: "i" } },
+      { agency_name: { $regex: search, $options: "i" } },
+      { text: { $regex: search, $options: "i" } }
     ];
-
   }
 
-  // ================= PAGINATION =================
-
   const currentPage = Number(page) || 1;
-
   const currentLimit = Number(limit) || 10;
+  const skip = (currentPage - 1) * currentLimit;
 
-  const skip =
-    (currentPage - 1) * currentLimit;
+  const t1 = performance.now();
 
-  // ================= QUERY =================
+  const data = await db.collection(COL)
+    .find(query)
+    .project({
+      raw: 0,
+      text: 0,
+      description: 0,
+      summary_description: 0
+    })
+    .skip(skip)
+    .limit(currentLimit)
+    .toArray();
 
-  const [data, total] = await Promise.all([
+  const t2 = performance.now();
 
-    db.collection(COL)
+  const total = await db.collection(COL).countDocuments(query);
 
-      .find(query)
+  const t3 = performance.now();
 
-      // Không tải các field lớn ở API danh sách
-      .project({
-        raw: 0,
-        text: 0,
-        description: 0
-      })
-
-      .skip(skip)
-
-      .limit(currentLimit)
-
-      .toArray(),
-
-    db.collection(COL)
-      .countDocuments(query)
-
-  ]);
-
-  // ================= RESPONSE =================
+  console.log(
+    `FUND | find=${(t2 - t1).toFixed(0)}ms | ` +
+    `count=${(t3 - t2).toFixed(0)}ms | ` +
+    `total=${(t3 - t0).toFixed(0)}ms`
+  );
 
   res.json({
     data,
@@ -94,8 +59,7 @@ export const getFunds = async (req, res) => {
       page: currentPage,
       limit: currentLimit,
       total,
-      totalPages:
-        Math.ceil(total / currentLimit)
+      totalPages: Math.ceil(total / currentLimit)
     }
   });
 };
