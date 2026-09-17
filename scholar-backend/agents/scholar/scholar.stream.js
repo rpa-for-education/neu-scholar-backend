@@ -1,204 +1,1001 @@
 // agents/scholar/scholar.stream.js
-import fetch from "node-fetch";
+
 import { runAgent } from "./scholar.agent.js";
-import { addToHistory } from "../../middlewares/session.js";
-import { buildScholarPrompt } from "./scholar.prompt.js";
+
 import {
-  normalizeHistory,
-  buildContextualQuestion
+  addToHistory
+} from "../../middlewares/session.js";
+
+import {
+  buildScholarPrompt
+} from "./scholar.prompt.js";
+
+import {
+  buildLLMContext
+} from "../shared/context.js";
+
+import {
+  normalizeHistory
 } from "../shared/memory.js";
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL;
-const TIMEOUT = 15000;
 
-// ================= TIMEOUT =================
-function fetchWithTimeout(url, options, ms = TIMEOUT) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), ms);
+// =====================================================
+// CONFIG
+// =====================================================
 
-  const promise = fetch(url, {
-    ...options,
-    signal: controller.signal,
-  }).finally(() => clearTimeout(id));
+const OLLAMA_LLM_BASE = (
+  process.env.OLLAMA_LLM_BASE_URL ||
+  "http://101.96.66.232:8037/ollama"
+).replace(/\/+$/, "");
 
-  return { promise, controller };
-}
 
-// ================= MAIN =================
-export async function streamScholar(req, res, question, topk = 5) {
-  let result = null;
-  let controller = null;
+const OLLAMA_LLM_SECKEY =
+  process.env.OLLAMA_LLM_SECKEY ||
+  "";
 
-  // 🔥 heartbeat
-  let heartbeat = null;
 
-  // ================= PORTAL MEMORY =================
-  const history = Array.isArray(req.body?.context?.history)
-    ? req.body.context.history
-    : [];
+const OLLAMA_LLM_MODEL =
+  process.env.OLLAMA_LLM_MODEL ||
+  "qwen2.5:14b-instruct-ctx16k";
 
-  console.log(
-    "🧠 STREAM MEMORY:",
-    JSON.stringify(history, null, 2)
+
+const LLM_TIMEOUT =
+  Number(
+    process.env.LLM_TIMEOUT_MS
+  ) || 120000;
+
+
+const LLM_NUM_CTX =
+  Number(
+    process.env.LLM_NUM_CTX
+  ) || 16384;
+
+
+const parsedTemperature =
+  Number(
+    process.env.LLM_TEMPERATURE
   );
 
+
+const LLM_TEMPERATURE =
+  Number.isFinite(
+    parsedTemperature
+  )
+    ? parsedTemperature
+    : 0.2;
+
+
+// =====================================================
+// SSE HELPERS
+// =====================================================
+
+function sendSSE(
+  res,
+  data
+) {
+  if (
+    res.writableEnded ||
+    res.destroyed
+  ) {
+    return;
+  }
+
+
+  const payload =
+    typeof data === "string"
+      ? data
+      : JSON.stringify(data);
+
+
+  res.write(
+    `data: ${payload}\n\n`
+  );
+
+
+  if (
+    typeof res.flush === "function"
+  ) {
+    res.flush();
+  }
+}
+
+
+// =====================================================
+// MAIN
+// =====================================================
+
+export async function streamScholar(
+  req,
+  res,
+  question,
+  topk = 5
+) {
+
+  const start =
+    Date.now();
+
+
+  let heartbeat =
+    null;
+
+
+  let controller =
+    null;
+
+
+  let closed =
+    false;
+
+
+  let result =
+    null;
+
+
+  let finalText =
+    "";
+
+
   try {
-    // ================= SSE HEADER =================
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
 
-    res.flushHeaders?.();
+    // =================================================
+    // 1. SSE HEADERS
+    // =================================================
 
-    let closed = false;
+    if (!res.headersSent) {
 
-    req.on("close", () => {
-      closed = true;
-      console.warn("⚠️ client disconnected");
+      res.status(200);
 
-      // 🔥 cleanup toàn bộ
-      if (heartbeat) clearInterval(heartbeat);
-      if (controller) controller.abort();
-    });
 
-    // 🔥 heartbeat chống timeout
-    heartbeat = setInterval(() => {
-      if (!closed) res.write(`:\n\n`);
-    }, 10000);
+      res.setHeader(
+        "Content-Type",
+        "text/event-stream; charset=utf-8"
+      );
 
-    // ================= UX =================
-    res.write(`data: 🔍 Đang tìm dữ liệu...\n\n`);
 
-    // ================= RUN AGENT =================
-    const history = normalizeHistory(
-      req.body?.context?.history || []
-    );
+      res.setHeader(
+        "Cache-Control",
+        "no-cache, no-transform"
+      );
 
-    const contextualQuestion = buildContextualQuestion(
-      question,
-      history
-    );
 
-    result = await runAgent(
-      contextualQuestion,
-      topk,
-      history
-    );
+      res.setHeader(
+        "Connection",
+        "keep-alive"
+      );
 
-    if (closed) return;
 
-    if (!result.conferences.length && !result.journals.length) {
-      res.write(`data: ❌ Không có dữ liệu phù hợp\n\n`);
-      clearInterval(heartbeat);
-      return res.end();
+      res.setHeader(
+        "X-Accel-Buffering",
+        "no"
+      );
+
+
+      if (
+        typeof res.flushHeaders ===
+        "function"
+      ) {
+        res.flushHeaders();
+      }
     }
 
-    res.write(`data: 📚 Đã tìm thấy dữ liệu, đang phân tích...\n\n`);
 
-    const prompt = buildScholarPrompt(
-      question,
-      result.conferences,
-      result.journals,
-      history
+    // =================================================
+    // 2. CLIENT DISCONNECT
+    // =================================================
+
+    req.on(
+      "close",
+      () => {
+
+        closed =
+          true;
+
+
+        console.warn(
+          "⚠️ Scholar stream client disconnected"
+        );
+
+
+        if (heartbeat) {
+          clearInterval(
+            heartbeat
+          );
+        }
+
+
+        if (controller) {
+          controller.abort();
+        }
+      }
     );
 
-    // ================= STREAM =================
-    const { promise, controller: ctrl } = fetchWithTimeout(
-      `${OLLAMA_BASE}/api/chat`,
+
+    // =================================================
+    // 3. HEARTBEAT
+    // =================================================
+
+    heartbeat =
+      setInterval(
+        () => {
+
+          if (
+            !closed &&
+            !res.writableEnded
+          ) {
+            res.write(
+              ": heartbeat\n\n"
+            );
+          }
+
+        },
+        10000
+      );
+
+
+    // =================================================
+    // 4. MEMORY / CONTEXT
+    // =================================================
+
+    const history =
+      normalizeHistory(
+        req.body
+          ?.context
+          ?.history ||
+        []
+      );
+
+
+    const llmContext =
+      buildLLMContext(req);
+
+
+    // Đồng bộ với scholar.service.js:
+    // history đã normalize là nguồn dùng cho prompt.
+    llmContext.history =
+      history;
+
+
+    console.log(
+      "\n========== SCHOLAR STREAM =========="
+    );
+
+
+    console.log(
+      "❓ QUESTION:",
+      question
+    );
+
+
+    console.log(
+      "🔢 TOPK:",
+      topk
+    );
+
+
+    console.log(
+      "🧠 HISTORY ITEMS:",
+      history.length
+    );
+
+
+    console.log(
+      "👤 PROFILE:",
+      llmContext
+        ?.profile
+        ?.full_name ||
+      "(none)"
+    );
+
+
+    console.log(
+      "📌 PROJECT:",
+      llmContext
+        ?.project
+        ?.name ||
+      "(none)"
+    );
+
+
+    console.log(
+      "📄 DOCUMENTS:",
+      llmContext
+        ?.docs
+        ?.length ||
+      0
+    );
+
+
+    console.log(
+      "====================================\n"
+    );
+
+
+    // =================================================
+    // 5. SEARCH
+    //
+    // Giữ nguyên nguyên tắc hiện tại:
+    // embedding chỉ nhận question.
+    //
+    // Không đưa raw history / document vào embedding.
+    // =================================================
+
+    sendSSE(
+      res,
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "qwen3:8b",
-          messages: [{ role: "user", content: prompt }],
-          stream: true,
-        }),
-      },
-      TIMEOUT
+        type:
+          "status",
+
+        message:
+          "Đang tìm dữ liệu..."
+      }
     );
 
-    controller = ctrl;
 
-    const response = await promise;
+    result =
+      await runAgent(
+        question,
+        topk
+      );
+
+
+    if (closed) {
+      return;
+    }
+
+
+    const conferences =
+      Array.isArray(
+        result?.conferences
+      )
+        ? result.conferences
+        : [];
+
+
+    const journals =
+      Array.isArray(
+        result?.journals
+      )
+        ? result.journals
+        : [];
+
+
+    console.log(
+      "📊 STREAM SEARCH:",
+      conferences.length,
+      journals.length
+    );
+
+
+    // Không return sớm khi search = 0.
+    //
+    // User vẫn có thể hỏi:
+    // - nội dung document
+    // - project
+    // - profile
+    // - history
+    //
+    // LLM phải được quyền trả lời
+    // từ các context này.
+
+
+    sendSSE(
+      res,
+      {
+        type:
+          "status",
+
+        message:
+          "Đang phân tích..."
+      }
+    );
+
+
+    // =================================================
+    // 6. BUILD PROMPT
+    // =================================================
+
+    const prompt =
+      buildScholarPrompt(
+        question,
+        conferences,
+        journals,
+        llmContext
+      );
+
+
+    console.log(
+      "📝 STREAM PROMPT:",
+      prompt.length,
+      "chars"
+    );
+
+
+    // =================================================
+    // 7. CALL NEW LLM
+    // =================================================
+
+    const url =
+      `${OLLAMA_LLM_BASE}/api/generate`;
+
+
+    controller =
+      new AbortController();
+
+
+    const timeoutId =
+      setTimeout(
+        () => {
+
+          if (
+            controller &&
+            !controller.signal.aborted
+          ) {
+            controller.abort();
+          }
+
+        },
+        LLM_TIMEOUT
+      );
+
+
+    console.log(
+      "\n========== LLM STREAM REQUEST =========="
+    );
+
+
+    console.log(
+      "🌐 URL:",
+      url
+    );
+
+
+    console.log(
+      "🧠 MODEL:",
+      OLLAMA_LLM_MODEL
+    );
+
+
+    console.log(
+      "📏 PROMPT CHARS:",
+      prompt.length
+    );
+
+
+    console.log(
+      "🪟 NUM_CTX:",
+      LLM_NUM_CTX
+    );
+
+
+    console.log(
+      "🌡️ TEMPERATURE:",
+      LLM_TEMPERATURE
+    );
+
+
+    console.log(
+      "⏱️ TIMEOUT:",
+      LLM_TIMEOUT,
+      "ms"
+    );
+
+
+    console.log(
+      "🚀 Starting LLM stream..."
+    );
+
+
+    let response;
+
+
+    try {
+
+      response =
+        await fetch(
+          url,
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              ...(OLLAMA_LLM_SECKEY
+                ? {
+                    "x-ollama-seckey":
+                      OLLAMA_LLM_SECKEY
+                  }
+                : {})
+            },
+
+            body:
+              JSON.stringify({
+                model:
+                  OLLAMA_LLM_MODEL,
+
+                prompt,
+
+                stream:
+                  true,
+
+                options: {
+                  temperature:
+                    LLM_TEMPERATURE,
+
+                  num_ctx:
+                    LLM_NUM_CTX
+                }
+              }),
+
+            signal:
+              controller.signal
+          }
+        );
+
+    } finally {
+
+      clearTimeout(
+        timeoutId
+      );
+    }
+
 
     if (!response.ok) {
-      throw new Error(`LLM error: ${response.status}`);
+
+      const errorText =
+        await response
+          .text()
+          .catch(
+            () => ""
+          );
+
+
+      throw new Error(
+        `LLM HTTP ${response.status}` +
+        (
+          errorText
+            ? `: ${errorText.slice(0, 500)}`
+            : ""
+        )
+      );
     }
 
-    if (!response.body) throw new Error("No stream body");
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    if (!response.body) {
+      throw new Error(
+        "LLM returned no stream body"
+      );
+    }
 
-    let buffer = "";
-    let finalText = "";
 
-    while (!closed) {
-      const { done, value } = await reader.read();
+    // =================================================
+    // 8. READ NDJSON STREAM
+    //
+    // /api/generate trả:
+    //
+    // {"response":"...","done":false}
+    // {"response":"...","done":false}
+    // ...
+    // {"done":true,...}
+    // =================================================
 
-      if (done || closed) break;
+    const reader =
+      response.body
+        .getReader();
 
-      buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+    const decoder =
+      new TextDecoder();
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
+
+    let buffer =
+      "";
+
+
+    let promptTokens =
+      null;
+
+
+    let outputTokens =
+      null;
+
+
+    let doneReason =
+      null;
+
+
+    while (
+      !closed
+    ) {
+
+      const {
+        done,
+        value
+      } =
+        await reader.read();
+
+
+      if (
+        done ||
+        closed
+      ) {
+        break;
+      }
+
+
+      buffer +=
+        decoder.decode(
+          value,
+          {
+            stream:
+              true
+          }
+        );
+
+
+      const lines =
+        buffer.split("\n");
+
+
+      buffer =
+        lines.pop() ||
+        "";
+
+
+      for (
+        const line of lines
+      ) {
+
+        const trimmed =
+          line.trim();
+
+
+        if (!trimmed) {
+          continue;
+        }
+
+
+        let json;
+
 
         try {
-          const json = JSON.parse(trimmed);
-          const token = json.message?.content;
 
-          if (!token) continue;
-
-          finalText += token;
-
-          res.write(`data: ${token}\n\n`);
-          res.flush?.();
+          json =
+            JSON.parse(
+              trimmed
+            );
 
         } catch {
-          // ignore partial JSON
+
+          // Có thể là NDJSON chưa hoàn chỉnh.
+          continue;
+        }
+
+
+        const token =
+          typeof json?.response ===
+          "string"
+            ? json.response
+            : "";
+
+
+        if (token) {
+
+          finalText +=
+            token;
+
+
+          sendSSE(
+            res,
+            {
+              type:
+                "content",
+
+              content:
+                token
+            }
+          );
+        }
+
+
+        if (json?.done) {
+
+          promptTokens =
+            json.prompt_eval_count ??
+            null;
+
+
+          outputTokens =
+            json.eval_count ??
+            null;
+
+
+          doneReason =
+            json.done_reason ??
+            null;
+
+
+          console.log(
+            "\n========== LLM STREAM RESPONSE =========="
+          );
+
+
+          console.log(
+            "✅ STREAM COMPLETE"
+          );
+
+
+          console.log(
+            "⏱️ LATENCY:",
+            Date.now() - start,
+            "ms"
+          );
+
+
+          console.log(
+            "🔢 PROMPT TOKENS:",
+            promptTokens ??
+            "N/A"
+          );
+
+
+          console.log(
+            "🔢 OUTPUT TOKENS:",
+            outputTokens ??
+            "N/A"
+          );
+
+
+          console.log(
+            "🏁 REASON:",
+            doneReason ||
+            "N/A"
+          );
+
+
+          console.log(
+            "=========================================\n"
+          );
         }
       }
     }
 
-    clearInterval(heartbeat);
 
-    // ================= SAVE =================
-    try {
-      if (finalText) {
-        addToHistory(req, question, finalText);
+    // =================================================
+    // 9. HANDLE REMAINING BUFFER
+    // =================================================
+
+    const remaining =
+      buffer.trim();
+
+
+    if (
+      remaining &&
+      !closed
+    ) {
+
+      try {
+
+        const json =
+          JSON.parse(
+            remaining
+          );
+
+
+        const token =
+          typeof json?.response ===
+          "string"
+            ? json.response
+            : "";
+
+
+        if (token) {
+
+          finalText +=
+            token;
+
+
+          sendSSE(
+            res,
+            {
+              type:
+                "content",
+
+              content:
+                token
+            }
+          );
+        }
+
+
+        if (json?.done) {
+
+          promptTokens =
+            json.prompt_eval_count ??
+            promptTokens;
+
+
+          outputTokens =
+            json.eval_count ??
+            outputTokens;
+
+
+          doneReason =
+            json.done_reason ??
+            doneReason;
+        }
+
+      } catch {
+        // Ignore incomplete trailing NDJSON.
       }
-    } catch {}
+    }
 
-    res.write(`data: [DONE]\n\n`);
-    res.end();
+
+    // =================================================
+    // 10. SAVE HISTORY
+    // =================================================
+
+    if (
+      !closed &&
+      finalText.trim()
+    ) {
+
+      try {
+
+        addToHistory(
+          req,
+          question,
+          finalText.trim()
+        );
+
+      } catch (err) {
+
+        console.warn(
+          "⚠️ Cannot save stream history:",
+          err?.message ||
+          err
+        );
+      }
+    }
+
+
+    // =================================================
+    // 11. META
+    // =================================================
+
+    if (!closed) {
+
+      sendSSE(
+        res,
+        {
+          type:
+            "meta",
+
+          meta: {
+            model_id:
+              "qwen2.5-14b",
+
+            model:
+              OLLAMA_LLM_MODEL,
+
+            response_time_ms:
+              Date.now() - start,
+
+            prompt_tokens:
+              promptTokens,
+
+            output_tokens:
+              outputTokens,
+
+            done_reason:
+              doneReason
+          }
+        }
+      );
+
+
+      sendSSE(
+        res,
+        "[DONE]"
+      );
+
+
+      res.end();
+    }
+
 
   } catch (err) {
-    console.error("❌ stream error:", err.message);
 
-    if (heartbeat) clearInterval(heartbeat);
+    console.error(
+      "❌ Scholar stream error:",
+      err?.message ||
+      err
+    );
 
-    // ================= 🔥 FALLBACK THÔNG MINH =================
-    try {
-      res.write(`data: ⚠️ Trả kết quả nhanh...\n\n`);
 
-      if (result) {
-        const fallbackText =
-          result.answer ||
-          "Có dữ liệu phù hợp với truy vấn.";
+    // =================================================
+    // 12. FALLBACK
+    // =================================================
 
-        res.write(`data: ${fallbackText}\n\n`);
+    if (
+      !closed &&
+      !res.writableEnded
+    ) {
+
+      const fallbackText =
+        typeof result?.answer ===
+          "string" &&
+        result.answer.trim()
+          ? result.answer.trim()
+          : "";
+
+
+      if (fallbackText) {
+
+        sendSSE(
+          res,
+          {
+            type:
+              "content",
+
+            content:
+              fallbackText,
+
+            fallback:
+              true
+          }
+        );
+
       } else {
-        res.write(`data: ❌ Lỗi hệ thống\n\n`);
+
+        sendSSE(
+          res,
+          {
+            type:
+              "error",
+
+            error:
+              err?.name ===
+              "AbortError"
+                ? "LLM timeout"
+                : (
+                    err?.message ||
+                    "Internal error"
+                  )
+          }
+        );
       }
 
-      res.write(`data: [DONE]\n\n`);
+
+      sendSSE(
+        res,
+        "[DONE]"
+      );
+
+
       res.end();
-    } catch {}
+    }
+
+
+  } finally {
+
+    // =================================================
+    // 13. CLEANUP
+    // =================================================
+
+    if (heartbeat) {
+      clearInterval(
+        heartbeat
+      );
+    }
+
+
+    if (
+      controller &&
+      !controller.signal.aborted
+    ) {
+      controller.abort();
+    }
   }
 }
