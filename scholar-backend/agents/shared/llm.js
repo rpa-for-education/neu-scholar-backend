@@ -9,7 +9,7 @@ import { Agent, fetch as undiciFetch } from "undici";
 
 const OLLAMA_LLM_BASE = (
   process.env.OLLAMA_LLM_BASE_URL ||
-  "http://101.96.66.232:8037/ollama"
+  "http://10.2.13.58:8037/ollama"
 ).replace(/\/+$/, "");
 
 
