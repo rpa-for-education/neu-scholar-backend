@@ -92,6 +92,17 @@ async function handleAsk(req, res) {
       history 
     );
 
+    // ================= GREETING =================
+    const fullName =
+      context?.user_profile?.full_name?.trim() || "";
+
+    const isFirstTurn = history.length === 0;
+
+    const finalAnswer =
+      isFirstTurn && fullName
+        ? `Xin chào ${fullName},\n\n${result.answer}`
+        : result.answer;
+
     // ================= BUILD SOURCES =================
     const sources = [];
 
