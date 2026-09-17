@@ -1,10 +1,28 @@
+// Scholar metadata
+// Mô tả capability của phân hệ Hội thảo & Tạp chí.
+
 export const SCHOLAR_METADATA = {
-  name: "Hội thảo & Tạp chí",
+
+  // =====================================================
+  // GENERAL
+  // =====================================================
+
+  name:
+    "Hội thảo & Tạp chí",
+
   description:
     "Tìm kiếm, hỏi đáp và gợi ý các hội thảo và tạp chí khoa học uy tín trong nước và quốc tế, hỗ trợ hoạt động nghiên cứu và công bố khoa học.",
 
-  version: "2.0.0",
-  developer: "Nhóm thầy V Huy, V Minh, X Lâm",
+  version:
+    "2.1.0",
+
+  developer:
+    "Nhóm thầy V Huy, V Minh, X Lâm",
+
+
+  // =====================================================
+  // CAPABILITIES
+  // =====================================================
 
   capabilities: [
     "search",
@@ -13,17 +31,54 @@ export const SCHOLAR_METADATA = {
     "summarize"
   ],
 
+
+  // =====================================================
+  // SUPPORTED LLM
+  //
+  // Đây phải là model_id mà Portal gửi về Scholar API.
+  //
+  // Portal:
+  //   model_id = qwen2.5-14b
+  //
+  // Backend:
+  //   qwen2.5-14b
+  //        ↓
+  //   qwen2.5:14b-instruct-ctx16k
+  // =====================================================
+
   supported_models: [
     {
-      model_id: "qwen3-8b",
-      provider: "ollama",
-      model: "qwen3:8b",
-      name: "Qwen3 8B",
-      description: "Mô hình tối ưu cho tư vấn học thuật"
+      model_id:
+        "qwen2.5-14b",
+
+      provider:
+        "ollama",
+
+      model:
+        "qwen2.5:14b-instruct-ctx16k",
+
+      name:
+        "Qwen2.5 14B",
+
+      description:
+        "Mô hình Qwen2.5 14B Instruct với ngữ cảnh 16K, sử dụng cho tư vấn học thuật."
     }
   ],
 
-  domains: ["conference", "journal"],
+
+  // =====================================================
+  // DOMAINS
+  // =====================================================
+
+  domains: [
+    "conference",
+    "journal"
+  ],
+
+
+  // =====================================================
+  // SAMPLE PROMPTS
+  // =====================================================
 
   sample_prompts: [
     "Danh sách 5 hội thảo uy tín liên quan đến Trí tuệ nhân tạo, Học máy,...?",
@@ -32,18 +87,33 @@ export const SCHOLAR_METADATA = {
     "Một số tạp chí nổi bật ngành Ngôn ngữ học?"
   ],
 
+
+  // =====================================================
+  // PROVIDED DATA
+  // =====================================================
+
   provided_data_types: [
     {
-      type: "conferences",
+      type:
+        "conferences",
+
       description:
-        "Danh sách hội thảo trong nước và quốc tế (deadline, địa điểm, lĩnh vực)"
+        "Danh sách hội thảo trong nước và quốc tế, bao gồm thông tin về hạn nộp bài, thời gian tổ chức, địa điểm và lĩnh vực nghiên cứu."
     },
+
     {
-      type: "journals",
+      type:
+        "journals",
+
       description:
-        "Danh sách tạp chí khoa học (quartile, publisher, lĩnh vực)"
+        "Danh sách tạp chí khoa học, bao gồm thông tin về quartile, nhà xuất bản, quốc gia và lĩnh vực nghiên cứu."
     }
   ],
+
+
+  // =====================================================
+  // RANKING
+  // =====================================================
 
   ranking_logic: [
     "Relevance to research topic",
@@ -52,6 +122,14 @@ export const SCHOLAR_METADATA = {
     "Location / country preference"
   ],
 
-  contact: "kcntt@neu.edu.vn",
-  status: "active"
+
+  // =====================================================
+  // CONTACT
+  // =====================================================
+
+  contact:
+    "kcntt@neu.edu.vn",
+
+  status:
+    "active"
 };
