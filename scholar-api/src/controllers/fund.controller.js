@@ -5,36 +5,97 @@ import { ObjectId } from "mongodb";
 const COL = "fund";
 
 // ================= GET ALL =================
+
 export const getFunds = async (req, res) => {
+
   const db = await getDb();
 
-  const { search, page = 1, limit = 10 } = req.query;
+  const {
+    search,
+    page = 1,
+    limit = 10
+  } = req.query;
 
   const query = {};
 
-  if (search) {
+  // ================= SEARCH =================
+
+  if (search && search.trim() !== "") {
+
+    const keyword = search.trim();
+
     query.$or = [
-      { opportunity_title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-      { agency_name: { $regex: search, $options: "i" } },
-      { text: { $regex: search, $options: "i" } }
+
+      {
+        opportunity_title: {
+          $regex: keyword,
+          $options: "i"
+        }
+      },
+
+      {
+        agency_name: {
+          $regex: keyword,
+          $options: "i"
+        }
+      },
+
+      {
+        text: {
+          $regex: keyword,
+          $options: "i"
+        }
+      }
+
     ];
+
   }
 
-  const skip = (page - 1) * limit;
+  // ================= PAGINATION =================
+
+  const currentPage = Number(page) || 1;
+
+  const currentLimit = Number(limit) || 10;
+
+  const skip =
+    (currentPage - 1) * currentLimit;
+
+  // ================= QUERY =================
 
   const [data, total] = await Promise.all([
-    db.collection(COL).find(query).skip(skip).limit(Number(limit)).toArray(),
-    db.collection(COL).countDocuments(query)
+
+    db.collection(COL)
+
+      .find(query)
+
+      // Không tải các field lớn ở API danh sách
+      .project({
+        raw: 0,
+        text: 0,
+        description: 0
+      })
+
+      .skip(skip)
+
+      .limit(currentLimit)
+
+      .toArray(),
+
+    db.collection(COL)
+      .countDocuments(query)
+
   ]);
+
+  // ================= RESPONSE =================
 
   res.json({
     data,
     meta: {
-      page: Number(page),
-      limit: Number(limit),
+      page: currentPage,
+      limit: currentLimit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages:
+        Math.ceil(total / currentLimit)
     }
   });
 };
