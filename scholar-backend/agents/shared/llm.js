@@ -1,5 +1,8 @@
 // agents/shared/llm.js
 
+import { Agent, fetch as undiciFetch } from "undici";
+
+
 // =====================================================
 // CONFIG
 // =====================================================
@@ -10,9 +13,6 @@ const OLLAMA_LLM_BASE = (
 ).replace(/\/+$/, "");
 
 
-// Ưu tiên ENV.
-// Nếu ENV chưa cấu hình thì fallback sang secret hiện tại
-// để backend vẫn có thể hoạt động.
 const OLLAMA_LLM_SECKEY =
   process.env.OLLAMA_LLM_SECKEY ||
   "research";
@@ -27,10 +27,31 @@ const DEFAULT_MODEL_ID =
   "qwen2.5-14b";
 
 
+// Tổng thời gian tối đa cho một request LLM.
+// Đây KHÔNG phải connect timeout.
 const LLM_TIMEOUT =
   Number(
     process.env.LLM_TIMEOUT_MS
   ) || 60000;
+
+
+// Chỉ cho phép tối đa 4 giây để thiết lập TCP connection.
+const LLM_CONNECT_TIMEOUT =
+  Number(
+    process.env.LLM_CONNECT_TIMEOUT_MS
+  ) || 4000;
+
+
+// Sau lỗi network/connect timeout,
+// tạm thời không gọi lại cùng LLM server.
+//
+// Mục đích:
+// rewrite vừa lỗi thì generation không tiếp tục
+// chờ thêm một connect timeout nữa.
+const CIRCUIT_BREAKER_MS =
+  Number(
+    process.env.LLM_CIRCUIT_BREAKER_MS
+  ) || 15000;
 
 
 // =====================================================
@@ -43,6 +64,70 @@ export const modelMap = {
     model: DEFAULT_MODEL
   }
 };
+
+
+// =====================================================
+// UNDICI AGENT
+// =====================================================
+//
+// Native Node fetch dùng Undici bên dưới nhưng
+// connect timeout mặc định có thể ~10 giây.
+//
+// Dùng Agent riêng để chủ động giảm connect timeout.
+//
+// LLM_TIMEOUT vẫn kiểm soát toàn bộ request.
+// =====================================================
+
+const ollamaDispatcher =
+  new Agent({
+    connect: {
+      timeout:
+        LLM_CONNECT_TIMEOUT
+    }
+  });
+
+
+// =====================================================
+// CIRCUIT BREAKER
+// =====================================================
+
+let circuitOpenUntil = 0;
+
+let lastCircuitError = null;
+
+
+function isCircuitOpen() {
+  return (
+    circuitOpenUntil >
+    Date.now()
+  );
+}
+
+
+function openCircuit(error) {
+  circuitOpenUntil =
+    Date.now() +
+    CIRCUIT_BREAKER_MS;
+
+  lastCircuitError =
+    error?.message ||
+    "LLM unavailable";
+}
+
+
+function closeCircuit() {
+  circuitOpenUntil = 0;
+  lastCircuitError = null;
+}
+
+
+function circuitRemainingMs() {
+  return Math.max(
+    0,
+    circuitOpenUntil -
+      Date.now()
+  );
+}
 
 
 // =====================================================
@@ -103,10 +188,7 @@ function safeJSONParse(text) {
       .trim();
 
 
-  // ---------------------------------------------------
   // JSON trực tiếp
-  // ---------------------------------------------------
-
   try {
     return JSON.parse(clean);
   } catch {
@@ -114,10 +196,7 @@ function safeJSONParse(text) {
   }
 
 
-  // ---------------------------------------------------
-  // Tìm JSON object hoặc array trong response
-  // ---------------------------------------------------
-
+  // Tìm JSON object hoặc array
   const match =
     clean.match(
       /\{[\s\S]*\}|\[[\s\S]*\]/
@@ -157,17 +236,92 @@ function getErrorMessage(
 
 
 // =====================================================
+// ERROR HELPERS
+// =====================================================
+
+function getErrorCode(err) {
+  return (
+    err?.code ||
+    err?.cause?.code ||
+    ""
+  );
+}
+
+
+function isAbortError(err) {
+  return (
+    err?.name === "TimeoutError" ||
+    err?.name === "AbortError"
+  );
+}
+
+
+function isConnectTimeout(err) {
+  const code =
+    getErrorCode(err);
+
+  const message =
+    String(
+      err?.message ||
+      err?.cause?.message ||
+      ""
+    ).toLowerCase();
+
+
+  return (
+    code ===
+      "UND_ERR_CONNECT_TIMEOUT" ||
+
+    message.includes(
+      "connect timeout"
+    )
+  );
+}
+
+
+function isNetworkError(err) {
+  const code =
+    getErrorCode(err);
+
+  const networkCodes =
+    new Set([
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_SOCKET",
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "ETIMEDOUT",
+      "EAI_AGAIN",
+      "ENOTFOUND"
+    ]);
+
+
+  if (
+    networkCodes.has(code)
+  ) {
+    return true;
+  }
+
+
+  const message =
+    String(
+      err?.message ||
+      ""
+    ).toLowerCase();
+
+
+  return (
+    message === "fetch failed" ||
+    message.includes(
+      "network"
+    )
+  );
+}
+
+
+// =====================================================
 // LOW-LEVEL OLLAMA CALL
-//
-// Native fetch.
-//
-// Request giữ gần nhất với request Ollama
-// đã test thành công:
-// - /api/generate
-// - stream:false
-// - không temperature
-// - không num_ctx
-// - không num_predict
 // =====================================================
 
 async function callOllamaRaw(
@@ -185,18 +339,32 @@ async function callOllamaRaw(
   }
 
 
-  /*
-   * Với cấu hình hiện tại, biến này luôn có giá trị:
-   *
-   * ENV nếu có
-   * hoặc fallback "research".
-   *
-   * Giữ validation để tránh request sai nếu cấu hình
-   * bị thay đổi trong tương lai.
-   */
   if (!OLLAMA_LLM_SECKEY) {
     throw new Error(
       "OLLAMA_LLM_SECKEY is not configured"
+    );
+  }
+
+
+  // ===================================================
+  // CIRCUIT BREAKER
+  // ===================================================
+
+  if (isCircuitOpen()) {
+    const remaining =
+      circuitRemainingMs();
+
+
+    console.warn(
+      `⚡ LLM CIRCUIT OPEN — skip request (${remaining} ms remaining)`
+    );
+
+
+    throw new Error(
+      `LLM temporarily unavailable: ${
+        lastCircuitError ||
+        "previous connection failure"
+      }`
     );
   }
 
@@ -257,7 +425,12 @@ async function callOllamaRaw(
   );
 
   console.log(
-    "⏱️ TIMEOUT:",
+    "🔌 CONNECT TIMEOUT:",
+    `${LLM_CONNECT_TIMEOUT} ms`
+  );
+
+  console.log(
+    "⏱️ REQUEST TIMEOUT:",
     `${LLM_TIMEOUT} ms`
   );
 
@@ -267,7 +440,7 @@ async function callOllamaRaw(
   );
 
   console.log(
-    "🚚 TRANSPORT: native fetch"
+    "🚚 TRANSPORT: undici fetch"
   );
 
   console.log(
@@ -286,7 +459,7 @@ async function callOllamaRaw(
   try {
 
     const response =
-      await fetch(
+      await undiciFetch(
         url,
         {
           method:
@@ -308,6 +481,9 @@ async function callOllamaRaw(
               payload
             ),
 
+          dispatcher:
+            ollamaDispatcher,
+
           signal:
             AbortSignal.timeout(
               LLM_TIMEOUT
@@ -321,10 +497,6 @@ async function callOllamaRaw(
       start;
 
 
-    /*
-     * Đọc text trước để xử lý được cả trường hợp
-     * server trả body không phải JSON.
-     */
     const raw =
       await response.text();
 
@@ -362,6 +534,11 @@ async function callOllamaRaw(
       typeof data.response === "string"
         ? data.response
         : "";
+
+
+    // Server đã phản hồi thành công:
+    // đóng circuit nếu trước đó từng lỗi.
+    closeCircuit();
 
 
     console.log(
@@ -425,7 +602,6 @@ async function callOllamaRaw(
 
 
     return {
-
       content,
 
       latency,
@@ -475,9 +651,32 @@ async function callOllamaRaw(
       start;
 
 
-    const timeout =
-      err?.name === "TimeoutError" ||
-      err?.name === "AbortError";
+    const requestTimeout =
+      isAbortError(err);
+
+    const connectTimeout =
+      isConnectTimeout(err);
+
+    const networkError =
+      isNetworkError(err);
+
+
+    // =================================================
+    // Chỉ mở circuit với lỗi hạ tầng/network.
+    //
+    // Không mở circuit vì:
+    // - JSON sai
+    // - HTTP 400
+    // - prompt sai
+    // - lỗi logic ứng dụng
+    // =================================================
+
+    if (
+      connectTimeout ||
+      networkError
+    ) {
+      openCircuit(err);
+    }
 
 
     console.error(
@@ -511,9 +710,18 @@ async function callOllamaRaw(
 
     console.error(
       "❌ TYPE:",
-      timeout
-        ? "TIMEOUT"
-        : err?.name
+      connectTimeout
+        ? "CONNECT_TIMEOUT"
+        : requestTimeout
+          ? "REQUEST_TIMEOUT"
+          : err?.name ||
+            "ERROR"
+    );
+
+    console.error(
+      "❌ CODE:",
+      getErrorCode(err) ||
+      "N/A"
     );
 
     console.error(
@@ -532,15 +740,32 @@ async function callOllamaRaw(
     }
 
 
+    if (isCircuitOpen()) {
+
+      console.error(
+        "⚡ CIRCUIT:",
+        `OPEN for ${circuitRemainingMs()} ms`
+      );
+    }
+
+
     console.error(
       "===============================\n"
     );
 
 
-    if (timeout) {
+    if (connectTimeout) {
 
       throw new Error(
-        `Ollama timeout after ${LLM_TIMEOUT}ms`
+        `Ollama connect timeout after ${LLM_CONNECT_TIMEOUT}ms`
+      );
+    }
+
+
+    if (requestTimeout) {
+
+      throw new Error(
+        `Ollama request timeout after ${LLM_TIMEOUT}ms`
       );
     }
 
@@ -615,7 +840,6 @@ export async function callLLM(
 
 
     return {
-
       provider:
         "ollama",
 
@@ -634,7 +858,6 @@ export async function callLLM(
         "",
 
       usage: {
-
         prompt_tokens:
           result.promptTokens,
 
@@ -658,16 +881,8 @@ export async function callLLM(
     );
 
 
-    /*
-     * DETERMINISTIC FALLBACK CONTRACT
-     *
-     * Không throw ra ngoài.
-     *
-     * Scholar/Fund service nhận answer=""
-     * và có thể sử dụng deterministic answer.
-     */
+    // Giữ contract cũ để không phá Scholar/Fund.
     return {
-
       provider:
         "ollama",
 
@@ -683,7 +898,6 @@ export async function callLLM(
         "",
 
       usage: {
-
         prompt_tokens:
           null,
 
@@ -769,16 +983,12 @@ ${prompt}
 
 
 // =====================================================
-// QUERY REWRITE
+// LEGACY QUERY EXPANSION
 //
-// Đây là query expansion cũ.
-//
-// LƯU Ý:
-// Contextual rewrite hiện nằm ở:
+// Contextual conversation rewrite nằm tại:
 // agents/shared/queryRewriter.js
 //
-// Giữ export này để không phá các module cũ
-// vẫn đang import rewriteQueryLLM.
+// Giữ export này để không phá module cũ.
 // =====================================================
 
 export async function rewriteQueryLLM(
@@ -883,6 +1093,8 @@ Return exactly this JSON structure:
 
 // =====================================================
 // RERANK
+//
+// Giữ lại để tương thích với module hiện tại.
 // =====================================================
 
 export async function rerankLLM(
@@ -1039,16 +1251,13 @@ Example:
     }
 
 
-    /*
-     * Candidate bị LLM bỏ sót:
-     * giữ ranking ban đầu.
-     */
     candidates.forEach(
       (item, index) => {
 
         if (
           !used.has(index)
         ) {
+
           reranked.push(
             item
           );
@@ -1057,10 +1266,6 @@ Example:
     );
 
 
-    /*
-     * Nếu input > 15:
-     * giữ nguyên phần còn lại.
-     */
     if (
       items.length >
       candidates.length
@@ -1087,4 +1292,43 @@ Example:
 
     return items;
   }
+}
+
+
+// =====================================================
+// OPTIONAL STATUS
+//
+// Hữu ích cho /health hoặc debug.
+// Không ảnh hưởng code cũ.
+// =====================================================
+
+export function getLLMStatus() {
+  return {
+    provider:
+      "ollama",
+
+    base_url:
+      OLLAMA_LLM_BASE,
+
+    model:
+      DEFAULT_MODEL,
+
+    connect_timeout_ms:
+      LLM_CONNECT_TIMEOUT,
+
+    request_timeout_ms:
+      LLM_TIMEOUT,
+
+    circuit_breaker_ms:
+      CIRCUIT_BREAKER_MS,
+
+    circuit_open:
+      isCircuitOpen(),
+
+    circuit_remaining_ms:
+      circuitRemainingMs(),
+
+    last_error:
+      lastCircuitError
+  };
 }
