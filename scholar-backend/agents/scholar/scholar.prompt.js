@@ -1,5 +1,783 @@
 // agents/scholar/scholar.prompt.js
 
+// =====================================================
+// CONFIG
+// =====================================================
+
+const MAX_ITEMS = 5;
+
+// Chỉ dùng một lượng history nhỏ khi câu hỏi thực sự
+// là câu hỏi nối tiếp.
+const MAX_HISTORY = 4;
+const MAX_HISTORY_CHARS_PER_ITEM = 500;
+
+// Project chỉ được đưa vào khi câu hỏi có liên quan.
+const MAX_PROJECT_CHARS = 1500;
+
+// Document chỉ được đưa vào khi câu hỏi có dấu hiệu
+// yêu cầu sử dụng tài liệu.
+const MAX_DOC_CHARS = 4000;
+
+
+// =====================================================
+// TEXT UTILS
+// =====================================================
+
+function normalizeText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+function normalizeForDetection(value) {
+  return normalizeText(value)
+    .toLowerCase();
+}
+
+
+function truncate(value, maxChars) {
+  const text = normalizeText(value);
+
+  if (!text) {
+    return "";
+  }
+
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, maxChars).trim()}…`;
+}
+
+
+function joinArray(value) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .filter(Boolean)
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(", ");
+}
+
+
+// =====================================================
+// CONTEXT INTENT DETECTION
+// =====================================================
+
+/**
+ * Không phải câu hỏi nào cũng cần:
+ * - history
+ * - profile
+ * - project
+ * - documents
+ *
+ * Retrieval question độc lập như:
+ *
+ * "Danh sách 5 hội thảo về AI"
+ *
+ * chỉ cần:
+ * - current question
+ * - retrieval results
+ *
+ * Điều này giúp prompt ngắn hơn đáng kể.
+ */
+
+
+function needsHistory(question) {
+  const q =
+    normalizeForDetection(question);
+
+  if (!q) {
+    return false;
+  }
+
+  const patterns = [
+    "ở trên",
+    "bên trên",
+    "vừa rồi",
+    "trước đó",
+    "trước đây",
+    "trong số đó",
+    "trong các",
+    "các kết quả trên",
+    "kết quả trên",
+    "danh sách trên",
+    "cái nào",
+    "cái thứ",
+    "mục nào",
+    "mục thứ",
+    "hội thảo đó",
+    "hội thảo này",
+    "tạp chí đó",
+    "tạp chí này",
+    "nó ",
+    "chúng ",
+    "so sánh chúng",
+    "so sánh các kết quả",
+    "kết quả nào"
+  ];
+
+  return patterns.some(
+    pattern => q.includes(pattern)
+  );
+}
+
+
+function needsProfile(question) {
+  const q =
+    normalizeForDetection(question);
+
+  if (!q) {
+    return false;
+  }
+
+  const patterns = [
+    "phù hợp với tôi",
+    "phù hợp cho tôi",
+    "của tôi",
+    "hướng nghiên cứu của tôi",
+    "lĩnh vực của tôi",
+    "chuyên môn của tôi",
+    "hồ sơ của tôi",
+    "profile của tôi",
+    "đơn vị của tôi",
+    "chức danh của tôi",
+    "học vị của tôi",
+    "recommend cho tôi",
+    "gợi ý cho tôi"
+  ];
+
+  return patterns.some(
+    pattern => q.includes(pattern)
+  );
+}
+
+
+function needsProject(question) {
+  const q =
+    normalizeForDetection(question);
+
+  if (!q) {
+    return false;
+  }
+
+  const patterns = [
+    "dự án",
+    "đề tài",
+    "project",
+    "nghiên cứu đang làm",
+    "nghiên cứu của tôi",
+    "đề tài của tôi",
+    "dự án của tôi",
+    "phù hợp với đề tài",
+    "phù hợp với dự án"
+  ];
+
+  return patterns.some(
+    pattern => q.includes(pattern)
+  );
+}
+
+
+function needsDocuments(question) {
+  const q =
+    normalizeForDetection(question);
+
+  if (!q) {
+    return false;
+  }
+
+  const patterns = [
+    "tài liệu",
+    "file",
+    "document",
+    "bài báo",
+    "bài viết",
+    "bản thảo",
+    "manuscript",
+    "paper",
+    "tệp",
+    "đính kèm",
+    "upload",
+    "tôi gửi",
+    "đã gửi",
+    "nội dung này",
+    "tài liệu này",
+    "file này"
+  ];
+
+  return patterns.some(
+    pattern => q.includes(pattern)
+  );
+}
+
+
+// =====================================================
+// DATE / STATUS HELPERS
+// =====================================================
+
+function safeTime(value) {
+  if (!value) {
+    return null;
+  }
+
+  const time =
+    new Date(value).getTime();
+
+  return Number.isFinite(time)
+    ? time
+    : null;
+}
+
+
+function getStatus(conference) {
+  const now =
+    Date.now();
+
+  const deadline =
+    safeTime(
+      conference?.deadline
+    );
+
+  const start =
+    safeTime(
+      conference?.start_date
+    );
+
+
+  // ===================================================
+  // DEADLINE AVAILABLE
+  // ===================================================
+
+  if (deadline !== null) {
+    const diffDays =
+      (deadline - now) /
+      (1000 * 60 * 60 * 24);
+
+
+    if (diffDays > 30) {
+      return "submission_open";
+    }
+
+
+    if (diffDays > 0) {
+      return "submission_soon";
+    }
+
+
+    // Deadline đã qua nhưng hội thảo chưa diễn ra.
+    if (start !== null) {
+      if (start > now) {
+        return "upcoming_event";
+      }
+
+      return "past_event";
+    }
+
+
+    return "submission_closed";
+  }
+
+
+  // ===================================================
+  // NO DEADLINE, BUT EVENT DATE AVAILABLE
+  // ===================================================
+
+  if (start !== null) {
+    if (start > now) {
+      return "upcoming_event";
+    }
+
+    return "past_event";
+  }
+
+
+  return "unknown";
+}
+
+
+// =====================================================
+// PROFILE CONTEXT
+// =====================================================
+
+function buildProfileContext(profile) {
+  if (!profile) {
+    return "";
+  }
+
+
+  const lines = [];
+
+
+  if (profile.full_name) {
+    lines.push(
+      `Họ tên: ${normalizeText(profile.full_name)}`
+    );
+  }
+
+
+  if (profile.position) {
+    lines.push(
+      `Vị trí/Chức vụ: ${normalizeText(profile.position)}`
+    );
+  }
+
+
+  if (profile.academic_title) {
+    lines.push(
+      `Chức danh khoa học: ${normalizeText(profile.academic_title)}`
+    );
+  }
+
+
+  if (profile.academic_degree) {
+    lines.push(
+      `Học vị: ${normalizeText(profile.academic_degree)}`
+    );
+  }
+
+
+  if (profile.department_name) {
+    lines.push(
+      `Đơn vị: ${normalizeText(profile.department_name)}`
+    );
+  }
+
+
+  const directions =
+    joinArray(
+      profile.direction
+    );
+
+
+  if (directions) {
+    lines.push(
+      `Hướng nghiên cứu: ${directions}`
+    );
+  }
+
+
+  if (!lines.length) {
+    return "";
+  }
+
+
+  return [
+    "=== HỒ SƠ NGƯỜI DÙNG ===",
+    ...lines
+  ].join("\n");
+}
+
+
+// =====================================================
+// PROJECT CONTEXT
+// =====================================================
+
+function buildProjectContext(project) {
+  if (!project) {
+    return "";
+  }
+
+
+  const lines = [];
+
+
+  const name =
+    normalizeText(
+      project?.name
+    );
+
+
+  const description =
+    truncate(
+      project?.description,
+      MAX_PROJECT_CHARS
+    );
+
+
+  if (name) {
+    lines.push(
+      `Tên: ${name}`
+    );
+  }
+
+
+  if (description) {
+    lines.push(
+      `Mô tả: ${description}`
+    );
+  }
+
+
+  if (!lines.length) {
+    return "";
+  }
+
+
+  return [
+    "=== DỰ ÁN / ĐỀ TÀI ===",
+    ...lines
+  ].join("\n");
+}
+
+
+// =====================================================
+// HISTORY CONTEXT
+// =====================================================
+
+function buildHistoryContext(history) {
+  if (
+    !Array.isArray(history) ||
+    !history.length
+  ) {
+    return "";
+  }
+
+
+  const items =
+    history
+      .filter(
+        item =>
+          item &&
+          ["user", "assistant"].includes(
+            item.role
+          ) &&
+          typeof item.content === "string" &&
+          item.content.trim()
+      )
+      .slice(-MAX_HISTORY)
+      .map(item => {
+        const role =
+          item.role === "user"
+            ? "User"
+            : "Assistant";
+
+        const content =
+          truncate(
+            item.content,
+            MAX_HISTORY_CHARS_PER_ITEM
+          );
+
+        return `${role}: ${content}`;
+      })
+      .filter(Boolean);
+
+
+  if (!items.length) {
+    return "";
+  }
+
+
+  return [
+    "=== HỘI THOẠI GẦN NHẤT ===",
+    ...items
+  ].join("\n");
+}
+
+
+// =====================================================
+// DOCUMENT CONTEXT
+// =====================================================
+
+function buildDocumentsContext(docs) {
+  if (
+    !Array.isArray(docs) ||
+    !docs.length
+  ) {
+    return "";
+  }
+
+
+  const lines = [
+    "=== TÀI LIỆU NGƯỜI DÙNG ==="
+  ];
+
+
+  let remainingChars =
+    MAX_DOC_CHARS;
+
+
+  let truncatedAny =
+    false;
+
+
+  for (const doc of docs) {
+    if (remainingChars <= 0) {
+      truncatedAny = true;
+      break;
+    }
+
+
+    const rawText =
+      typeof doc?.text === "string"
+        ? doc.text.trim()
+        : "";
+
+
+    if (!rawText) {
+      continue;
+    }
+
+
+    const name =
+      normalizeText(doc?.name) ||
+      "document";
+
+
+    const text =
+      rawText.slice(
+        0,
+        remainingChars
+      );
+
+
+    if (
+      text.length <
+      rawText.length
+    ) {
+      truncatedAny = true;
+    }
+
+
+    remainingChars -=
+      text.length;
+
+
+    lines.push(
+      `[FILE: ${name}]`
+    );
+
+    lines.push(
+      text
+    );
+  }
+
+
+  if (lines.length === 1) {
+    return "";
+  }
+
+
+  if (truncatedAny) {
+    lines.push(
+      "[Một phần tài liệu đã được lược bớt do giới hạn ngữ cảnh.]"
+    );
+  }
+
+
+  return lines.join("\n");
+}
+
+
+// =====================================================
+// CONFERENCE DATA
+// =====================================================
+
+function buildConferenceContext(
+  conferences
+) {
+
+  if (
+    !Array.isArray(conferences) ||
+    !conferences.length
+  ) {
+    return "";
+  }
+
+
+  const lines = [
+    "=== HỘI THẢO TỪ HỆ THỐNG ==="
+  ];
+
+
+  conferences
+    .slice(0, MAX_ITEMS)
+    .forEach(
+      (conference, index) => {
+
+        const title =
+          normalizeText(
+            conference?.name ||
+            conference?.title ||
+            conference?.acronym
+          ) ||
+          "N/A";
+
+
+        const location =
+          [
+            conference?.city,
+            conference?.country
+          ]
+            .filter(Boolean)
+            .map(normalizeText)
+            .filter(Boolean)
+            .join(", ") ||
+          "N/A";
+
+
+        const fields =
+          joinArray(
+            conference?.fields
+          ) ||
+          joinArray(
+            conference?.topics
+          ) ||
+          "N/A";
+
+
+        const url =
+          normalizeText(
+            conference?.cfp_link ||
+            conference?.url ||
+            conference?.link ||
+            conference?.website
+          ) ||
+          "N/A";
+
+
+        const deadline =
+          normalizeText(
+            conference?.deadline
+          ) ||
+          "N/A";
+
+
+        const event =
+          normalizeText(
+            conference?.start_date
+          ) ||
+          "N/A";
+
+
+        const status =
+          getStatus(
+            conference
+          );
+
+
+        lines.push(
+          `[C${index + 1}] ` +
+          `${title}` +
+          ` | location: ${location}` +
+          ` | deadline: ${deadline}` +
+          ` | event: ${event}` +
+          ` | status: ${status}` +
+          ` | field: ${fields}` +
+          ` | url: ${url}`
+        );
+      }
+    );
+
+
+  return lines.join("\n");
+}
+
+
+// =====================================================
+// JOURNAL DATA
+// =====================================================
+
+function buildJournalContext(
+  journals
+) {
+
+  if (
+    !Array.isArray(journals) ||
+    !journals.length
+  ) {
+    return "";
+  }
+
+
+  const lines = [
+    "=== TẠP CHÍ TỪ HỆ THỐNG ==="
+  ];
+
+
+  journals
+    .slice(0, MAX_ITEMS)
+    .forEach(
+      (journal, index) => {
+
+        const title =
+          normalizeText(
+            journal?.title
+          ) ||
+          "N/A";
+
+
+        const publisher =
+          normalizeText(
+            journal?.publisher
+          ) ||
+          "N/A";
+
+
+        const quartile =
+          normalizeText(
+            journal?.sjr_best_quartile
+          ) ||
+          "N/A";
+
+
+        const fields =
+          joinArray(
+            journal?.fields
+          ) ||
+          joinArray(
+            journal?.categories
+          ) ||
+          joinArray(
+            journal?.areas
+          ) ||
+          "N/A";
+
+
+        const country =
+          normalizeText(
+            journal?.country
+          ) ||
+          "N/A";
+
+
+        const url =
+          normalizeText(
+            journal?.scimago_link ||
+            journal?.url
+          ) ||
+          "N/A";
+
+
+        lines.push(
+          `[J${index + 1}] ` +
+          `${title}` +
+          ` | publisher: ${publisher}` +
+          ` | quartile: ${quartile}` +
+          ` | field: ${fields}` +
+          ` | country: ${country}` +
+          ` | url: ${url}`
+        );
+      }
+    );
+
+
+  return lines.join("\n");
+}
+
+
+// =====================================================
+// MAIN PROMPT BUILDER
+// =====================================================
+
 export function buildScholarPrompt(
   question,
   conferences = [],
@@ -7,29 +785,9 @@ export function buildScholarPrompt(
   llmContext = {}
 ) {
 
-  // =====================================================
-  // LIMITS
-  // =====================================================
+  const currentQuestion =
+    normalizeText(question);
 
-  const MAX_HISTORY = 10;
-
-  // Giới hạn mỗi message trong history
-  const MAX_HISTORY_CHARS_PER_ITEM = 2000;
-
-  // Tối đa số conference / journal đưa vào LLM
-  const MAX_ITEMS = 5;
-
-  // Qwen2.5 hiện dùng context 16K.
-  // Không đưa toàn bộ file dài vào prompt.
-  const MAX_DOC_CHARS = 12000;
-
-  // Giới hạn mô tả project để tránh context bất thường
-  const MAX_PROJECT_CHARS = 4000;
-
-
-  // =====================================================
-  // CONTEXT
-  // =====================================================
 
   const {
     history = [],
@@ -39,538 +797,219 @@ export function buildScholarPrompt(
   } = llmContext || {};
 
 
-  let context = `
+  // ===================================================
+  // DETERMINE REQUIRED CONTEXT
+  // ===================================================
+
+  const useHistory =
+    needsHistory(currentQuestion);
+
+
+  const useProfile =
+    needsProfile(currentQuestion);
+
+
+  const useProject =
+    needsProject(currentQuestion);
+
+
+  const useDocuments =
+    needsDocuments(currentQuestion);
+
+
+  // ===================================================
+  // DEBUG CONTEXT SELECTION
+  // ===================================================
+
+  console.log(
+    "🧩 PROMPT CONTEXT:",
+    [
+      useHistory
+        ? "history"
+        : null,
+
+      useProfile
+        ? "profile"
+        : null,
+
+      useProject
+        ? "project"
+        : null,
+
+      useDocuments
+        ? "documents"
+        : null
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+      "retrieval-only"
+  );
+
+
+  // ===================================================
+  // SYSTEM INSTRUCTIONS
+  // ===================================================
+
+  const sections = [];
+
+
+  sections.push(`
 Bạn là AI tư vấn học thuật hỗ trợ tra cứu hội thảo và tạp chí khoa học.
 
 QUY TẮC:
-- Trả lời đúng câu hỏi hiện tại của người dùng.
-- Đối với thông tin về hội thảo và tạp chí, chỉ sử dụng dữ liệu hội thảo và tạp chí được cung cấp bên dưới.
-- Không được bịa tên hội thảo, tạp chí, hạn nộp bài, ngày tổ chức, quartile, nhà xuất bản hoặc thông tin học thuật.
-- Không được tự tạo hội thảo hoặc tạp chí không xuất hiện trong dữ liệu được cung cấp.
-- Có thể sử dụng hồ sơ người dùng để cá nhân hóa câu trả lời khi thực sự phù hợp.
-- Có thể sử dụng thông tin dự án/đề tài khi câu hỏi liên quan đến dự án đó.
-- Có thể sử dụng nội dung tài liệu người dùng cung cấp để hiểu chủ đề, nội dung và bối cảnh nghiên cứu.
-- Sử dụng lịch sử hội thoại để hiểu các câu hỏi nối tiếp và tham chiếu như "ở trên", "trong số đó", "cái nào", "hội thảo đó" hoặc "tạp chí đó".
-- Câu hỏi hiện tại có mức ưu tiên cao nhất.
-- Nếu hồ sơ, dự án, tài liệu hoặc lịch sử không liên quan đến câu hỏi hiện tại thì bỏ qua.
-- Các kết quả hội thảo và tạp chí đã được hệ thống tìm kiếm và xếp hạng trước khi đưa vào đây; ưu tiên các kết quả ở đầu danh sách khi mức độ phù hợp tương đương.
-- Khi người dùng hỏi về hội thảo phù hợp để nộp bài, ưu tiên hội thảo còn hạn nộp bài nếu dữ liệu cho phép xác định.
-- Phân biệt rõ hạn nộp bài (deadline) với ngày diễn ra hội thảo (event date).
-- Không suy diễn dữ liệu còn thiếu.
-- Nếu một thuộc tính được ghi là N/A thì không được tự bổ sung giá trị.
-- Nếu dữ liệu được cung cấp không đủ để khẳng định điều gì, hãy nói rõ giới hạn đó.
-- Không tự chào người dùng; lời chào đầu phiên được hệ thống xử lý riêng.
-- Trả lời bằng tiếng Việt, rõ ràng, súc tích và có cấu trúc phù hợp với câu hỏi.
-`.trim();
-
-
-  // =====================================================
-  // USER PROFILE
-  // =====================================================
-
-  if (profile) {
-
-    const directions =
-      Array.isArray(profile.direction)
-        ? profile.direction
-            .filter(Boolean)
-            .map(String)
-            .join(", ")
-        : "";
-
-
-    const hasProfileData =
-      profile.full_name ||
-      profile.position ||
-      profile.academic_title ||
-      profile.academic_degree ||
-      profile.department_name ||
-      directions;
-
-
-    if (hasProfileData) {
-
-      context +=
-        "\n\n=== HỒ SƠ NGƯỜI DÙNG ===\n";
-
-
-      if (profile.full_name) {
-        context +=
-          `Họ tên: ${profile.full_name}\n`;
-      }
-
-
-      if (profile.position) {
-        context +=
-          `Vị trí/Chức vụ: ${profile.position}\n`;
-      }
-
-
-      if (profile.academic_title) {
-        context +=
-          `Chức danh khoa học: ${profile.academic_title}\n`;
-      }
-
-
-      if (profile.academic_degree) {
-        context +=
-          `Học vị: ${profile.academic_degree}\n`;
-      }
-
-
-      if (profile.department_name) {
-        context +=
-          `Đơn vị: ${profile.department_name}\n`;
-      }
-
-
-      if (directions) {
-        context +=
-          `Hướng nghiên cứu: ${directions}\n`;
-      }
-    }
-  }
-
-
-  // =====================================================
-  // PROJECT
-  // =====================================================
-
-  if (project) {
-
-    const projectName =
-      typeof project.name === "string"
-        ? project.name.trim()
-        : "";
-
-
-    const projectDescription =
-      typeof project.description === "string"
-        ? project.description
-            .trim()
-            .slice(0, MAX_PROJECT_CHARS)
-        : "";
-
-
-    if (
-      projectName ||
-      projectDescription
-    ) {
-
-      context +=
-        "\n=== DỰ ÁN / ĐỀ TÀI ĐANG MỞ ===\n";
-
-
-      if (projectName) {
-        context +=
-          `Tên: ${projectName}\n`;
-      }
-
-
-      if (projectDescription) {
-        context +=
-          `Mô tả: ${projectDescription}\n`;
-      }
-    }
-  }
-
-
-  // =====================================================
-  // DOCUMENTS
-  // =====================================================
-
-  if (
-    Array.isArray(docs) &&
-    docs.length
-  ) {
-
-    context +=
-      "\n=== TÀI LIỆU NGƯỜI DÙNG CUNG CẤP ===\n";
-
-
-    let remainingChars =
-      MAX_DOC_CHARS;
-
-
-    let truncated =
-      false;
-
-
-    for (const doc of docs) {
-
-      if (remainingChars <= 0) {
-        truncated = true;
-        break;
-      }
-
-
-      const rawText =
-        typeof doc?.text === "string"
-          ? doc.text.trim()
-          : "";
-
-
-      if (!rawText) {
-        continue;
-      }
-
-
-      const docName =
-        typeof doc?.name === "string" &&
-        doc.name.trim()
-          ? doc.name.trim()
-          : "document";
-
-
-      const text =
-        rawText.slice(
-          0,
-          remainingChars
-        );
-
-
-      if (
-        text.length <
-        rawText.length
-      ) {
-        truncated = true;
-      }
-
-
-      remainingChars -=
-        text.length;
-
-
-      context +=
-        `\n[FILE: ${docName}]\n`;
-
-      context +=
-        `${text}\n`;
-    }
-
-
-    if (truncated) {
-      context +=
-        "\n[Ghi chú: Một phần nội dung tài liệu đã được lược bớt do giới hạn ngữ cảnh. Không suy diễn nội dung nằm ngoài phần được cung cấp.]\n";
-    }
-  }
-
-
-  // =====================================================
-  // HISTORY
-  // =====================================================
-
-  if (
-    Array.isArray(history) &&
-    history.length
-  ) {
-
-    context +=
-      "\n=== LỊCH SỬ HỘI THOẠI GẦN NHẤT ===\n";
-
-
-    history
-      .filter(
-        h =>
-          h &&
-          ["user", "assistant"].includes(
-            h.role
-          ) &&
-          typeof h.content === "string" &&
-          h.content.trim()
-      )
-      .slice(-MAX_HISTORY)
-      .forEach(h => {
-
-        const role =
-          h.role === "user"
-            ? "User"
-            : "Assistant";
-
-
-        const content =
-          h.content
-            .trim()
-            .slice(
-              0,
-              MAX_HISTORY_CHARS_PER_ITEM
-            );
-
-
-        context +=
-          `${role}: ${content}\n`;
-      });
-  }
-
-
-  // =====================================================
-  // STATUS HELPER
-  // =====================================================
-
-  function safeTime(value) {
-
-    if (!value) {
-      return null;
-    }
-
-
-    const time =
-      new Date(value)
-        .getTime();
-
-
-    return Number.isFinite(time)
-      ? time
-      : null;
-  }
-
-
-  function getStatus(c) {
-
-    const now =
-      Date.now();
-
-
-    const deadline =
-      safeTime(c?.deadline);
-
-
-    const start =
-      safeTime(c?.start_date);
-
-
-    // -------------------------------------------------
-    // Có deadline
-    // -------------------------------------------------
-
-    if (deadline !== null) {
-
-      const diffDays =
-        (deadline - now) /
-        (1000 * 60 * 60 * 24);
-
-
-      if (diffDays > 30) {
-        return "submission_open";
-      }
-
-
-      if (diffDays > 0) {
-        return "submission_soon";
-      }
-
-
-      // Deadline đã qua
-      if (start !== null) {
-
-        if (start > now) {
-          return "upcoming_event";
-        }
-
-
-        return "past_event";
-      }
-
-
-      return "submission_closed";
-    }
-
-
-    // -------------------------------------------------
-    // Không có deadline nhưng có event date
-    // -------------------------------------------------
-
-    if (start !== null) {
-
-      if (start > now) {
-        return "upcoming_event";
-      }
-
-
-      return "past_event";
-    }
-
-
-    return "unknown";
-  }
-
-
-  // =====================================================
-  // CONFERENCES
-  // =====================================================
-
-  if (
-    Array.isArray(conferences) &&
-    conferences.length
-  ) {
-
-    context +=
-      "\n=== DỮ LIỆU HỘI THẢO TỪ HỆ THỐNG ===\n";
-
-
-    conferences
-      .slice(0, MAX_ITEMS)
-      .forEach(
-        (c, i) => {
-
-          const title =
-            c?.name ||
-            c?.title ||
-            c?.acronym ||
-            "N/A";
-
-
-          const location =
-            [
-              c?.city,
-              c?.country
-            ]
-              .filter(Boolean)
-              .join(", ") ||
-            "N/A";
-
-
-          const fields =
-            Array.isArray(c?.fields) &&
-            c.fields.length
-              ? c.fields
-                  .filter(Boolean)
-                  .join(", ")
-
-              : Array.isArray(c?.topics) &&
-                c.topics.length
-                ? c.topics
-                    .filter(Boolean)
-                    .join(", ")
-
-                : "N/A";
-
-
-          const url =
-            c?.cfp_link ||
-            c?.url ||
-            c?.link ||
-            c?.website ||
-            "N/A";
-
-
-          context +=
-            `[C${i + 1}] ` +
-            `${title}` +
-            ` | location: ${location}` +
-            ` | deadline: ${c?.deadline || "N/A"}` +
-            ` | event: ${c?.start_date || "N/A"}` +
-            ` | status: ${getStatus(c)}` +
-            ` | field: ${fields}` +
-            ` | url: ${url}\n`;
-        }
+- Trả lời trực tiếp câu hỏi hiện tại bằng tiếng Việt.
+- Với hội thảo/tạp chí, chỉ sử dụng dữ liệu hệ thống cung cấp bên dưới.
+- Không bịa tên, deadline, ngày tổ chức, quartile, nhà xuất bản, URL hoặc dữ liệu còn thiếu.
+- Giữ nguyên tên chính thức của hội thảo/tạp chí.
+- Nếu dữ liệu là N/A hoặc không có thì không tự bổ sung.
+- Phân biệt deadline nộp bài với ngày diễn ra hội thảo.
+- Các kết quả đã được hệ thống truy xuất và xếp hạng trước.
+- Không tự chào người dùng.
+- Trả lời rõ ràng, ngắn gọn và có cấu trúc.
+`.trim());
+
+
+  // ===================================================
+  // OPTIONAL CONTEXT
+  // ===================================================
+
+  if (useProfile) {
+    const profileContext =
+      buildProfileContext(
+        profile
       );
-  }
 
-
-  // =====================================================
-  // JOURNALS
-  // =====================================================
-
-  if (
-    Array.isArray(journals) &&
-    journals.length
-  ) {
-
-    context +=
-      "\n=== DỮ LIỆU TẠP CHÍ TỪ HỆ THỐNG ===\n";
-
-
-    journals
-      .slice(0, MAX_ITEMS)
-      .forEach(
-        (j, i) => {
-
-          const fields =
-            Array.isArray(j?.fields) &&
-            j.fields.length
-              ? j.fields
-                  .filter(Boolean)
-                  .join(", ")
-
-              : Array.isArray(j?.categories) &&
-                j.categories.length
-                ? j.categories
-                    .filter(Boolean)
-                    .join(", ")
-
-                : Array.isArray(j?.areas) &&
-                  j.areas.length
-                  ? j.areas
-                      .filter(Boolean)
-                      .join(", ")
-
-                  : "N/A";
-
-
-          const url =
-            j?.scimago_link ||
-            j?.url ||
-            "N/A";
-
-
-          context +=
-            `[J${i + 1}] ` +
-            `${j?.title || "N/A"}` +
-            ` | publisher: ${j?.publisher || "N/A"}` +
-            ` | quartile: ${j?.sjr_best_quartile || "N/A"}` +
-            ` | field: ${fields}` +
-            ` | country: ${j?.country || "N/A"}` +
-            ` | url: ${url}\n`;
-        }
+    if (profileContext) {
+      sections.push(
+        profileContext
       );
+    }
   }
 
 
-  // =====================================================
+  if (useProject) {
+    const projectContext =
+      buildProjectContext(
+        project
+      );
+
+    if (projectContext) {
+      sections.push(
+        projectContext
+      );
+    }
+  }
+
+
+  if (useDocuments) {
+    const documentsContext =
+      buildDocumentsContext(
+        docs
+      );
+
+    if (documentsContext) {
+      sections.push(
+        documentsContext
+      );
+    }
+  }
+
+
+  if (useHistory) {
+    const historyContext =
+      buildHistoryContext(
+        history
+      );
+
+    if (historyContext) {
+      sections.push(
+        historyContext
+      );
+    }
+  }
+
+
+  // ===================================================
+  // RETRIEVAL RESULTS
+  // ===================================================
+
+  const conferenceContext =
+    buildConferenceContext(
+      conferences
+    );
+
+
+  const journalContext =
+    buildJournalContext(
+      journals
+    );
+
+
+  if (conferenceContext) {
+    sections.push(
+      conferenceContext
+    );
+  }
+
+
+  if (journalContext) {
+    sections.push(
+      journalContext
+    );
+  }
+
+
+  // ===================================================
   // NO RETRIEVAL RESULTS
-  // =====================================================
+  // ===================================================
 
   if (
-    (!Array.isArray(conferences) ||
-      conferences.length === 0) &&
-    (!Array.isArray(journals) ||
-      journals.length === 0)
+    !conferenceContext &&
+    !journalContext
   ) {
 
-    context += `
-    
-=== KẾT QUẢ TRA CỨU HỌC THUẬT ===
+    sections.push(`
+=== KẾT QUẢ TRA CỨU ===
 Không có hội thảo hoặc tạp chí nào được hệ thống truy xuất cho câu hỏi hiện tại.
 
-Nếu câu hỏi chỉ liên quan đến tài liệu, hồ sơ, dự án hoặc lịch sử hội thoại thì vẫn trả lời dựa trên ngữ cảnh tương ứng.
+Nếu câu hỏi liên quan đến hồ sơ, dự án, tài liệu hoặc lịch sử đã được cung cấp trong prompt, có thể trả lời dựa trên ngữ cảnh đó.
 
-Nếu câu hỏi yêu cầu thông tin cụ thể về hội thảo hoặc tạp chí thì không được tự tạo kết quả.
-`;
+Nếu người dùng yêu cầu thông tin cụ thể về hội thảo hoặc tạp chí thì không được tự tạo kết quả.
+`.trim());
   }
 
 
-  // =====================================================
+  // ===================================================
   // CURRENT QUESTION
-  // =====================================================
+  // ===================================================
 
-  context += `
+  sections.push(`
+=== CÂU HỎI ===
+${currentQuestion || "(empty)"}
 
-=== CÂU HỎI HIỆN TẠI ===
-${typeof question === "string"
-  ? question.trim()
-  : String(question || "")}
+=== YÊU CẦU ===
+Trả lời trực tiếp câu hỏi trên.
 
-=== YÊU CẦU TRẢ LỜI ===
-Hãy trả lời trực tiếp câu hỏi hiện tại bằng tiếng Việt.
+Nếu liệt kê hội thảo:
+- Chỉ sử dụng [C1], [C2], ... có trong dữ liệu.
+- Ưu tiên đúng thứ tự kết quả hệ thống khi mức độ phù hợp tương đương.
+- Nếu người dùng hỏi khả năng nộp bài, chú ý deadline và status.
+- Không gọi một hội thảo là "uy tín", "hàng đầu" hoặc tương tự nếu dữ liệu không cung cấp căn cứ cho nhận định đó.
 
-Nếu liệt kê hội thảo hoặc tạp chí:
-- Chỉ liệt kê các mục có trong dữ liệu hệ thống ở trên.
-- Giữ nguyên tên chính thức.
-- Không tự tạo deadline, quartile hoặc thông tin còn thiếu.
-- Khi phù hợp, sử dụng mã [C1], [C2], ... hoặc [J1], [J2], ... để người dùng có thể đối chiếu với nguồn.
-`;
+Nếu liệt kê tạp chí:
+- Chỉ sử dụng [J1], [J2], ... có trong dữ liệu.
+- Không tự suy diễn quartile hoặc chỉ số còn thiếu.
+
+Khi phù hợp, ghi mã [C1], [C2] hoặc [J1], [J2] sau tên để đối chiếu nguồn.
+`.trim());
 
 
-  return context.trim();
+  // ===================================================
+  // FINAL PROMPT
+  // ===================================================
+
+  return sections
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
 }
