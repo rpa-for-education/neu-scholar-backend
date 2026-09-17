@@ -2,51 +2,67 @@
 import axios from "axios";
 
 // ================= CONFIG =================
-const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://host.docker.internal:11434").replace(/\/$/, "");
-const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
-const DEFAULT_MODEL_ID = "qwen3-8b";
+const OLLAMA_LLM_BASE = (
+  process.env.OLLAMA_LLM_BASE_URL ||
+  "http://101.96.66.232:8037/ollama"
+).replace(/\/$/, "");
 
-// ===== MODEL MAP =====
+const OLLAMA_LLM_SECKEY =
+  process.env.OLLAMA_LLM_SECKEY || "";
+
+const DEFAULT_MODEL =
+  process.env.OLLAMA_MODEL ||
+  "qwen2.5:14b-instruct-ctx16k";
+
+const DEFAULT_MODEL_ID = "qwen2.5-14b";
+
+// ================= MODEL MAP =================
 export const modelMap = {
-  "qwen3-8b": { provider: "ollama", model: "qwen3:8b" },
-
-  // 👉 mở rộng sau nếu cần
-  // "mistral-7b": { provider: "ollama", model: "mistral:7b" },
+  "qwen2.5-14b": {
+    provider: "ollama",
+    model: "qwen2.5:14b-instruct-ctx16k"
+  }
 };
 
 // ================= LOW LEVEL CALL =================
-async function callOllamaRaw(messages, model) {
+async function callOllamaRaw(prompt, model) {
   const start = Date.now();
 
   try {
     const res = await axios.post(
-      `${OLLAMA_BASE}/api/chat`,
+      `${OLLAMA_LLM_BASE}/api/generate`,
       {
         model: model || DEFAULT_MODEL,
-        messages,
+        prompt,
         stream: false,
         options: {
-          temperature: 0.2,
-        },
+          temperature: 0.2
+        }
       },
       {
-        headers: { "Content-Type": "application/json" },
-        timeout: 120000,
+        headers: {
+          "Content-Type": "application/json",
+          "x-ollama-seckey": OLLAMA_LLM_SECKEY
+        },
+        timeout: 120000
       }
     );
 
-    const latency = Date.now() - start;
-
     return {
-      content: res.data?.message?.content || "",
-      latency,
+      content: res.data?.response || "",
+      latency: Date.now() - start
     };
 
   } catch (err) {
-    console.error("❌ Ollama RAW error:", err.response?.data || err.message);
+    console.error(
+      "❌ Ollama RAW error:",
+      err.response?.data || err.message
+    );
 
     throw new Error(
-      err.response?.data?.error || err.message || "Ollama request failed"
+      err.response?.data?.error ||
+      err.message ||
+      "Ollama request failed"
     );
   }
 }
@@ -56,58 +72,78 @@ function safeJSONParse(text) {
   try {
     return JSON.parse(text);
   } catch {
-    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    const match =
+      text?.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+
     if (match) {
       try {
         return JSON.parse(match[0]);
       } catch {}
     }
+
     return null;
   }
 }
 
 // ================= GENERIC CALL =================
-export async function callLLM(prompt, model_id = DEFAULT_MODEL_ID) {
-  const info = modelMap[model_id];
+export async function callLLM(
+  prompt,
+  model_id = DEFAULT_MODEL_ID
+) {
+  const finalModelId =
+    modelMap[model_id]
+      ? model_id
+      : DEFAULT_MODEL_ID;
 
-  if (!info) {
-    throw new Error(`Invalid model_id: ${model_id}`);
+  if (finalModelId !== model_id) {
+    console.warn(
+      `⚠️ Unknown model_id=${model_id}, fallback → ${finalModelId}`
+    );
   }
 
+  const info = modelMap[finalModelId];
   const model = info.model;
 
-  console.log(`⚡ callLLM → model_id=${model_id} | model=${model}`);
+  console.log(
+    `⚡ callLLM → model_id=${finalModelId} | model=${model}`
+  );
 
   try {
     const res = await callOllamaRaw(
-      [{ role: "user", content: prompt }],
+      prompt,
       model
     );
 
     return {
       provider: "ollama",
-      model_id,
+      model_id: finalModelId,
       model,
       latency: res.latency,
-      answer: res.content || "",
+      answer: res.content || ""
     };
 
   } catch (err) {
-    console.error("❌ LLM error:", err.message);
+    console.error(
+      "❌ LLM error:",
+      err.message
+    );
 
     return {
       provider: "ollama",
-      model_id,
+      model_id: finalModelId,
       model,
       latency: null,
       answer: "",
-      error: err.message,
+      error: err.message
     };
   }
 }
 
 // ================= JSON MODE =================
-export async function callLLMJson(prompt, model_id = DEFAULT_MODEL_ID) {
+export async function callLLMJson(
+  prompt,
+  model_id = DEFAULT_MODEL_ID
+) {
   const strictPrompt = `
 You MUST return valid JSON only.
 No explanation.
@@ -116,20 +152,33 @@ No markdown.
 ${prompt}
 `;
 
-  const res = await callLLM(strictPrompt, model_id);
+  const res = await callLLM(
+    strictPrompt,
+    model_id
+  );
 
-  const parsed = safeJSONParse(res.answer);
+  const parsed =
+    safeJSONParse(res.answer);
 
   if (!parsed) {
-    console.error("❌ JSON parse failed. Raw:", res.answer);
-    throw new Error("LLM JSON parse failed");
+    console.error(
+      "❌ JSON parse failed. Raw:",
+      res.answer
+    );
+
+    throw new Error(
+      "LLM JSON parse failed"
+    );
   }
 
   return parsed;
 }
 
 // ================= QUERY REWRITE =================
-export async function rewriteQueryLLM(question) {
+export async function rewriteQueryLLM(
+  question,
+  model_id = DEFAULT_MODEL_ID
+) {
   const prompt = `
 Rewrite the query into 3 optimized academic search queries.
 
@@ -148,17 +197,35 @@ Return JSON:
 `;
 
   try {
-    const data = await callLLMJson(prompt);
-    return data.queries?.length ? data.queries : [question];
+    const data =
+      await callLLMJson(
+        prompt,
+        model_id
+      );
+
+    return data.queries?.length
+      ? data.queries
+      : [question];
+
   } catch (err) {
-    console.warn("⚠️ rewrite fallback:", err.message);
+    console.warn(
+      "⚠️ rewrite fallback:",
+      err.message
+    );
+
     return [question];
   }
 }
 
 // ================= RERANK =================
-export async function rerankLLM(query, items) {
-  if (!items?.length) return items;
+export async function rerankLLM(
+  query,
+  items,
+  model_id = DEFAULT_MODEL_ID
+) {
+  if (!items?.length) {
+    return items;
+  }
 
   const prompt = `
 You are an academic ranking system.
@@ -171,20 +238,35 @@ Rank the items by relevance (best first).
 Return JSON array of indices.
 
 Items:
-${items.map((it, i) =>
-  `[${i}] ${it.title || it.name} | ${it.topics || it.areas || ""}`
-).join("\n")}
+${items
+  .map(
+    (it, i) =>
+      `[${i}] ${it.title || it.name} | ${
+        it.topics || it.areas || ""
+      }`
+  )
+  .join("\n")}
 `;
 
   try {
-    const order = await callLLMJson(prompt);
+    const order =
+      await callLLMJson(
+        prompt,
+        model_id
+      );
 
-    return order
-      .map(i => items[i])
-      .filter(Boolean);
+    return Array.isArray(order)
+      ? order
+          .map(i => items[i])
+          .filter(Boolean)
+      : items;
 
   } catch (err) {
-    console.warn("⚠️ rerank fallback:", err.message);
+    console.warn(
+      "⚠️ rerank fallback:",
+      err.message
+    );
+
     return items;
   }
 }
