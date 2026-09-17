@@ -2,8 +2,7 @@
 import { runAgent } from "./scholar.agent.js";
 import { addToHistory } from "../../middlewares/session.js";
 import {
-  normalizeHistory,
-  buildContextualQuestion
+  normalizeHistory
 } from "../shared/memory.js";
 
 export async function runScholarAgent(
@@ -19,14 +18,10 @@ export async function runScholarAgent(
     // ================= MEMORY =================
     const normalizedHistory = normalizeHistory(history);
 
-    const contextualQuestion = buildContextualQuestion(
-      question,
-      normalizedHistory
-    );
-
-    console.log("🧠 HISTORY:", normalizedHistory.length);
-    console.log("🔎 ORIGINAL QUESTION:", question);
-    console.log("🔎 CONTEXTUAL QUESTION:", contextualQuestion);
+    console.log("\n========== SCHOLAR AGENT ==========");
+    console.log("🧠 HISTORY ITEMS:", normalizedHistory.length);
+    console.log("🔎 SEARCH QUESTION:", question);
+    console.log("===================================\n");
 
     // ================= SEARCH =================
     const result = await runAgent(question, topk);

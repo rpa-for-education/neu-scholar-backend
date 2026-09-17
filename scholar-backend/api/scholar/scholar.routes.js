@@ -103,6 +103,9 @@ async function handleAsk(req, res) {
         ? `Xin chào ${fullName},\n\n${result.answer}`
         : result.answer;
 
+    console.log("👤 FULL NAME:", fullName || "(empty)");
+    console.log("🆕 FIRST TURN:", isFirstTurn);
+
     // ================= BUILD SOURCES =================
     const sources = [];
 
@@ -127,13 +130,13 @@ async function handleAsk(req, res) {
       });
     });
 
-    // ===== JOURNAL (🔥 FIX QUAN TRỌNG) =====
+    // ===== JOURNAL =====
     (result?.journals || []).forEach((j, i) => {
       sources.push({
         id: `J${i + 1}`,
         type: "journal",
         title: j.title,
-        url: getJournalUrl(j), // 🔥 FIX Ở ĐÂY
+        url: getJournalUrl(j),
         metadata: {
           publisher: j.publisher,
           quartile: j.sjr_best_quartile
@@ -141,25 +144,24 @@ async function handleAsk(req, res) {
       });
     });
 
-    // 🔥 DEBUG (có thể tắt)
     console.log("📦 SOURCES:", sources);
 
+    // ================= RESPONSE =================
     return res.json({
       session_id: session_id ?? null,
       status: "success",
 
-      // 🔥 LUÔN dùng output đã format
-      content_markdown: result.answer,
-      answer: result.answer,
+      // 🔥 phải dùng finalAnswer
+      content_markdown: finalAnswer,
+      answer: finalAnswer,
 
       sources,
 
       meta: {
         response_time_ms: result.responseTimeMs,
-        domain: result.domain,
-      },
+        domain: result.domain
+      }
     });
-
   } catch (err) {
     console.error("❌ Scholar error:", err);
 
