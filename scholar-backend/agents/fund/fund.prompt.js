@@ -1,158 +1,285 @@
-// fund.prompt.js - FINAL LOCKED (HARD FORMAT + REAL INSIGHT + FIX LINK)
+// agents/fund/fund.prompt.js
 
-export function buildFundPrompt(question, funds = [], history = []) {
-  let context = `
-Bạn là chuyên gia tư vấn quỹ nghiên cứu.
+// =====================================================
+// CONFIG
+// =====================================================
 
-⚠️ QUY TẮC BẮT BUỘC:
-- CHỈ được sử dụng dữ liệu trong === FUNDS ===
-- MỖI quỹ phải tham chiếu bằng ID [F1], [F2], ...
-- TUYỆT ĐỐI KHÔNG được tạo quỹ mới
-- KHÔNG được suy đoán ngoài dữ liệu
-- Nếu không có quỹ phù hợp rõ ràng → trả lời: "không đủ dữ liệu"
+const MAX_FUNDS = 5;
+const MAX_HISTORY = 3;
+const MAX_HISTORY_CHARS = 500;
+const MAX_SUMMARY_CHARS = 180;
 
----
 
-🎯 NHIỆM VỤ:
-- Lựa chọn các quỹ PHÙ HỢP NHẤT với câu hỏi
-- Ưu tiên:
-  1. Mức độ liên quan nội dung (QUAN TRỌNG NHẤT)
-  2. Funding
-  3. Deadline
+// =====================================================
+// TEXT UTILS
+// =====================================================
 
----
+function normalizeText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
 
-⚠️ RÀNG BUỘC QUAN TRỌNG:
-- Nếu query có từ khóa cụ thể (nafosted, vietnam, AI, health...):
-  → ƯU TIÊN quỹ có chứa từ khóa đó
-- KHÔNG chọn quỹ không liên quan chỉ vì funding cao
-- Nếu tất cả đều ít liên quan:
-  → chọn quỹ "ít sai nhất"
+  return String(value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
----
 
-⚖️ VỀ THỨ TỰ:
-- Danh sách đã được xếp hạng sẵn (F1 > F2 > F3...)
-- CHỈ đổi thứ tự nếu có lý do rõ ràng
-- Nếu tương đương → giữ nguyên
+function truncate(value, maxChars) {
+  const text = normalizeText(value);
 
----
+  if (!text || text.length <= maxChars) {
+    return text;
+  }
 
-🚫 TUYỆT ĐỐI CẤM:
-- "Dưới đây là..."
-- "Dựa trên yêu cầu của bạn..."
-- "Hệ thống đã tìm thấy..."
-- Bất kỳ câu mở đầu kiểu template
+  return `${text.slice(0, maxChars).trim()}…`;
+}
 
-👉 Nếu viết những câu này → trả lời sai
 
----
+// =====================================================
+// FUND FIELD HELPERS
+// =====================================================
 
-🔥 OUTPUT PHẢI TUÂN THỦ NGHIÊM NGẶT:
+function getTitle(fund) {
+  return normalizeText(
+    fund?.opportunity_title ||
+    fund?.title
+  );
+}
 
-1. DÒNG ĐẦU TIÊN = INTRO (2–3 câu)
-2. KHÔNG được thêm tiêu đề kiểu "Danh sách", "Kết quả"
-3. KHÔNG được giải thích lan man
-4. KHÔNG được lặp lại câu hỏi
 
----
+function getAgency(fund) {
+  return normalizeText(
+    fund?.agency_name ||
+    fund?.agency
+  );
+}
 
-🔥 INTRO (BẮT BUỘC CÓ INSIGHT):
 
-- 2–3 câu
-- KHÔNG generic
-- PHẢI phân tích từ dữ liệu
+function getDeadline(fund) {
+  return normalizeText(
+    fund?.close_date ||
+    fund?.deadline
+  );
+}
 
-👉 BẮT BUỘC chọn ít nhất 2 yếu tố:
 
-- Nguồn quỹ (Mỹ, Nafosted…)
-- Funding (lớn / nhỏ)
-- Deadline (gần / đã hết hạn)
-- Pattern (research / collaboration…)
-- Trạng thái (còn hạn / hết hạn)
+function getAmount(fund) {
+  return normalizeText(
+    fund?.funding_amount ??
+    fund?.amount
+  );
+}
 
-👉 Nếu không có insight → coi như FAIL
 
----
+function getLink(fund) {
+  return normalizeText(
+    fund?.url ||
+    fund?.link ||
+    fund?.additional_info_url ||
+    fund?.["LINK TO ADDITIONAL INFORMATION"] ||
+    fund?.["OPPORTUNITY URL"]
+  );
+}
 
-📌 FORMAT OUTPUT CHÍNH XÁC:
 
-<INTRO - 2 đến 3 câu>
+function getSummary(fund) {
+  return truncate(
+    fund?.text ||
+    fund?.description,
+    MAX_SUMMARY_CHARS
+  );
+}
+
+
+// =====================================================
+// HISTORY
+// =====================================================
+
+function buildHistoryContext(history) {
+  if (!Array.isArray(history)) {
+    return "";
+  }
+
+  const items = history
+    .filter(
+      item =>
+        item &&
+        ["user", "assistant"].includes(item.role) &&
+        typeof item.content === "string" &&
+        item.content.trim()
+    )
+    .slice(-MAX_HISTORY)
+    .map(item => {
+      const role =
+        item.role === "user"
+          ? "User"
+          : "Assistant";
+
+      return (
+        `${role}: ` +
+        truncate(
+          item.content,
+          MAX_HISTORY_CHARS
+        )
+      );
+    });
+
+  if (!items.length) {
+    return "";
+  }
+
+  return [
+    "=== HISTORY ===",
+    ...items
+  ].join("\n");
+}
+
+
+// =====================================================
+// FUNDS
+// =====================================================
+
+function buildFundsContext(funds) {
+  if (
+    !Array.isArray(funds) ||
+    !funds.length
+  ) {
+    return "";
+  }
+
+  const items = funds
+    .slice(0, MAX_FUNDS)
+    .map((fund, index) => {
+      const id =
+        `F${index + 1}`;
+
+      return [
+        `[${id}]`,
+        `Title: ${getTitle(fund) || "N/A"}`,
+        `Agency: ${getAgency(fund) || "N/A"}`,
+        `Deadline: ${getDeadline(fund) || "N/A"}`,
+        `Funding: ${getAmount(fund) || "N/A"}`,
+        `Link: ${getLink(fund) || "N/A"}`,
+        `Summary: ${getSummary(fund) || "N/A"}`
+      ].join("\n");
+    });
+
+  return [
+    "=== FUNDS ===",
+    ...items
+  ].join("\n\n");
+}
+
+
+// =====================================================
+// SYSTEM INSTRUCTIONS
+// =====================================================
+
+const SYSTEM_PROMPT = `
+Bạn là AI tư vấn cơ hội tài trợ nghiên cứu.
+
+QUY TẮC:
+- Chỉ sử dụng dữ liệu trong === FUNDS ===.
+- Không tạo thêm quỹ, chương trình, agency, funding, deadline hoặc URL.
+- Mỗi quỹ được đề cập phải tham chiếu đúng ID [F1], [F2], ...
+- Giữ nguyên tên chính thức của quỹ/chương trình.
+- Dữ liệu N/A hoặc không có thì không tự bổ sung.
+- Không suy diễn đơn vị tiền tệ nếu dữ liệu không nêu rõ.
+- Không gọi funding là "lớn", "cao", "tốt" nếu dữ liệu không đủ căn cứ so sánh.
+- Không khẳng định quỹ còn mở nếu deadline không cho phép xác định điều đó.
+- Nếu không có kết quả đủ liên quan, nói rõ không đủ dữ liệu phù hợp.
+- Trả lời bằng tiếng Việt, ngắn gọn và trực tiếp.
+
+XẾP HẠNG:
+- Kết quả đã được hệ thống truy xuất và xếp hạng trước.
+- Ưu tiên mức độ phù hợp với chủ đề/yêu cầu của người dùng.
+- Funding và deadline chỉ là thông tin hỗ trợ, không được lấn át mức độ liên quan.
+- Giữ thứ tự [F1], [F2], ... trừ khi dữ liệu cung cấp lý do rõ ràng để thay đổi.
+
+ĐỊNH DẠNG:
+- Mở đầu bằng tối đa 2 câu nhận xét cụ thể dựa trên dữ liệu.
+- Không lặp lại câu hỏi.
+- Không dùng câu mở đầu khuôn mẫu như "Dưới đây là..." hoặc "Hệ thống đã tìm thấy...".
+- Sau phần mở đầu, trình bày các quỹ ngắn gọn.
+
+Mẫu:
+
+<Nhận xét ngắn dựa trên dữ liệu>
 
 🔥 **Quỹ nổi bật nhất:**
 
-🎓 **[F? Title]**
-🏢 [Agency]
-💰 [Funding nếu có]
-🔎 [Link nếu có]
-👉 [Reason 1 dòng]
+🎓 **[F1] Tên quỹ**
+🏢 Agency
+💰 Funding (nếu có)
+📅 Deadline (nếu có)
+🔎 Link (nếu có)
+👉 Một lý do ngắn gọn về mức độ phù hợp
 
 ---
 
-🎓 **[F? Title]**
-🏢 [Agency]
-💰 [Funding nếu có]
-🔎 [Link nếu có]
-👉 [Reason]
+🎓 **[F2] Tên quỹ**
+🏢 Agency
+💰 Funding (nếu có)
+📅 Deadline (nếu có)
+🔎 Link (nếu có)
+👉 Một lý do ngắn gọn về mức độ phù hợp
 
----
+Chỉ hiển thị trường có dữ liệu thực tế.
+`.trim();
 
-(lặp lại các quỹ khác)
 
----
+// =====================================================
+// MAIN
+// Giữ nguyên export/signature hiện tại.
+// =====================================================
 
-📌 RULE CHO Reason:
-- 1 dòng duy nhất
-- Không lặp info
-- Không dài dòng
-- Tập trung:
-  + phù hợp
-  + funding (nếu đáng nói)
-  + deadline
+export function buildFundPrompt(
+  question,
+  funds = [],
+  history = []
+) {
+  const currentQuestion =
+    normalizeText(question);
 
----
+  const sections = [
+    SYSTEM_PROMPT
+  ];
 
-`;
+  const historyContext =
+    buildHistoryContext(history);
 
-  // ================= 🔥 FIX LINK (ADD - KHÔNG PHÁ LOGIC) =================
-  const getLink = (f) => {
-    return (
-      f.link ||
-      f.url ||
-      f.additional_info_url ||
-      f["LINK TO ADDITIONAL INFORMATION"] ||
-      f["OPPORTUNITY URL"] ||
-      ""
+  if (historyContext) {
+    sections.push(
+      historyContext
     );
-  };
-
-  // ================= HISTORY =================
-  if (history.length) {
-    context += "\n=== HISTORY ===\n";
-    history.slice(-3).forEach((h) => {
-      context += `${h.role}: ${h.content}\n`;
-    });
   }
 
-  // ================= FUNDS =================
-  if (funds.length) {
-    context += "\n=== FUNDS ===\n";
+  const fundsContext =
+    buildFundsContext(funds);
 
-    funds.forEach((f, i) => {
-      context += `
-[F${i + 1}]
-Title: ${f.title}
-Agency: ${f.agency || "N/A"}
-Deadline: ${f.deadline || "N/A"}
-Funding: ${f.amount || "N/A"}
-Link: ${getLink(f) || "N/A"}
-Summary: ${(f.text || "").slice(0, 180)}
-`;
-    });
+  if (fundsContext) {
+    sections.push(
+      fundsContext
+    );
+  } else {
+    sections.push(`
+=== FUNDS ===
+Không có dữ liệu quỹ được hệ thống cung cấp.
+`.trim());
   }
 
-  // ================= QUESTION =================
-  context += `\n=== QUESTION ===\n${question}\n`;
+  sections.push(`
+=== QUESTION ===
+${currentQuestion || "(empty)"}
 
-  return context;
+=== YÊU CẦU ===
+Trả lời trực tiếp câu hỏi dựa trên dữ liệu FUNDS ở trên.
+Nếu FUNDS không có kết quả phù hợp, không tự tạo thông tin để bù vào.
+`.trim());
+
+  return sections
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
 }
