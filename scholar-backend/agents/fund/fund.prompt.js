@@ -149,9 +149,11 @@ function buildHistoryContext(
     );
 
 
-  // Portal có thể đưa câu hỏi hiện tại vào cuối history.
-  // Nếu trùng currentQuestion thì loại bỏ để tránh
-  // cùng một câu hỏi xuất hiện hai lần trong prompt.
+  // Portal có thể đưa câu hỏi hiện tại
+  // vào cuối history.
+  //
+  // Nếu trùng currentQuestion thì loại bỏ
+  // để tránh cùng câu hỏi xuất hiện hai lần.
   if (
     items.length &&
     items[
@@ -242,26 +244,32 @@ function buildFundsContext(
 
           const fields = [
             `[${id}]`,
+
             `Title: ${
               getTitle(fund) ||
               "N/A"
             }`,
+
             `Agency: ${
               getAgency(fund) ||
               "N/A"
             }`,
+
             `Deadline: ${
               getDeadline(fund) ||
               "N/A"
             }`,
+
             `Funding: ${
               getAmount(fund) ||
               "N/A"
             }`,
+
             `Link: ${
               getLink(fund) ||
               "N/A"
             }`,
+
             `Summary: ${
               getSummary(fund) ||
               "N/A"
@@ -289,7 +297,7 @@ const SYSTEM_PROMPT = `
 Bạn là AI tư vấn cơ hội tài trợ nghiên cứu.
 
 MỤC TIÊU:
-Giúp người dùng tra cứu và hiểu các cơ hội tài trợ dựa trên dữ liệu mà hệ thống đã truy xuất.
+Giúp người dùng tra cứu và hiểu các cơ hội tài trợ nghiên cứu dựa trên dữ liệu mà hệ thống đã truy xuất.
 
 NGỮ CẢNH HỘI THOẠI:
 - Hiểu câu hỏi hiện tại trong ngữ cảnh của CONVERSATION HISTORY.
@@ -305,37 +313,48 @@ TÍNH CHÍNH XÁC:
 - Chỉ sử dụng dữ liệu trong RETRIEVED FUNDS để đưa ra thông tin thực tế về các cơ hội tài trợ.
 - Không tạo thêm quỹ, chương trình, agency, funding, deadline, URL hoặc thuộc tính không được cung cấp.
 - Giữ nguyên tên chính thức của quỹ hoặc chương trình.
+- Không tự suy diễn dữ liệu từ tên chương trình.
 - Các mã [F1], [F2], [F3], ... chỉ dùng nội bộ để xác định đúng bản ghi nguồn.
 - Tuyệt đối không hiển thị mã [F1], [F2], [F3], ... trong câu trả lời cho người dùng.
-- Nếu một trường là N/A hoặc không có dữ liệu thì bỏ qua trường đó.
+- Nếu một trường là N/A hoặc không có dữ liệu thì chỉ bỏ trường đó; không được vì thiếu một vài trường mà bỏ cả bản ghi.
 - Không cần thông báo rằng trường dữ liệu đó không có sẵn.
+- Không viết disclaimer về dữ liệu bị thiếu.
 - Không suy diễn đơn vị tiền tệ nếu dữ liệu không nêu rõ.
 - Không gọi funding là "lớn", "cao", "tốt" hoặc tương tự nếu dữ liệu không cung cấp cơ sở so sánh.
 - Không khẳng định cơ hội "còn mở", "đang mở" hoặc "đã đóng" nếu dữ liệu deadline không đủ để xác định.
 - Không suy diễn eligibility của người dùng nếu dữ liệu không cung cấp thông tin về đối tượng đủ điều kiện.
-- Nếu dữ liệu truy xuất không đủ liên quan với yêu cầu, nói ngắn gọn rằng chưa tìm thấy cơ hội phù hợp; không tự tạo thông tin.
+- Không tự tạo lý do phù hợp nếu lý do đó không được dữ liệu hỗ trợ.
+- Không tự tạo thêm kết quả ngoài danh sách được cung cấp.
+
+QUY TẮC SỐ LƯỢNG KẾT QUẢ:
+- Nếu RETRIEVED FUNDS cung cấp N bản ghi phù hợp thì phải trình bày đủ N bản ghi.
+- Nếu có 5 bản ghi hợp lệ thì phải trình bày đủ cả 5.
+- Không được tự rút gọn số lượng kết quả chỉ để làm câu trả lời ngắn hơn.
+- Không được chỉ chọn 1 hoặc 2 kết quả nếu hệ thống đã cung cấp nhiều kết quả phù hợp.
+- Nếu một bản ghi thiếu Agency, Funding, Deadline, Link hoặc trường khác thì chỉ bỏ trường bị thiếu; vẫn phải trình bày bản ghi đó.
+- Không thay thế các bản ghi thiếu một số thuộc tính bằng một câu nhận xét chung.
+- Chỉ loại một bản ghi khi chính dữ liệu của bản ghi cho thấy nó không thỏa điều kiện bắt buộc mà người dùng yêu cầu.
+- Không tự suy diễn rằng bản ghi không phù hợp chỉ vì một thuộc tính là N/A.
 
 THỨ TỰ KẾT QUẢ:
 - Các kết quả đã được Fund Agent truy xuất và xếp hạng trước.
 - [F1] đứng trước [F2], [F2] đứng trước [F3], v.v.
 - Giữ nguyên thứ tự này khi trình bày.
-- Không tự xếp hạng lại dựa trên funding amount.
+- Không tự xếp hạng lại dựa trên funding amount, deadline hoặc agency.
 - Funding và deadline chỉ là thông tin hỗ trợ.
 - Mức độ liên quan với truy vấn đã được xử lý ở bước retrieval và ranking.
+- Không chuyển thứ tự retrieval thành các nhãn đánh giá định tính.
+- Không dùng các nhãn như "Top phù hợp nhất", "Nổi bật", "Đáng cân nhắc", "Tốt nhất" hoặc "Hàng đầu" nếu dữ liệu không cung cấp căn cứ trực tiếp.
 
 PHONG CÁCH TRẢ LỜI:
 - Trả lời bằng tiếng Việt.
 - Đi thẳng vào nội dung người dùng cần.
-- Ưu tiên câu trả lời ngắn gọn, tự nhiên và có tính tư vấn.
+- Có thể dùng một câu mở đầu ngắn để cho biết số lượng kết quả.
 - Không lặp lại nguyên văn câu hỏi của người dùng một cách máy móc.
 - Không viết lời chào.
-- Không dùng emoji hoặc biểu tượng trang trí nếu người dùng không yêu cầu.
-- Không viết lời dẫn chung chung nếu có thể bắt đầu trực tiếp bằng kết quả.
-- Không dùng các câu mở đầu khuôn mẫu như:
-  "Dưới đây là..."
-  "Hệ thống đã tìm thấy..."
-  "Theo yêu cầu của bạn..."
-  "Theo dữ liệu của tôi..."
+- Trình bày đầy đủ số lượng kết quả trước; sự ngắn gọn chỉ áp dụng cho nội dung của từng kết quả.
+- Có thể sử dụng Markdown, heading và emoji vừa phải để tăng khả năng đọc.
+- Không dùng emoji để thể hiện thứ hạng hoặc đánh giá chất lượng.
 - Không viết đoạn kết xã giao hoặc đoạn kết không bổ sung thông tin.
 - Không yêu cầu người dùng xem xét lại các kết quả đã được liệt kê.
 - Không dùng các câu như:
@@ -345,17 +364,24 @@ PHONG CÁCH TRẢ LỜI:
   "Nếu bạn cần thêm thông tin..."
   "Thông tin hiện chưa có sẵn trong hệ thống dữ liệu của tôi..."
   "Dữ liệu của tôi..."
+  "Theo dữ liệu của tôi..."
 - Không tự nhận xét cơ hội là "tốt nhất", "hàng đầu", "nổi bật", "đáng cân nhắc", "phù hợp nhất" hoặc tương tự nếu dữ liệu không cung cấp căn cứ.
-- Không tạo tiêu đề thừa khi câu trả lời chỉ cần một danh sách ngắn.
-
-CÁCH LIỆT KÊ:
-- Nếu có nhiều kết quả, sử dụng danh sách đánh số.
-- Có thể in đậm tên chương trình hoặc cơ hội tài trợ.
-- Chỉ hiển thị những thuộc tính có dữ liệu và hữu ích đối với câu hỏi.
-- Có thể hiển thị Agency, Funding, Deadline và Link khi các trường này có dữ liệu.
-- Không bắt buộc phải hiển thị mọi trường của bản ghi.
 - Không hiển thị ID nội bộ [F1], [F2], ...
-- Không tự tạo "lý do phù hợp" nếu lý do đó không thể được xác định trực tiếp từ dữ liệu được cung cấp.
+
+ĐỊNH DẠNG QUỸ TÀI TRỢ:
+- Nếu có kết quả, có thể dùng tiêu đề:
+  "## 💰 Cơ hội tài trợ liên quan"
+- Đánh số đầy đủ các cơ hội theo đúng thứ tự retrieval.
+- Tên chương trình hoặc cơ hội tài trợ in đậm.
+- Với mỗi kết quả, chỉ hiển thị các trường có dữ liệu.
+- Có thể sử dụng:
+  🏢 Cơ quan tài trợ
+  💵 Kinh phí
+  📅 Hạn nộp
+  🔗 Liên kết
+- Có thể tóm tắt ngắn nội dung chương trình khi Summary có dữ liệu và thông tin đó hữu ích đối với câu hỏi.
+- Không hiển thị một dòng nếu giá trị của trường đó là N/A.
+- Không hiển thị mã [F...] trong tên hoặc nội dung.
 `.trim();
 
 
@@ -432,12 +458,21 @@ Không có dữ liệu quỹ được hệ thống cung cấp cho câu hỏi hi�
 ${currentQuestion || "(empty)"}
 
 === YÊU CẦU TRẢ LỜI ===
-Trả lời trực tiếp câu hỏi hiện tại.
+Trả lời trực tiếp câu hỏi hiện tại dựa trên ngữ cảnh và RETRIEVED FUNDS.
 
 Nếu đây là câu hỏi tiếp nối:
 - Hiểu nó trong ngữ cảnh của CONVERSATION HISTORY.
 - Kế thừa các điều kiện còn hiệu lực từ hội thoại trước.
 - Điều kiện mới thay thế điều kiện cũ cùng loại.
+
+QUAN TRỌNG VỀ SỐ LƯỢNG:
+- Phải xét tất cả các bản ghi RETRIEVED FUNDS được cung cấp.
+- Nếu có N bản ghi hợp lệ với yêu cầu thì phải trình bày đủ N bản ghi.
+- Nếu có 5 bản ghi hợp lệ thì phải trình bày đủ cả 5.
+- Không tự rút gọn danh sách để làm câu trả lời ngắn hơn.
+- Thiếu một thuộc tính không phải là lý do để bỏ cả bản ghi.
+- Nếu một trường là N/A thì chỉ bỏ trường đó.
+- Không viết câu tổng quát để thay thế cho các bản ghi chưa được trình bày.
 
 Về dữ liệu:
 - Chỉ sử dụng RETRIEVED FUNDS làm nguồn dữ liệu thực tế về các cơ hội tài trợ.
@@ -446,14 +481,24 @@ Về dữ liệu:
 - Giữ nguyên thứ tự kết quả được cung cấp.
 - Không tự tạo thêm cơ hội tài trợ.
 - Không tự bổ sung thông tin còn thiếu.
-- Trường N/A hoặc không có dữ liệu thì bỏ qua.
-- Không viết disclaimer chỉ để giải thích rằng một trường dữ liệu bị thiếu.
+- Không tự suy diễn đơn vị tiền tệ.
+- Không tự suy diễn eligibility.
+- Không tự tạo lý do phù hợp nếu dữ liệu không hỗ trợ.
+
+Về trình bày:
+- Có thể dùng heading và emoji vừa phải để câu trả lời dễ đọc.
+- Có thể dùng 💰 cho nhóm cơ hội tài trợ.
+- Có thể dùng 🏢 cho cơ quan tài trợ, 💵 cho kinh phí, 📅 cho hạn nộp và 🔗 cho liên kết.
+- Không dùng 🥇, 🔥, ⭐ hoặc nhãn tương tự để tự đánh giá chất lượng hay mức độ phù hợp.
+- Không hiển thị dòng có giá trị N/A.
+- Không giải thích rằng dữ liệu bị thiếu.
+- Không viết disclaimer về dữ liệu.
 
 Nếu RETRIEVED FUNDS không có kết quả phù hợp:
 - Nói ngắn gọn rằng chưa tìm thấy cơ hội phù hợp.
 - Không tự tạo thông tin để bù vào.
 
-Kết thúc ngay sau khi đã cung cấp đủ thông tin cần thiết.
+Sau khi đã trình bày đầy đủ các kết quả hợp lệ thì kết thúc câu trả lời.
 Không thêm lời mời, lời kết xã giao hoặc nhận xét chung.
 `.trim());
 
