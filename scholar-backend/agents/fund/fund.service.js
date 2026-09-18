@@ -1,6 +1,8 @@
 // agents/fund/fund.service.js
 
-import { runFundSearch } from "./fund.agent.js";
+import {
+  runFundSearch
+} from "./fund.agent.js";
 
 import {
   normalizeHistory
@@ -19,12 +21,51 @@ const MAX_RETURN = 5;
 
 
 // =====================================================
-// TEXT UTILS
+// BASIC UTILS
 // =====================================================
 
+function hasValue(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  if (typeof value === "string") {
+    const text =
+      value.trim().toLowerCase();
+
+    return (
+      text !== "" &&
+      text !== "n/a" &&
+      text !== "na" &&
+      text !== "null" &&
+      text !== "undefined"
+    );
+  }
+
+  return true;
+}
+
+
 function normalizeText(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(normalizeText)
+      .filter(Boolean)
+      .join(", ");
   }
 
   return String(value)
@@ -35,18 +76,351 @@ function normalizeText(value) {
 
 function normalizeLower(value) {
   return normalizeText(value)
-    .toLowerCase();
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
 }
 
 
-function fundSearchText(fund) {
+function firstValue(...values) {
+  for (const value of values) {
+    if (hasValue(value)) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+
+function safeNumber(
+  value,
+  fallback = 0
+) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+
+// =====================================================
+// FUND FIELD GETTERS
+// =====================================================
+
+function getTitle(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.opportunity_title,
+      fund?.title,
+      fund?.name,
+      fund?.program_title,
+      fund?.opportunity_name,
+      fund?.["OPPORTUNITY TITLE"]
+    )
+  );
+}
+
+
+function getAgency(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.agency_name,
+      fund?.agency,
+      fund?.funding_agency,
+      fund?.organization,
+      fund?.sponsor,
+      fund?.top_level_agency_name,
+      fund?.["AGENCY NAME"]
+    )
+  );
+}
+
+
+function getTopLevelAgency(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.top_level_agency_name,
+      fund?.parent_agency_name,
+      fund?.department
+    )
+  );
+}
+
+
+function getAgencyCode(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.agency_code,
+      fund?.agency_id
+    )
+  );
+}
+
+
+function getOpportunityId(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.opportunity_id,
+      fund?.opportunity_identifier
+    )
+  );
+}
+
+
+function getOpportunityNumber(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.opportunity_number,
+      fund?.funding_opportunity_number,
+      fund?.foa_number,
+      fund?.notice_number
+    )
+  );
+}
+
+
+function getOpportunityStatus(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.opportunity_status,
+      fund?.status
+    )
+  );
+}
+
+
+function getCategory(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.funding_categories,
+      fund?.funding_category,
+      fund?.category,
+      fund?.categories,
+      fund?.research_area,
+      fund?.research_areas,
+      fund?.topics,
+      fund?.keywords
+    )
+  );
+}
+
+
+function getCategoryDescription(
+  fund = {}
+) {
+  return normalizeText(
+    firstValue(
+      fund?.funding_category_description,
+      fund?.category_explanation,
+      fund?.category_description
+    )
+  );
+}
+
+
+function getAssistanceListings(
+  fund = {}
+) {
+  return normalizeText(
+    firstValue(
+      fund?.opportunity_assistance_listings,
+      fund?.assistance_listings,
+      fund?.assistance_listing,
+      fund?.cfda_numbers
+    )
+  );
+}
+
+
+function getFundingInstruments(
+  fund = {}
+) {
+  return normalizeText(
+    firstValue(
+      fund?.funding_instruments,
+      fund?.funding_instrument,
+      fund?.instrument_type
+    )
+  );
+}
+
+
+function getApplicantTypes(
+  fund = {}
+) {
+  return normalizeText(
+    firstValue(
+      fund?.applicant_types,
+      fund?.applicant_type,
+      fund?.eligible_applicants,
+      fund?.eligibility_types
+    )
+  );
+}
+
+
+function getEligibility(
+  fund = {}
+) {
+  return normalizeText(
+    firstValue(
+      fund?.applicant_eligibility_description,
+      fund?.applicant_description,
+      fund?.eligibility_description,
+      fund?.eligibility
+    )
+  );
+}
+
+
+function getSummary(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.summary_description,
+      fund?.description,
+      fund?.text,
+      fund?.summary,
+      fund?.["FUNDING DESCRIPTION"],
+      fund?.additional_info_url_description,
+      fund?.funding_category_description,
+      fund?.category_explanation
+    )
+  );
+}
+
+
+function getDeadline(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.close_date,
+      fund?.deadline,
+      fund?.application_deadline,
+      fund?.submission_deadline,
+      fund?.["ESTIMATED APPLICATION DUE DATE"],
+      fund?.forecasted_close_date
+    )
+  );
+}
+
+
+function getPostDate(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.post_date,
+      fund?.posted_date,
+      fund?.publication_date
+    )
+  );
+}
+
+
+function getArchiveDate(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.archive_date
+    )
+  );
+}
+
+
+/*
+ * IMPORTANT:
+ *
+ * Canonical "amount" means total/program funding
+ * when such information is available.
+ *
+ * Award ceiling and award floor are separate fields.
+ */
+function getAmount(fund = {}) {
+  return firstValue(
+    fund?.funding_amount,
+    fund?.estimated_total_program_funding,
+    fund?.amount,
+    fund?.total_funding,
+    fund?.["ESTIMATED TOTAL FUNDING"]
+  );
+}
+
+
+function getAwardCeiling(fund = {}) {
+  return firstValue(
+    fund?.award_ceiling,
+    fund?.maximum_award,
+    fund?.max_award
+  );
+}
+
+
+function getAwardFloor(fund = {}) {
+  return firstValue(
+    fund?.award_floor,
+    fund?.minimum_award,
+    fund?.min_award
+  );
+}
+
+
+function getExpectedAwards(fund = {}) {
+  return firstValue(
+    fund?.expected_number_of_awards,
+    fund?.expected_awards,
+    fund?.number_of_awards
+  );
+}
+
+
+function getUrl(fund = {}) {
+  return normalizeText(
+    firstValue(
+      fund?.url,
+      fund?.link,
+      fund?.additional_info_url,
+      fund?.opportunity_url,
+      fund?.website,
+      fund?.homepage,
+      fund?.["LINK TO ADDITIONAL INFORMATION"],
+      fund?.["OPPORTUNITY URL"],
+      fund?.["URL"]
+    )
+  );
+}
+
+
+// =====================================================
+// SEARCHABLE TEXT
+// =====================================================
+
+function fundSearchText(fund = {}) {
   return normalizeLower(
     [
-      fund?.title,
-      fund?.agency,
-      fund?.text
+      getTitle(fund),
+
+      getAgency(fund),
+      getTopLevelAgency(fund),
+      getAgencyCode(fund),
+
+      getOpportunityId(fund),
+      getOpportunityNumber(fund),
+      getOpportunityStatus(fund),
+
+      getCategory(fund),
+      getCategoryDescription(fund),
+      getAssistanceListings(fund),
+
+      getFundingInstruments(fund),
+
+      getApplicantTypes(fund),
+      getEligibility(fund),
+
+      getSummary(fund),
+
+      fund?.source
     ]
-      .filter(Boolean)
+      .filter(hasValue)
       .join(" ")
   );
 }
@@ -65,6 +439,7 @@ function parseAmount(value) {
     return 0;
   }
 
+
   if (
     typeof value === "number" &&
     Number.isFinite(value)
@@ -72,33 +447,43 @@ function parseAmount(value) {
     return value;
   }
 
+
   const text =
     normalizeLower(value)
       .replace(/,/g, "");
+
 
   if (!text) {
     return 0;
   }
 
+
   const match =
-    text.match(/\d+(?:\.\d+)?/);
+    text.match(
+      /\d+(?:\.\d+)?/
+    );
+
 
   if (!match) {
     return 0;
   }
 
+
   const number =
     Number(match[0]);
+
 
   if (!Number.isFinite(number)) {
     return 0;
   }
+
 
   if (
     /\b(billion|bn)\b/.test(text)
   ) {
     return number * 1e9;
   }
+
 
   if (
     /\b(million|mn)\b/.test(text) ||
@@ -107,12 +492,14 @@ function parseAmount(value) {
     return number * 1e6;
   }
 
+
   if (
     /\b(thousand)\b/.test(text) ||
     /\d+(?:\.\d+)?k\b/.test(text)
   ) {
     return number * 1e3;
   }
+
 
   return number;
 }
@@ -125,31 +512,48 @@ function formatMoney(
   const raw =
     normalizeText(amount);
 
+
   /*
-   * Nếu DB đã có chuỗi tiền tệ rõ ràng thì
-   * giữ nguyên để không tự suy diễn đơn vị.
+   * Preserve currency if explicitly stored.
+   *
+   * Never infer currency from agency/country.
    */
   if (
     raw &&
-    /[$€£¥₫]|usd|eur|gbp|vnd|đồng|dollar/i.test(raw)
+    /[$€£¥₫]|usd|eur|gbp|vnd|đồng|dollar/i
+      .test(raw)
   ) {
     return raw;
   }
 
+
   const num =
-    Number(amountNum) ||
-    parseAmount(amount);
+    safeNumber(
+      amountNum,
+      parseAmount(amount)
+    );
+
 
   if (!num) {
     return raw;
   }
 
-  return num.toLocaleString("en-US");
+
+  return num.toLocaleString(
+    "en-US"
+  );
 }
 
 
 // =====================================================
 // NORMALIZE FUND
+//
+// IMPORTANT:
+//
+// Preserve complete source payload.
+//
+// Canonical aliases are added for downstream use,
+// but source fields are not destroyed.
 // =====================================================
 
 function normalizeFund(
@@ -161,78 +565,348 @@ function normalizeFund(
     result ||
     {};
 
+
+  const title =
+    getTitle(payload);
+
+  const agency =
+    getAgency(payload);
+
+  const topLevelAgency =
+    getTopLevelAgency(
+      payload
+    );
+
+  const agencyCode =
+    getAgencyCode(
+      payload
+    );
+
+  const opportunityId =
+    getOpportunityId(
+      payload
+    );
+
+  const opportunityNumber =
+    getOpportunityNumber(
+      payload
+    );
+
+  const opportunityStatus =
+    getOpportunityStatus(
+      payload
+    );
+
+  const category =
+    getCategory(payload);
+
+  const categoryDescription =
+    getCategoryDescription(
+      payload
+    );
+
+  const assistanceListings =
+    getAssistanceListings(
+      payload
+    );
+
+  const fundingInstruments =
+    getFundingInstruments(
+      payload
+    );
+
+  const applicantTypes =
+    getApplicantTypes(
+      payload
+    );
+
+  const eligibility =
+    getEligibility(
+      payload
+    );
+
+  const summary =
+    getSummary(payload);
+
+  const deadline =
+    getDeadline(payload);
+
+  const postDate =
+    getPostDate(payload);
+
+  const archiveDate =
+    getArchiveDate(payload);
+
   const amount =
-    payload.funding_amount ??
-    payload.amount ??
-    "";
+    getAmount(payload);
 
   const amountNum =
-    Number(payload.amount_num) ||
-    parseAmount(amount);
+    safeNumber(
+      payload?.amount_num,
+      parseAmount(amount)
+    );
+
+  const awardCeiling =
+    getAwardCeiling(
+      payload
+    );
+
+  const awardFloor =
+    getAwardFloor(
+      payload
+    );
+
+  const expectedAwards =
+    getExpectedAwards(
+      payload
+    );
+
+  const url =
+    getUrl(payload);
+
 
   const rawScore =
     Number(
       result?.finalScore ??
       result?.score ??
+      payload?.finalScore ??
+      payload?.score ??
       0
     );
 
+
+  /*
+   * Hybrid scores can legitimately exceed 1.
+   * Never clamp them to [0,1].
+   */
   const score =
     Number.isFinite(rawScore)
-      ? Math.max(
-          0,
-          Math.min(
-            1,
-            rawScore
-          )
-        )
+      ? rawScore
       : 0;
 
-  return {
 
-    title:
+  const normalized = {
+    /*
+     * Preserve complete Fund payload first.
+     */
+    ...payload,
+
+    /*
+     * Canonical fields.
+     */
+    title,
+
+    opportunity_title:
       normalizeText(
-        payload.opportunity_title ||
-        payload.title
+        firstValue(
+          payload?.opportunity_title,
+          title
+        )
       ),
 
-    agency:
+    agency,
+
+    agency_name:
       normalizeText(
-        payload.agency_name ||
-        payload.agency
+        firstValue(
+          payload?.agency_name,
+          agency
+        )
       ),
 
-    deadline:
+    top_level_agency_name:
       normalizeText(
-        payload.close_date ||
-        payload.deadline
+        firstValue(
+          payload?.top_level_agency_name,
+          topLevelAgency
+        )
       ),
 
+    agency_code:
+      normalizeText(
+        firstValue(
+          payload?.agency_code,
+          agencyCode
+        )
+      ),
+
+    opportunity_id:
+      normalizeText(
+        firstValue(
+          payload?.opportunity_id,
+          opportunityId
+        )
+      ),
+
+    opportunity_number:
+      normalizeText(
+        firstValue(
+          payload?.opportunity_number,
+          opportunityNumber
+        )
+      ),
+
+    opportunity_status:
+      normalizeText(
+        firstValue(
+          payload?.opportunity_status,
+          opportunityStatus
+        )
+      ),
+
+    category:
+      normalizeText(
+        firstValue(
+          payload?.category,
+          category
+        )
+      ),
+
+    funding_categories:
+      normalizeText(
+        firstValue(
+          payload?.funding_categories,
+          category
+        )
+      ),
+
+    funding_category_description:
+      normalizeText(
+        firstValue(
+          payload?.funding_category_description,
+          categoryDescription
+        )
+      ),
+
+    opportunity_assistance_listings:
+      normalizeText(
+        firstValue(
+          payload?.opportunity_assistance_listings,
+          assistanceListings
+        )
+      ),
+
+    funding_instruments:
+      normalizeText(
+        firstValue(
+          payload?.funding_instruments,
+          fundingInstruments
+        )
+      ),
+
+    applicant_types:
+      normalizeText(
+        firstValue(
+          payload?.applicant_types,
+          applicantTypes
+        )
+      ),
+
+    applicant_eligibility_description:
+      normalizeText(
+        firstValue(
+          payload?.applicant_eligibility_description,
+          eligibility
+        )
+      ),
+
+    summary_description:
+      normalizeText(
+        firstValue(
+          payload?.summary_description,
+          summary
+        )
+      ),
+
+    text:
+      normalizeText(
+        firstValue(
+          payload?.text,
+          payload?.description,
+          summary
+        )
+      ),
+
+    deadline,
+
+    close_date:
+      normalizeText(
+        firstValue(
+          payload?.close_date,
+          deadline
+        )
+      ),
+
+    post_date:
+      normalizeText(
+        firstValue(
+          payload?.post_date,
+          postDate
+        )
+      ),
+
+    archive_date:
+      normalizeText(
+        firstValue(
+          payload?.archive_date,
+          archiveDate
+        )
+      ),
+
+    /*
+     * Canonical total/program funding.
+     */
     amount,
 
     amount_num:
       amountNum,
 
-    url:
-      normalizeText(
-        payload.url ||
-        payload.link ||
-        payload.additional_info_url ||
-        payload["LINK TO ADDITIONAL INFORMATION"] ||
-        payload["OPPORTUNITY URL"]
+    /*
+     * Do NOT fabricate source-specific fields.
+     *
+     * funding_amount and
+     * estimated_total_program_funding remain empty
+     * when they were absent from the source payload.
+     */
+    funding_amount:
+      hasValue(
+        payload?.funding_amount
+      )
+        ? payload.funding_amount
+        : "",
+
+    estimated_total_program_funding:
+      hasValue(
+        payload
+          ?.estimated_total_program_funding
+      )
+        ? payload
+            .estimated_total_program_funding
+        : "",
+
+    award_ceiling:
+      awardCeiling,
+
+    award_floor:
+      awardFloor,
+
+    expected_number_of_awards:
+      firstValue(
+        payload
+          ?.expected_number_of_awards,
+        expectedAwards
       ),
 
-    text:
-      normalizeText(
-        payload.text ||
-        payload.description
-      ),
+    url,
 
     score,
 
     _idx:
       index
   };
+
+
+  return normalized;
 }
 
 
@@ -251,27 +925,71 @@ function normalizeFunds(results) {
 // QUERY INTENT
 // =====================================================
 
+function hasToken(
+  normalizedText,
+  token
+) {
+  if (
+    !normalizedText ||
+    !token
+  ) {
+    return false;
+  }
+
+  const escaped =
+    token.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+  return new RegExp(
+    `(^|\\s)${escaped}(?=\\s|$|[.,;:!?()])`,
+    "i"
+  ).test(
+    normalizedText
+  );
+}
+
+
 function isVietnamQuery(question) {
   const q =
     normalizeLower(question);
 
   return (
-    q.includes("việt") ||
+    q.includes("viet nam") ||
     q.includes("vietnam") ||
     q.includes("nafosted")
   );
 }
 
 
-function isBasicResearchQuery(question) {
+function isUSQuery(question) {
   const q =
     normalizeLower(question);
 
   return (
-    q.includes("nghiên cứu cơ bản") ||
-    q.includes("cơ bản") ||
-    q.includes("basic research") ||
-    q.includes("basic")
+    q.includes("hoa ky") ||
+    q.includes("united states") ||
+    hasToken(q, "usa") ||
+    hasToken(q, "us") ||
+    hasToken(q, "my")
+  );
+}
+
+
+function isBasicResearchQuery(
+  question
+) {
+  const q =
+    normalizeLower(question);
+
+  return (
+    q.includes(
+      "nghien cuu co ban"
+    ) ||
+    q.includes(
+      "basic research"
+    )
   );
 }
 
@@ -283,10 +1001,13 @@ function isNafostedFund(fund) {
   return (
     text.includes("nafosted") ||
     text.includes(
-      "quỹ phát triển khoa học"
+      "quy phat trien khoa hoc"
     ) ||
     text.includes(
-      "khoa học và công nghệ quốc gia"
+      "khoa hoc va cong nghe quoc gia"
+    ) ||
+    text.includes(
+      "national foundation for science and technology development"
     )
   );
 }
@@ -298,24 +1019,24 @@ function isVietnamFund(fund) {
 
   return (
     text.includes("vietnam") ||
-    text.includes("việt nam") ||
-    text.includes("việt") ||
+    text.includes("viet nam") ||
     isNafostedFund(fund)
   );
 }
 
 
 // =====================================================
-// DEADLINE
+// DATE
 // =====================================================
 
 function safeTime(value) {
-  if (!value) {
+  if (!hasValue(value)) {
     return null;
   }
 
   const time =
-    new Date(value).getTime();
+    new Date(value)
+      .getTime();
 
   return Number.isFinite(time)
     ? time
@@ -323,36 +1044,231 @@ function safeTime(value) {
 }
 
 
-function getDeadlineInfo(deadline) {
+function getDeadlineInfo(
+  deadline
+) {
   const time =
     safeTime(deadline);
+
 
   if (time === null) {
     return "";
   }
 
+
   const diffDays =
     (time - Date.now()) /
     86_400_000;
+
 
   if (diffDays < 0) {
     return "đã hết hạn";
   }
 
+
   if (diffDays <= 7) {
     return "deadline rất gần";
   }
 
+
   if (diffDays <= 30) {
     return "deadline sắp tới";
   }
+
 
   return "";
 }
 
 
 // =====================================================
-// RELEVANCE
+// TOKENIZATION
+// =====================================================
+
+const STOP_WORDS =
+  new Set([
+    "cho",
+    "toi",
+    "tim",
+    "kiem",
+    "quy",
+    "tai",
+    "tro",
+    "nguon",
+    "ve",
+    "cac",
+    "nhung",
+    "mot",
+    "so",
+    "cua",
+    "va",
+    "hoac",
+    "o",
+    "thuoc",
+    "lien",
+    "quan",
+    "con",
+    "thi",
+    "sao",
+    "nao",
+
+    "fund",
+    "funds",
+    "grant",
+    "grants",
+    "funding",
+    "find",
+    "show",
+    "give",
+    "me",
+    "about",
+    "for",
+    "the",
+    "a",
+    "an",
+    "of",
+    "and",
+    "or",
+    "in",
+    "on"
+  ]);
+
+
+function tokenize(value) {
+  return normalizeLower(value)
+    .replace(
+      /[^\p{L}\p{N}\s]/gu,
+      " "
+    )
+    .split(/\s+/)
+    .filter(
+      token =>
+        token.length >= 2 &&
+        !STOP_WORDS.has(token) &&
+        !/^20\d{2}$/.test(token)
+    );
+}
+
+
+// =====================================================
+// LEXICAL RELEVANCE
+// =====================================================
+
+function lexicalRelevance(
+  fund,
+  question
+) {
+  const tokens = [
+    ...new Set(
+      tokenize(question)
+    )
+  ];
+
+
+  if (!tokens.length) {
+    return 0;
+  }
+
+
+  const title =
+    normalizeLower(
+      getTitle(fund)
+    );
+
+
+  const agency =
+    normalizeLower(
+      [
+        getAgency(fund),
+        getTopLevelAgency(fund),
+        getAgencyCode(fund)
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+
+  const category =
+    normalizeLower(
+      [
+        getCategory(fund),
+        getCategoryDescription(fund),
+        getAssistanceListings(fund)
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+
+  const eligibility =
+    normalizeLower(
+      [
+        getApplicantTypes(fund),
+        getEligibility(fund)
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+
+  const summary =
+    normalizeLower(
+      getSummary(fund)
+    );
+
+
+  let titleHits = 0;
+  let agencyHits = 0;
+  let categoryHits = 0;
+  let eligibilityHits = 0;
+  let summaryHits = 0;
+
+
+  for (const token of tokens) {
+    if (title.includes(token)) {
+      titleHits += 1;
+    }
+
+    if (agency.includes(token)) {
+      agencyHits += 1;
+    }
+
+    if (category.includes(token)) {
+      categoryHits += 1;
+    }
+
+    if (
+      eligibility.includes(token)
+    ) {
+      eligibilityHits += 1;
+    }
+
+    if (summary.includes(token)) {
+      summaryHits += 1;
+    }
+  }
+
+
+  const count =
+    tokens.length;
+
+
+  return (
+    (titleHits / count) * 4 +
+    (agencyHits / count) * 3 +
+    (categoryHits / count) * 3 +
+    (eligibilityHits / count) * 1.5 +
+    (summaryHits / count) * 2
+  );
+}
+
+
+// =====================================================
+// SECONDARY RELEVANCE
+//
+// fund.search.js owns the primary retrieval/ranking.
+//
+// This layer is intentionally modest and is used only
+// as a tie-breaker after search score.
 // =====================================================
 
 function relevanceScore(
@@ -365,91 +1281,91 @@ function relevanceScore(
   const text =
     fundSearchText(fund);
 
-  let relevance = 0;
+
+  let relevance =
+    lexicalRelevance(
+      fund,
+      question
+    );
 
 
   // ---------------------------------------------------
-  // Vietnam / NAFOSTED
+  // NAFOSTED
   // ---------------------------------------------------
-
-  if (isVietnamQuery(q)) {
-
-    if (isNafostedFund(fund)) {
-      relevance += 10;
-    }
-
-    if (
-      text.includes("vietnam") ||
-      text.includes("việt nam") ||
-      text.includes("việt")
-    ) {
-      relevance += 3;
-    }
-  }
-
 
   if (
     q.includes("nafosted") &&
     isNafostedFund(fund)
   ) {
-    relevance += 8;
+    relevance += 1;
   }
 
 
   // ---------------------------------------------------
-  // Basic research
+  // VIETNAM
+  // ---------------------------------------------------
+
+  if (
+    isVietnamQuery(q) &&
+    isVietnamFund(fund)
+  ) {
+    relevance += 0.5;
+  }
+
+
+  // ---------------------------------------------------
+  // US
+  // ---------------------------------------------------
+
+  if (isUSQuery(q)) {
+    if (
+      text.includes(
+        "united states"
+      ) ||
+      hasToken(text, "usa")
+    ) {
+      relevance += 0.5;
+    }
+  }
+
+
+  // ---------------------------------------------------
+  // BASIC RESEARCH
   // ---------------------------------------------------
 
   if (
     isBasicResearchQuery(q)
   ) {
-
     if (
-      text.includes("basic research") ||
-      text.includes("nghiên cứu cơ bản")
+      text.includes(
+        "basic research"
+      ) ||
+      text.includes(
+        "nghien cuu co ban"
+      )
     ) {
-      relevance += 5;
-    }
-
-    /*
-     * Với câu hỏi nghiên cứu cơ bản nói chung,
-     * bilateral/collaboration không nên tự động
-     * được ưu tiên.
-     */
-    if (
-      text.includes("bilateral") ||
-      text.includes("collaboration") ||
-      text.includes("joint research") ||
-      text.includes("hợp tác")
-    ) {
-      relevance -= 2;
+      relevance += 0.5;
     }
   }
 
 
   // ---------------------------------------------------
-  // Deadline
+  // ACTIVE DEADLINE
+  //
+  // Very small bonus only.
   // ---------------------------------------------------
 
   const deadline =
-    safeTime(fund?.deadline);
+    safeTime(
+      fund?.deadline
+    );
 
-  if (deadline !== null) {
 
-    const year =
-      new Date(deadline)
-        .getFullYear();
-
-    if (year < 2022) {
-      relevance -= 2;
-    }
-
-    if (
-      deadline >
-      Date.now()
-    ) {
-      relevance += 1;
-    }
+  if (
+    deadline !== null &&
+    deadline > Date.now()
+  ) {
+    relevance += 0.1;
   }
 
 
@@ -458,33 +1374,30 @@ function relevanceScore(
 
 
 // =====================================================
-// HARD FILTER
+// SAFE POST-RETRIEVAL FILTER
+//
+// Do NOT repeat:
+// - country filters
+// - agency filters
+// - year filters
+// - deadline filters
+//
+// fund.search.js owns explicit retrieval constraints.
 // =====================================================
 
-function applyHardFilters(
-  funds,
-  question
+function applyPostRetrievalFilters(
+  funds
 ) {
-  if (!funds.length) {
+  if (!Array.isArray(funds)) {
     return [];
   }
 
-  /*
-   * HARD FILTER:
-   *
-   * Khi standalone query yêu cầu Việt Nam/NAFOSTED,
-   * tuyệt đối không fallback sang quỹ Mỹ hoặc
-   * quốc gia khác chỉ vì vector similarity cao.
-   */
-  if (
-    isVietnamQuery(question)
-  ) {
-    return funds.filter(
-      isVietnamFund
-    );
-  }
-
-  return funds;
+  return funds.filter(
+    fund =>
+      hasValue(
+        getTitle(fund)
+      )
+  );
 }
 
 
@@ -497,59 +1410,59 @@ function rankFunds(
   question
 ) {
   return [...funds]
-    .map(fund => ({
-      ...fund,
+    .map(
+      fund => ({
+        ...fund,
 
-      _relevance:
-        relevanceScore(
-          fund,
-          question
-        )
-    }))
-    .sort((a, b) => {
-
-      // 1. Intent relevance
-      if (
-        b._relevance !==
-        a._relevance
-      ) {
-        return (
-          b._relevance -
-          a._relevance
-        );
-      }
-
-
-      // 2. Vector/final score
-      if (
-        b.score !==
-        a.score
-      ) {
-        return (
-          b.score -
+        _relevance:
+          relevanceScore(
+            fund,
+            question
+          )
+      })
+    )
+    .sort(
+      (a, b) => {
+        /*
+         * 1. Primary search score.
+         *
+         * fund.search.js already performs semantic +
+         * lexical + constraint-aware ranking.
+         */
+        if (
+          b.score !==
           a.score
-        );
-      }
+        ) {
+          return (
+            b.score -
+            a.score
+          );
+        }
 
 
-      // 3. Funding amount
-      if (
-        b.amount_num !==
-        a.amount_num
-      ) {
+        /*
+         * 2. Secondary service relevance.
+         */
+        if (
+          b._relevance !==
+          a._relevance
+        ) {
+          return (
+            b._relevance -
+            a._relevance
+          );
+        }
+
+
+        /*
+         * 3. Stable original retrieval order.
+         */
         return (
-          b.amount_num -
-          a.amount_num
+          a._idx -
+          b._idx
         );
       }
-
-
-      // 4. Stable original order
-      return (
-        a._idx -
-        b._idx
-      );
-    });
+    );
 }
 
 
@@ -559,20 +1472,21 @@ function rankFunds(
 
 function buildReasoning(
   fund,
-  index,
   question
 ) {
   const reasons = [];
 
 
-  if (
-    relevanceScore(
+  const relevance =
+    lexicalRelevance(
       fund,
       question
-    ) > 0
-  ) {
+    );
+
+
+  if (relevance > 0) {
     reasons.push(
-      "khớp trực tiếp với yêu cầu"
+      "khớp với chủ đề/yêu cầu tìm kiếm"
     );
   }
 
@@ -582,6 +1496,7 @@ function buildReasoning(
       fund.deadline
     );
 
+
   if (deadlineInfo) {
     reasons.push(
       deadlineInfo
@@ -589,14 +1504,6 @@ function buildReasoning(
   }
 
 
-  /*
-   * Không tự gọi kết quả đầu tiên là
-   * "phù hợp nhất với nhu cầu".
-   *
-   * Thứ tự đã được ranking xác định,
-   * nhưng không cần đưa ra khẳng định
-   * định tính quá mạnh trong phần render.
-   */
   return reasons.length
     ? `👉 ${reasons.join(", ")}`
     : "";
@@ -615,19 +1522,42 @@ function renderFund(
   const lines = [];
 
 
+  // ---------------------------------------------------
+  // TITLE
+  // ---------------------------------------------------
+
   if (fund.title) {
     lines.push(
-      `🎓 **${fund.title}**`
+      `### ${index + 1}. **${fund.title}**`
     );
   }
 
+
+  // ---------------------------------------------------
+  // AGENCY
+  // ---------------------------------------------------
 
   if (fund.agency) {
     lines.push(
-      `🏢 ${fund.agency}`
+      `- 🏢 **Cơ quan tài trợ:** ${fund.agency}`
     );
   }
 
+
+  if (
+    fund.top_level_agency_name &&
+    fund.top_level_agency_name !==
+      fund.agency
+  ) {
+    lines.push(
+      `- 🏛️ **Cơ quan cấp trên:** ${fund.top_level_agency_name}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // FUNDING
+  // ---------------------------------------------------
 
   const money =
     formatMoney(
@@ -638,17 +1568,121 @@ function renderFund(
 
   if (money) {
     lines.push(
-      `💰 ${money}`
+      `- 💵 **Tổng kinh phí:** ${money}`
     );
   }
 
+
+  const ceiling =
+    formatMoney(
+      fund.award_ceiling,
+      parseAmount(
+        fund.award_ceiling
+      )
+    );
+
+
+  if (ceiling) {
+    lines.push(
+      `- 📈 **Mức tài trợ tối đa:** ${ceiling}`
+    );
+  }
+
+
+  const floor =
+    formatMoney(
+      fund.award_floor,
+      parseAmount(
+        fund.award_floor
+      )
+    );
+
+
+  if (floor) {
+    lines.push(
+      `- 📉 **Mức tài trợ tối thiểu:** ${floor}`
+    );
+  }
+
+
+  if (
+    hasValue(
+      fund.expected_number_of_awards
+    )
+  ) {
+    lines.push(
+      `- 🎯 **Số giải dự kiến:** ${fund.expected_number_of_awards}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // DATES
+  // ---------------------------------------------------
 
   if (fund.deadline) {
     lines.push(
-      `📅 ${fund.deadline}`
+      `- 📅 **Hạn nộp:** ${fund.deadline}`
     );
   }
 
+
+  if (fund.post_date) {
+    lines.push(
+      `- 🗓️ **Ngày đăng:** ${fund.post_date}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // STATUS / TYPE
+  // ---------------------------------------------------
+
+  if (
+    fund.opportunity_status
+  ) {
+    lines.push(
+      `- 📌 **Trạng thái:** ${fund.opportunity_status}`
+    );
+  }
+
+
+  if (
+    fund.funding_instruments
+  ) {
+    lines.push(
+      `- 📑 **Hình thức tài trợ:** ${fund.funding_instruments}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // ELIGIBILITY
+  // ---------------------------------------------------
+
+  if (fund.applicant_types) {
+    lines.push(
+      `- 👥 **Đối tượng:** ${fund.applicant_types}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // OPPORTUNITY NUMBER
+  // ---------------------------------------------------
+
+  if (
+    fund.opportunity_number
+  ) {
+    lines.push(
+      `- 🆔 **Mã cơ hội:** ${fund.opportunity_number}`
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // URL
+  // ---------------------------------------------------
 
   if (
     fund.url &&
@@ -657,15 +1691,18 @@ function renderFund(
     )
   ) {
     lines.push(
-      `🔎 ${fund.url}`
+      `- 🔎 **Liên kết:** ${fund.url}`
     );
   }
 
 
+  // ---------------------------------------------------
+  // REASON
+  // ---------------------------------------------------
+
   const reason =
     buildReasoning(
       fund,
-      index,
       question
     );
 
@@ -694,8 +1731,7 @@ function buildIntro(question) {
     q.includes("nafosted")
   ) {
     return (
-      "Các kết quả đầu tiên có liên quan trực tiếp " +
-      "đến NAFOSTED theo dữ liệu hiện có."
+      "Các cơ hội tài trợ dưới đây có liên quan đến NAFOSTED theo dữ liệu truy xuất được."
     );
   }
 
@@ -704,28 +1740,22 @@ function buildIntro(question) {
     isVietnamQuery(q)
   ) {
     return (
-      "Các kết quả sau liên quan đến Việt Nam " +
-      "theo dữ liệu hiện có."
+      "Các cơ hội tài trợ dưới đây có liên quan đến Việt Nam theo dữ liệu truy xuất được."
     );
   }
 
 
   if (
-    q.includes("ai") ||
-    q.includes("trí tuệ nhân tạo") ||
-    q.includes("data") ||
-    q.includes("dữ liệu")
+    isUSQuery(q)
   ) {
     return (
-      "Các cơ hội sau được sắp xếp theo mức độ " +
-      "liên quan với hướng nghiên cứu được yêu cầu."
+      "Các cơ hội tài trợ dưới đây có liên quan đến Hoa Kỳ theo dữ liệu truy xuất được."
     );
   }
 
 
   return (
-    "Các cơ hội sau được sắp xếp theo mức độ " +
-    "liên quan với yêu cầu."
+    "Các cơ hội tài trợ liên quan được truy xuất từ dữ liệu hiện có:"
   );
 }
 
@@ -739,49 +1769,39 @@ function buildAnswer(
   question
 ) {
   if (!funds.length) {
-
-    if (
-      isVietnamQuery(question)
-    ) {
-      return (
-        "Không tìm thấy cơ hội tài trợ liên quan " +
-        "đến Việt Nam phù hợp với yêu cầu trong dữ liệu hiện có."
-      );
-    }
-
+    /*
+     * Never claim that such funding does not exist
+     * in reality.
+     *
+     * This statement refers only to current retrieval.
+     */
     return (
-      "Không tìm thấy quỹ phù hợp với yêu cầu trong dữ liệu hiện có."
+      "Không tìm thấy cơ hội tài trợ phù hợp trong dữ liệu được truy xuất."
     );
   }
 
 
   const lines = [
     buildIntro(question),
-    "",
-    renderFund(
-      funds[0],
-      0,
-      question
-    )
+    ""
   ];
 
 
-  funds
-    .slice(1)
-    .forEach(
-      (fund, index) => {
-        lines.push(
-          "",
-          "---",
-          "",
-          renderFund(
-            fund,
-            index + 1,
-            question
-          )
-        );
+  funds.forEach(
+    (fund, index) => {
+      if (index > 0) {
+        lines.push("");
       }
-    );
+
+      lines.push(
+        renderFund(
+          fund,
+          index,
+          question
+        )
+      );
+    }
+  );
 
 
   return lines
@@ -811,31 +1831,36 @@ export async function runFundAgent(
 
 
   try {
-
-    // ===================================================
+    // =================================================
     // 1. NORMALIZE HISTORY
     //
-    // Portal context.history là nguồn hội thoại chính.
-    // Không sử dụng express-session history trong Fund.
-    // ===================================================
+    // Portal context.history is authoritative.
+    //
+    // Do not use express-session history.
+    // =================================================
 
     const normalizedHistory =
-      normalizeHistory(history);
+      normalizeHistory(
+        history
+      );
 
 
     console.log(
       "\n========== FUND AGENT =========="
     );
 
+
     console.log(
       "🧠 HISTORY ITEMS:",
       normalizedHistory.length
     );
 
+
     console.log(
       "💬 ORIGINAL QUESTION:",
       question
     );
+
 
     console.log(
       "🤖 MODEL:",
@@ -844,10 +1869,19 @@ export async function runFundAgent(
     );
 
 
-    // ===================================================
+    // =================================================
     // 2. CONTEXTUAL QUERY REWRITE
     //
-    // Ví dụ:
+    // queryRewriter.js is SHARED by:
+    //
+    // - JOURNAL
+    // - CONFERENCE
+    // - FUND
+    //
+    // Only current question + conversation history
+    // are passed to it.
+    //
+    // Example:
     //
     // History:
     //   User: Tìm quỹ tài trợ AI tại Việt Nam
@@ -858,44 +1892,57 @@ export async function runFundAgent(
     // Standalone:
     //   Tìm quỹ tài trợ AI tại Mỹ
     //
-    // standaloneQuestion được dùng cho:
+    // standaloneQuestion is used for:
+    //
     // - retrieval
-    // - intent detection
-    // - hard filter
+    // - retrieval constraints
     // - ranking
-    // - deterministic answer
-    // ===================================================
+    // - deterministic rendering
+    // =================================================
 
     let standaloneQuestion =
-      normalizeText(question);
+      normalizeText(
+        question
+      );
 
 
     try {
-
       const rewritten =
         await rewriteQuery(
-          question,
+          standaloneQuestion,
           normalizedHistory
         );
 
 
       if (
-        typeof rewritten === "string" &&
+        typeof rewritten ===
+          "string" &&
         rewritten.trim()
       ) {
         standaloneQuestion =
-          rewritten.trim();
+          normalizeText(
+            rewritten
+          );
       }
 
-    } catch (err) {
-
+    } catch (error) {
+      /*
+       * rewriteQuery() already has its own fallback.
+       * This outer guard protects the service as well.
+       */
       console.warn(
         "⚠️ FUND QUERY REWRITE FAILED:",
-        err?.message || err
+        error?.message ||
+        error
       );
+    }
 
+
+    if (!standaloneQuestion) {
       standaloneQuestion =
-        normalizeText(question);
+        normalizeText(
+          question
+        );
     }
 
 
@@ -905,15 +1952,24 @@ export async function runFundAgent(
     );
 
 
-    // ===================================================
-    // 3. TOPK
-    // ===================================================
+    // =================================================
+    // 3. TOP K
+    // =================================================
+
+    const requestedTopk =
+      Number(topk);
+
 
     const finalTopk =
       Math.min(
         Math.max(
-          Number(topk) ||
-          MAX_RETURN,
+          Number.isFinite(
+            requestedTopk
+          )
+            ? Math.floor(
+                requestedTopk
+              )
+            : MAX_RETURN,
           1
         ),
         MAX_RETURN
@@ -925,17 +1981,19 @@ export async function runFundAgent(
       finalTopk
     );
 
+
     console.log(
       "================================\n"
     );
 
 
-    // ===================================================
+    // =================================================
     // 4. RETRIEVAL
     //
-    // QUAN TRỌNG:
-    // Search bằng standaloneQuestion.
-    // ===================================================
+    // IMPORTANT:
+    //
+    // Only standaloneQuestion is used for search.
+    // =================================================
 
     const raw =
       await runFundSearch(
@@ -953,40 +2011,49 @@ export async function runFundAgent(
     );
 
 
-    // ===================================================
+    // =================================================
     // 5. NORMALIZE
-    // ===================================================
+    // =================================================
 
     let funds =
-      normalizeFunds(raw);
+      normalizeFunds(
+        raw
+      );
 
 
-    // ===================================================
-    // 6. HARD FILTERS
+    // =================================================
+    // 6. SAFE POST-RETRIEVAL FILTER
     //
-    // QUAN TRỌNG:
-    // Intent phải đọc standaloneQuestion,
-    // không đọc câu follow-up thiếu ngữ cảnh.
-    // ===================================================
+    // Do not repeat:
+    //
+    // - country constraint
+    // - agency constraint
+    // - year constraint
+    // - deadline constraint
+    //
+    // fund.search.js owns retrieval constraints.
+    // =================================================
 
     funds =
-      applyHardFilters(
-        funds,
-        standaloneQuestion
+      applyPostRetrievalFilters(
+        funds
       );
 
 
     console.log(
-      "🌏 AFTER HARD FILTER:",
+      "🧹 AFTER NORMALIZE/FILTER:",
       funds.length
     );
 
 
-    // ===================================================
+    // =================================================
     // 7. RANKING
     //
-    // Ranking cũng dùng standaloneQuestion.
-    // ===================================================
+    // Search score remains authoritative.
+    //
+    // Service relevance is only a secondary
+    // tie-breaker.
+    // =================================================
 
     funds =
       rankFunds(
@@ -995,7 +2062,7 @@ export async function runFundAgent(
       )
         .slice(
           0,
-          MAX_RETURN
+          finalTopk
         );
 
 
@@ -1005,17 +2072,20 @@ export async function runFundAgent(
     );
 
 
-    // ===================================================
+    // =================================================
     // 8. ANSWER
     //
-    // Fund hiện tại là deterministic.
+    // Fund remains deterministic at this layer.
     //
-    // Vì vậy answer nên dùng standaloneQuestion để
-    // buildIntro / reasoning hiểu đầy đủ intent.
+    // Because there is currently no final Fund LLM
+    // generation in this service, standaloneQuestion
+    // is appropriate for deterministic rendering.
     //
-    // Nếu sau này Fund dùng buildFundPrompt + LLM,
-    // generation LLM phải nhận question GỐC + history.
-    // ===================================================
+    // If buildFundPrompt + callLLM are connected later:
+    //
+    // - retrieval -> standaloneQuestion
+    // - generation -> ORIGINAL question + context/history
+    // =================================================
 
     const answer =
       buildAnswer(
@@ -1024,15 +2094,15 @@ export async function runFundAgent(
       );
 
 
-    // ===================================================
+    // =================================================
     // 9. RESPONSE
     //
-    // Không addToHistory().
-    // Portal context.history là nguồn memory chính.
-    // ===================================================
+    // Portal remains authoritative conversation memory.
+    //
+    // Do NOT addToHistory().
+    // =================================================
 
     return {
-
       answer,
 
       funds,
@@ -1041,11 +2111,18 @@ export async function runFundAgent(
         "fund",
 
       /*
-       * Fund service hiện deterministic sau retrieval.
-       * Không khai báo latency/token LLM giả.
+       * Exposed for debugging contextual retrieval.
+       *
+       * Existing clients may safely ignore it.
+       */
+      standalone_question:
+        standaloneQuestion,
+
+      /*
+       * No final LLM is called by this service.
+       * Therefore do not fabricate model statistics.
        */
       model: {
-
         model_id:
           model_id ||
           null,
@@ -1064,20 +2141,19 @@ export async function runFundAgent(
       },
 
       responseTimeMs:
-        Date.now() - start
+        Date.now() -
+        start
     };
 
 
-  } catch (err) {
-
+  } catch (error) {
     console.error(
       "❌ Fund agent error:",
-      err
+      error
     );
 
 
     return {
-
       answer:
         "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
 
@@ -1087,8 +2163,12 @@ export async function runFundAgent(
       domain:
         "error",
 
-      model: {
+      standalone_question:
+        normalizeText(
+          question
+        ),
 
+      model: {
         model_id:
           model_id ||
           null,
@@ -1107,7 +2187,8 @@ export async function runFundAgent(
       },
 
       responseTimeMs:
-        Date.now() - start
+        Date.now() -
+        start
     };
   }
 }

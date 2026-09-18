@@ -1,6 +1,7 @@
 // api/scholar/scholar.routes.js
 
 import express from "express";
+import { createHash } from "node:crypto";
 import { runScholarAgent } from "../../agents/scholar/scholar.service.js";
 
 const router = express.Router();
@@ -126,10 +127,56 @@ function normalizeKeyPart(value) {
 }
 
 
+/**
+ * History ảnh hưởng trực tiếp đến contextual query rewrite.
+ *
+ * Ví dụ cùng câu:
+ * "Còn Q2 thì sao?"
+ *
+ * nhưng history khác nhau có thể tạo ra standalone query
+ * hoàn toàn khác nhau.
+ *
+ * Vì vậy dedup key bắt buộc phải phân biệt history.
+ *
+ * Dùng SHA-256 để tránh đưa toàn bộ nội dung history
+ * vào key của Map.
+ */
+function buildHistoryFingerprint(history = []) {
+  if (!Array.isArray(history) || !history.length) {
+    return "no-history";
+  }
+
+  const payload = history
+    .map(item => ({
+      role: item?.role || "",
+      content: normalizeKeyPart(
+        item?.content || ""
+      )
+    }))
+    .filter(
+      item =>
+        item.role &&
+        item.content
+    );
+
+  if (!payload.length) {
+    return "no-history";
+  }
+
+  return createHash("sha256")
+    .update(
+      JSON.stringify(payload)
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+
 function buildDedupKey({
   body,
   question,
-  topk
+  topk,
+  history
 }) {
   const identity =
     getRequestIdentity(body);
@@ -138,7 +185,8 @@ function buildDedupKey({
     normalizeKeyPart(identity),
     normalizeKeyPart(question),
     SCHOLAR_MODEL_ID,
-    String(topk)
+    String(topk),
+    buildHistoryFingerprint(history)
   ].join("::");
 }
 
@@ -159,15 +207,35 @@ function logRequest({
     "\n========== SCHOLAR REQUEST =========="
   );
 
-  console.log("🔗 ENDPOINT:", endpoint);
+  console.log(
+    "🔗 ENDPOINT:",
+    endpoint
+  );
+
   console.log(
     "🆔 SESSION:",
     sessionId || "(none)"
   );
-  console.log("❓ QUESTION:", question);
-  console.log("🤖 MODEL:", SCHOLAR_MODEL_ID);
-  console.log("🔢 TOPK:", topk);
-  console.log("🧠 MEMORY ITEMS:", history.length);
+
+  console.log(
+    "❓ QUESTION:",
+    question
+  );
+
+  console.log(
+    "🤖 MODEL:",
+    SCHOLAR_MODEL_ID
+  );
+
+  console.log(
+    "🔢 TOPK:",
+    topk
+  );
+
+  console.log(
+    "🧠 MEMORY ITEMS:",
+    history.length
+  );
 
   console.log(
     "👤 USER:",
@@ -287,8 +355,12 @@ function getRecentResult(key) {
     return null;
   }
 
-  if (Date.now() >= cached.expiresAt) {
+  if (
+    Date.now() >=
+    cached.expiresAt
+  ) {
     recentResults.delete(key);
+
     return null;
   }
 
@@ -296,26 +368,44 @@ function getRecentResult(key) {
 }
 
 
-function saveRecentResult(key, result) {
-  recentResults.set(key, {
-    result,
-    expiresAt:
-      Date.now() + RECENT_RESULT_TTL_MS
-  });
+function saveRecentResult(
+  key,
+  result
+) {
+  recentResults.set(
+    key,
+    {
+      result,
+      expiresAt:
+        Date.now() +
+        RECENT_RESULT_TTL_MS
+    }
+  );
 
   /**
    * Không cần timer riêng cho từng request.
+   *
    * Cleanup opportunistic để tránh Map tăng mãi.
    */
-  if (recentResults.size > 100) {
-    const now = Date.now();
+  if (
+    recentResults.size > 100
+  ) {
+    const now =
+      Date.now();
 
     for (
-      const [cachedKey, cached]
-      of recentResults
+      const [
+        cachedKey,
+        cached
+      ] of recentResults
     ) {
-      if (now >= cached.expiresAt) {
-        recentResults.delete(cachedKey);
+      if (
+        now >=
+        cached.expiresAt
+      ) {
+        recentResults.delete(
+          cachedKey
+        );
       }
     }
   }
@@ -340,8 +430,10 @@ async function runDeduplicated({
     buildDedupKey({
       body,
       question,
-      topk
+      topk,
+      history
     });
+
 
   // -----------------------------------------------
   // 1. Request vừa hoàn thành
@@ -358,6 +450,7 @@ async function runDeduplicated({
     return recent;
   }
 
+
   // -----------------------------------------------
   // 2. Request đang chạy
   // -----------------------------------------------
@@ -372,6 +465,7 @@ async function runDeduplicated({
 
     return await running;
   }
+
 
   // -----------------------------------------------
   // 3. Request mới
@@ -408,10 +502,12 @@ async function runDeduplicated({
 
   } finally {
     /**
-     * Chỉ xóa nếu Map vẫn chứa chính Promise này.
+     * Chỉ xóa nếu Map vẫn chứa
+     * chính Promise này.
      */
     if (
-      inFlight.get(key) === promise
+      inFlight.get(key) ===
+      promise
     ) {
       inFlight.delete(key);
     }
@@ -434,10 +530,14 @@ function prepareRequest(req) {
     getQuestion(body);
 
   const topk =
-    safeTopk(body.topk);
+    safeTopk(
+      body.topk
+    );
 
   const history =
-    getHistory(context);
+    getHistory(
+      context
+    );
 
   return {
     body,
@@ -445,8 +545,10 @@ function prepareRequest(req) {
     question,
     topk,
     history,
+
     sessionId:
-      body.session_id ?? null
+      body.session_id ??
+      null
   };
 }
 
@@ -456,13 +558,15 @@ function prepareRequest(req) {
 // Used by POST / and POST /ask
 // =====================================================
 
-async function handleAsk(req, res) {
+async function handleAsk(
+  req,
+  res
+) {
   try {
     const prepared =
       prepareRequest(req);
 
     const {
-      body,
       context,
       question,
       topk,
@@ -471,10 +575,13 @@ async function handleAsk(req, res) {
     } = prepared;
 
     if (!question) {
-      return res.status(400).json({
-        status: "error",
-        error: "Missing question"
-      });
+      return res
+        .status(400)
+        .json({
+          status: "error",
+          error:
+            "Missing question"
+        });
     }
 
     logRequest({
@@ -483,7 +590,8 @@ async function handleAsk(req, res) {
       topk,
       history,
       context,
-      endpoint: req.originalUrl
+      endpoint:
+        req.originalUrl
     });
 
     const result =
@@ -527,12 +635,15 @@ async function handleAsk(req, res) {
       err
     );
 
-    return res.status(500).json({
-      status: "error",
-      error:
-        err?.message ||
-        "Internal error"
-    });
+    return res
+      .status(500)
+      .json({
+        status: "error",
+
+        error:
+          err?.message ||
+          "Internal error"
+      });
   }
 }
 
@@ -563,7 +674,10 @@ router.post(
 
 router.get(
   "/data",
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     try {
       const {
         type,
@@ -572,7 +686,9 @@ router.get(
       } = req.query;
 
       const normalizedType =
-        String(type || "")
+        String(
+          type || ""
+        )
           .trim()
           .toLowerCase();
 
@@ -580,14 +696,20 @@ router.get(
         ![
           "conferences",
           "journals"
-        ].includes(normalizedType)
+        ].includes(
+          normalizedType
+        )
       ) {
-        return res.status(400).json({
-          status: "error",
-          error:
-            "type must be 'conferences' or 'journals'"
-        });
+        return res
+          .status(400)
+          .json({
+            status: "error",
+
+            error:
+              "type must be 'conferences' or 'journals'"
+          });
       }
+
 
       // ---------------------------------------------
       // Pagination
@@ -598,31 +720,46 @@ router.get(
 
       const finalLimit =
         Math.min(
-          Number.isFinite(rawLimit) &&
+          Number.isFinite(
+            rawLimit
+          ) &&
           rawLimit > 0
-            ? Math.floor(rawLimit)
+            ? Math.floor(
+                rawLimit
+              )
             : 20,
           100
         );
+
 
       const rawPage =
         Number(page);
 
       const finalPage =
-        Number.isFinite(rawPage) &&
+        Number.isFinite(
+          rawPage
+        ) &&
         rawPage > 0
-          ? Math.floor(rawPage)
+          ? Math.floor(
+              rawPage
+            )
           : 1;
 
+
       const skip =
-        (finalPage - 1) *
+        (
+          finalPage - 1
+        ) *
         finalLimit;
+
 
       // ---------------------------------------------
       // MongoDB
       // ---------------------------------------------
 
-      const { getDb } =
+      const {
+        getDb
+      } =
         await import(
           "../../db/mongo.js"
         );
@@ -630,81 +767,142 @@ router.get(
       const db =
         await getDb();
 
+
       const collectionName =
-        normalizedType === "conferences"
+        normalizedType ===
+        "conferences"
           ? "conference"
           : "journal";
+
 
       const collection =
         db.collection(
           collectionName
         );
 
-      const [items, total] =
+
+      const [
+        items,
+        total
+      ] =
         await Promise.all([
           collection
             .find({})
+            /**
+             * Explicit sort giúp pagination ổn định.
+             *
+             * Nếu không sort, MongoDB không đảm bảo
+             * thứ tự tự nhiên giữa các request.
+             */
+            .sort({
+              _id: 1
+            })
             .skip(skip)
-            .limit(finalLimit)
+            .limit(
+              finalLimit
+            )
             .toArray(),
 
           collection
             .countDocuments({})
         ]);
 
+
       // ---------------------------------------------
       // Response mapping
       // ---------------------------------------------
 
       const data =
-        normalizedType === "conferences"
-          ? items.map(c => ({
-              id: c._id,
-              name: c.name,
-              acronym: c.acronym,
-              year: c.year,
-              country: c.country,
-              deadline: c.deadline,
+        normalizedType ===
+        "conferences"
 
-              url:
-                c.cfp_link ||
-                c.url ||
-                c.link ||
-                c.website ||
-                ""
-            }))
+          ? items.map(
+              c => ({
+                id:
+                  c._id,
 
-          : items.map(j => ({
-              id: j._id,
-              title: j.title,
-              publisher: j.publisher,
+                name:
+                  c.name,
 
-              quartile:
-                j.sjr_best_quartile,
+                acronym:
+                  c.acronym,
 
-              sjr: j.sjr,
-              h_index: j.h_index,
+                year:
+                  c.year,
 
-              url:
-                j.scimago_link ||
-                j.url ||
-                ""
-            }));
+                country:
+                  c.country,
+
+                deadline:
+                  c.deadline,
+
+                url:
+                  c.cfp_link ||
+                  c.url ||
+                  c.link ||
+                  c.website ||
+                  ""
+              })
+            )
+
+          : items.map(
+              j => ({
+                id:
+                  j._id,
+
+                title:
+                  j.title,
+
+                publisher:
+                  j.publisher,
+
+                /**
+                 * Ưu tiên quartile canonical.
+                 *
+                 * Không suy ra quartile tổng thể
+                 * từ categories/areas.
+                 */
+                quartile:
+                  j.quartile ||
+                  j.sjr_best_quartile ||
+                  j.best_quartile ||
+                  j.sjr_quartile ||
+                  "",
+
+                sjr:
+                  j.sjr,
+
+                h_index:
+                  j.h_index,
+
+                url:
+                  j.scimago_link ||
+                  j.url ||
+                  ""
+              })
+            );
+
 
       return res.json({
-        status: "success",
+        status:
+          "success",
 
         type:
           normalizedType,
 
         pagination: {
           total,
-          page: finalPage,
-          limit: finalLimit,
+
+          page:
+            finalPage,
+
+          limit:
+            finalLimit,
 
           total_pages:
             Math.ceil(
-              total / finalLimit
+              total /
+              finalLimit
             )
         },
 
@@ -717,13 +915,16 @@ router.get(
         err
       );
 
-      return res.status(500).json({
-        status: "error",
+      return res
+        .status(500)
+        .json({
+          status:
+            "error",
 
-        error:
-          err?.message ||
-          "Internal error"
-      });
+          error:
+            err?.message ||
+            "Internal error"
+        });
     }
   }
 );
@@ -745,7 +946,10 @@ router.get(
 
 router.post(
   "/stream",
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     try {
       const prepared =
         prepareRequest(req);
@@ -758,12 +962,15 @@ router.post(
         sessionId
       } = prepared;
 
+
       // ---------------------------------------------
       // SSE headers
       // ---------------------------------------------
 
       res.status(
-        question ? 200 : 400
+        question
+          ? 200
+          : 400
       );
 
       res.setHeader(
@@ -786,12 +993,14 @@ router.post(
         "no"
       );
 
+
       if (
         typeof res.flushHeaders ===
         "function"
       ) {
         res.flushHeaders();
       }
+
 
       // ---------------------------------------------
       // Validation
@@ -800,9 +1009,14 @@ router.post(
       if (!question) {
         res.write(
           `data: ${JSON.stringify({
-            type: "error",
-            status: "error",
-            error: "Missing question"
+            type:
+              "error",
+
+            status:
+              "error",
+
+            error:
+              "Missing question"
           })}\n\n`
         );
 
@@ -812,6 +1026,7 @@ router.post(
 
         return res.end();
       }
+
 
       // ---------------------------------------------
       // Logging
@@ -823,12 +1038,14 @@ router.post(
         topk,
         history,
         context,
-        endpoint: req.originalUrl
+        endpoint:
+          req.originalUrl
       });
 
       console.log(
         "🌊 SSE MODE: buffered result"
       );
+
 
       // ---------------------------------------------
       // SAME DEDUP CORE AS / AND /ask
@@ -842,6 +1059,7 @@ router.post(
           history
         });
 
+
       const finalAnswer =
         applyFirstTurnGreeting(
           result?.answer,
@@ -849,16 +1067,21 @@ router.post(
           history
         );
 
+
       // ---------------------------------------------
       // Content
       // ---------------------------------------------
 
       res.write(
         `data: ${JSON.stringify({
-          type: "content",
-          content: finalAnswer
+          type:
+            "content",
+
+          content:
+            finalAnswer
         })}\n\n`
       );
+
 
       // ---------------------------------------------
       // Sources
@@ -866,11 +1089,15 @@ router.post(
 
       res.write(
         `data: ${JSON.stringify({
-          type: "sources",
+          type:
+            "sources",
+
           sources:
-            result?.sources || []
+            result?.sources ||
+            []
         })}\n\n`
       );
+
 
       // ---------------------------------------------
       // Meta
@@ -878,10 +1105,16 @@ router.post(
 
       res.write(
         `data: ${JSON.stringify({
-          type: "meta",
-          meta: buildMeta(result)
+          type:
+            "meta",
+
+          meta:
+            buildMeta(
+              result
+            )
         })}\n\n`
       );
+
 
       // ---------------------------------------------
       // Done
@@ -899,7 +1132,10 @@ router.post(
         err
       );
 
-      if (!res.headersSent) {
+
+      if (
+        !res.headersSent
+      ) {
         res.status(500);
 
         res.setHeader(
@@ -908,9 +1144,11 @@ router.post(
         );
       }
 
+
       res.write(
         `data: ${JSON.stringify({
-          type: "error",
+          type:
+            "error",
 
           error:
             err?.message ||

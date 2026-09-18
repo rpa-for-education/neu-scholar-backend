@@ -5,14 +5,14 @@
 // CONFIG
 // =====================================================
 
-const MAX_ITEMS = 5;
-
 const MAX_HISTORY = 6;
 const MAX_HISTORY_CHARS_PER_ITEM = 700;
 
 const MAX_PROFILE_CHARS = 2000;
 const MAX_PROJECT_CHARS = 2500;
 const MAX_DOC_CHARS = 5000;
+
+const MAX_RETRIEVAL_TEXT_CHARS = 1000;
 
 
 // =====================================================
@@ -56,7 +56,11 @@ function truncate(
 function joinArray(value) {
   if (Array.isArray(value)) {
     return value
-      .filter(Boolean)
+      .filter(
+        item =>
+          item !== null &&
+          item !== undefined
+      )
       .map(normalizeText)
       .filter(Boolean)
       .join(", ");
@@ -67,7 +71,140 @@ function joinArray(value) {
 
 
 // =====================================================
-// DATE / CONFERENCE STATUS
+// FIELD VALUE UTILS
+// =====================================================
+
+function isMissingValue(value) {
+  const text =
+    normalizeText(value)
+      .toLowerCase();
+
+  return (
+    !text ||
+    text === "n/a" ||
+    text === "na" ||
+    text === "null" ||
+    text === "undefined"
+  );
+}
+
+
+function firstValue(...values) {
+  for (const value of values) {
+    const text =
+      normalizeText(value);
+
+    if (!isMissingValue(text)) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+
+function firstArrayValue(...values) {
+  for (const value of values) {
+    const text =
+      joinArray(value);
+
+    if (!isMissingValue(text)) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+
+function booleanValue(value) {
+  if (
+    value === true ||
+    value === 1
+  ) {
+    return "Yes";
+  }
+
+  if (
+    value === false ||
+    value === 0
+  ) {
+    return "No";
+  }
+
+  const text =
+    normalizeText(value)
+      .toLowerCase();
+
+  if (
+    text === "true" ||
+    text === "yes" ||
+    text === "y"
+  ) {
+    return "Yes";
+  }
+
+  if (
+    text === "false" ||
+    text === "no" ||
+    text === "n"
+  ) {
+    return "No";
+  }
+
+  return "";
+}
+
+
+// =====================================================
+// CONTEXT FIELD BUILDER
+//
+// Missing fields are omitted entirely.
+//
+// This avoids filling the internal prompt with "N/A".
+// =====================================================
+
+function contextField(
+  label,
+  value
+) {
+  const text =
+    normalizeText(value);
+
+  if (isMissingValue(text)) {
+    return "";
+  }
+
+  return `${label}: ${text}`;
+}
+
+
+function buildRecord(
+  id,
+  title,
+  fields = []
+) {
+  const header =
+    `[${id}] ${title}`;
+
+  const validFields =
+    fields.filter(Boolean);
+
+  if (!validFields.length) {
+    return header;
+  }
+
+  return [
+    header,
+    ...validFields.map(
+      field => ` | ${field}`
+    )
+  ].join("");
+}
+
+
+// =====================================================
+// DATE / CONFERENCE TEMPORAL STATUS
 // =====================================================
 
 function safeTime(value) {
@@ -76,7 +213,8 @@ function safeTime(value) {
   }
 
   const time =
-    new Date(value).getTime();
+    new Date(value)
+      .getTime();
 
   return Number.isFinite(time)
     ? time
@@ -84,56 +222,120 @@ function safeTime(value) {
 }
 
 
-function getStatus(conference) {
+/*
+ * This is deliberately named temporal status.
+ *
+ * It describes the CFP/event timing inferred from
+ * deadline/start date.
+ *
+ * It is NOT the same thing as a stored database
+ * workflow/crawl status such as "completed".
+ */
+function getTemporalStatus(
+  conference
+) {
   const now =
     Date.now();
 
   const deadline =
     safeTime(
-      conference?.deadline
+      firstValue(
+        conference?.deadline,
+        conference?.submission_deadline,
+        conference?.paper_deadline,
+        conference?.cfp_deadline,
+        conference?.close_date
+      )
     );
 
   const start =
     safeTime(
-      conference?.start_date
+      firstValue(
+        conference?.start_date,
+        conference?.event_date,
+        conference?.conference_date,
+        conference?.date
+      )
+    );
+
+  const end =
+    safeTime(
+      firstValue(
+        conference?.end_date,
+        conference?.event_end_date,
+        conference?.conference_end_date
+      )
     );
 
 
-  if (deadline !== null) {
+  /*
+   * If an explicit end date exists and is already past,
+   * the event itself is past.
+   */
+  if (
+    end !== null &&
+    end < now
+  ) {
+    return "past_event";
+  }
+
+
+  /*
+   * Deadline still open.
+   */
+  if (
+    deadline !== null &&
+    deadline > now
+  ) {
     const diffDays =
       (deadline - now) /
       86_400_000;
 
-
-    if (diffDays > 30) {
-      return "submission_open";
-    }
-
-
-    if (diffDays > 0) {
-      return "submission_soon";
-    }
+    return diffDays <= 30
+      ? "submission_soon"
+      : "submission_open";
+  }
 
 
-    if (start !== null) {
-      return start > now
-        ? "upcoming_event"
-        : "past_event";
-    }
+  /*
+   * Deadline passed, but event has not started.
+   */
+  if (
+    start !== null &&
+    start > now
+  ) {
+    return "upcoming_event";
+  }
 
 
+  /*
+   * Start date is already past.
+   *
+   * Without an end date we cannot know whether
+   * a multi-day event is currently running, so
+   * "started_or_past_event" is safer than making
+   * a stronger claim.
+   */
+  if (
+    start !== null &&
+    start <= now
+  ) {
+    return "started_or_past_event";
+  }
+
+
+  /*
+   * We only know that submission is closed.
+   */
+  if (
+    deadline !== null &&
+    deadline <= now
+  ) {
     return "submission_closed";
   }
 
 
-  if (start !== null) {
-    return start > now
-      ? "upcoming_event"
-      : "past_event";
-  }
-
-
-  return "unknown";
+  return "";
 }
 
 
@@ -189,7 +391,7 @@ function buildProfileContext(
       )
       .filter(
         ([, value]) =>
-          value
+          !isMissingValue(value)
       )
       .map(
         ([label, value]) =>
@@ -240,14 +442,18 @@ function buildProjectContext(
   const lines = [];
 
 
-  if (name) {
+  if (!isMissingValue(name)) {
     lines.push(
       `Tên: ${name}`
     );
   }
 
 
-  if (description) {
+  if (
+    !isMissingValue(
+      description
+    )
+  ) {
     lines.push(
       `Mô tả: ${description}`
     );
@@ -274,9 +480,7 @@ function buildHistoryContext(
   history,
   currentQuestion = ""
 ) {
-  if (
-    !Array.isArray(history)
-  ) {
+  if (!Array.isArray(history)) {
     return "";
   }
 
@@ -303,9 +507,13 @@ function buildHistoryContext(
     );
 
 
-  // Portal có thể đưa current question vào cuối history.
-  // Nếu trùng currentQuestion thì loại bỏ để tránh
-  // cùng một câu hỏi xuất hiện hai lần trong prompt.
+  /*
+   * Portal may include current question as the last
+   * user message in history.
+   *
+   * Remove that duplicate because the current question
+   * is added separately below.
+   */
   if (
     items.length &&
     items[
@@ -470,95 +678,339 @@ function buildConferenceContext(
   conferences
 ) {
   if (
-    !Array.isArray(
-      conferences
-    ) ||
+    !Array.isArray(conferences) ||
     !conferences.length
   ) {
     return "";
   }
 
 
+  /*
+   * IMPORTANT:
+   *
+   * Do NOT slice here.
+   *
+   * scholar.service.js / scholar.search.js owns topk.
+   * Every record passed into this prompt should remain
+   * visible to the LLM.
+   */
   const items =
-    conferences
-      .slice(
-        0,
-        MAX_ITEMS
-      )
-      .map(
-        (
-          conference,
-          index
-        ) => {
-          const title =
-            normalizeText(
-              conference?.name ||
-              conference?.title ||
-              conference?.acronym
-            ) ||
-            "N/A";
+    conferences.map(
+      (
+        conference,
+        index
+      ) => {
+
+        // -----------------------------------------------
+        // NAME / TITLE
+        // -----------------------------------------------
+
+        const title =
+          firstValue(
+            conference?.name,
+            conference?.title,
+            conference?.conference_name,
+            conference?.event_name,
+            conference?.acronym
+          ) ||
+          "Untitled conference";
 
 
-          const location =
-            [
-              conference?.city,
-              conference?.country
-            ]
-              .map(
-                normalizeText
-              )
-              .filter(Boolean)
-              .join(", ") ||
-            "N/A";
+        // -----------------------------------------------
+        // ACRONYM
+        // -----------------------------------------------
 
-
-          const fields =
-            joinArray(
-              conference?.fields
-            ) ||
-            joinArray(
-              conference?.topics
-            ) ||
-            "N/A";
-
-
-          const deadline =
-            normalizeText(
-              conference?.deadline
-            ) ||
-            "N/A";
-
-
-          const event =
-            normalizeText(
-              conference?.start_date
-            ) ||
-            "N/A";
-
-
-          const url =
-            normalizeText(
-              conference?.cfp_link ||
-              conference?.url ||
-              conference?.link ||
-              conference?.website
-            ) ||
-            "N/A";
-
-
-          return (
-            `[C${index + 1}] ${title}` +
-            ` | location: ${location}` +
-            ` | deadline: ${deadline}` +
-            ` | event: ${event}` +
-            ` | status: ${getStatus(
-              conference
-            )}` +
-            ` | field: ${fields}` +
-            ` | url: ${url}`
+        const acronym =
+          firstValue(
+            conference?.acronym,
+            conference?.short_name,
+            conference?.abbreviation
           );
-        }
-      );
+
+
+        // -----------------------------------------------
+        // LOCATION
+        // -----------------------------------------------
+
+        const city =
+          firstValue(
+            conference?.city,
+            conference?.location_city
+          );
+
+
+        const country =
+          firstValue(
+            conference?.country,
+            conference?.country_name,
+            conference?.location_country
+          );
+
+
+        const composedLocation =
+          [
+            city,
+            country
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+
+        const location =
+          firstValue(
+            conference?.location,
+            conference?.venue,
+            conference?.place,
+            composedLocation
+          );
+
+
+        // -----------------------------------------------
+        // TOPICS / FIELDS
+        // -----------------------------------------------
+
+        const topics =
+          firstArrayValue(
+            conference?.topics,
+            conference?.topic,
+            conference?.fields,
+            conference?.field,
+            conference?.categories,
+            conference?.category,
+            conference?.areas,
+            conference?.area,
+            conference?.subjects,
+            conference?.subject,
+            conference?.keywords,
+            conference?.keyword
+          );
+
+
+        // -----------------------------------------------
+        // DATES
+        // -----------------------------------------------
+
+        const deadline =
+          firstValue(
+            conference?.deadline,
+            conference?.submission_deadline,
+            conference?.paper_deadline,
+            conference?.cfp_deadline,
+            conference?.close_date
+          );
+
+
+        const startDate =
+          firstValue(
+            conference?.start_date,
+            conference?.event_date,
+            conference?.conference_date,
+            conference?.date
+          );
+
+
+        const endDate =
+          firstValue(
+            conference?.end_date,
+            conference?.event_end_date,
+            conference?.conference_end_date
+          );
+
+
+        // -----------------------------------------------
+        // STORED STATUS
+        //
+        // Keep it separate from temporal status because
+        // a value such as "completed" may describe crawl
+        // processing rather than event timing.
+        // -----------------------------------------------
+
+        const storedStatus =
+          firstValue(
+            conference?.status,
+            conference?.event_status,
+            conference?.submission_status
+          );
+
+
+        const temporalStatus =
+          getTemporalStatus(
+            conference
+          );
+
+
+        // -----------------------------------------------
+        // SOURCE
+        // -----------------------------------------------
+
+        const source =
+          firstValue(
+            conference?.source,
+            conference?.data_source,
+            conference?.provider
+          );
+
+
+        // -----------------------------------------------
+        // URL
+        // -----------------------------------------------
+
+        const url =
+          firstValue(
+            conference?.url,
+            conference?.cfp_link,
+            conference?.link,
+            conference?.website,
+            conference?.homepage,
+            conference?.conference_url
+          );
+
+
+        // -----------------------------------------------
+        // CFP TEXT
+        // -----------------------------------------------
+
+        const cfpText =
+          truncate(
+            firstValue(
+              conference?.cfp_text,
+              conference?.cfp,
+              conference?.description,
+              conference?.text,
+              conference?.summary
+            ),
+            MAX_RETRIEVAL_TEXT_CHARS
+          );
+
+
+        // -----------------------------------------------
+        // CRAWL SOURCE
+        // -----------------------------------------------
+
+        const crawlSource =
+          firstValue(
+            conference?.crawl_source,
+            conference?.crawler,
+            conference?.crawl_method
+          );
+
+
+        // -----------------------------------------------
+        // ENRICHED
+        // -----------------------------------------------
+
+        const enriched =
+          booleanValue(
+            conference?.is_enriched ??
+            conference?.enriched
+          );
+
+
+        // -----------------------------------------------
+        // INTERNAL KEY
+        // -----------------------------------------------
+
+        const key =
+          firstValue(
+            conference?._key,
+            conference?.u_key,
+            conference?.key
+          );
+
+
+        // -----------------------------------------------
+        // INTERNAL RETRIEVAL CONTEXT
+        //
+        // Missing fields are omitted.
+        // -----------------------------------------------
+
+        return buildRecord(
+          `C${index + 1}`,
+          title,
+          [
+            contextField(
+              "acronym",
+              acronym
+            ),
+
+            contextField(
+              "location",
+              location
+            ),
+
+            contextField(
+              "city",
+              city
+            ),
+
+            contextField(
+              "country",
+              country
+            ),
+
+            contextField(
+              "topics",
+              topics
+            ),
+
+            contextField(
+              "deadline",
+              deadline
+            ),
+
+            contextField(
+              "start_date",
+              startDate
+            ),
+
+            contextField(
+              "end_date",
+              endDate
+            ),
+
+            contextField(
+              "stored_status",
+              storedStatus
+            ),
+
+            contextField(
+              "temporal_status",
+              temporalStatus
+            ),
+
+            contextField(
+              "source",
+              source
+            ),
+
+            contextField(
+              "url",
+              url
+            ),
+
+            contextField(
+              "cfp_text",
+              cfpText
+            ),
+
+            contextField(
+              "crawl_source",
+              crawlSource
+            ),
+
+            contextField(
+              "is_enriched",
+              enriched
+            ),
+
+            contextField(
+              "key",
+              key
+            )
+          ]
+        );
+      }
+    );
 
 
   return [
@@ -576,87 +1028,350 @@ function buildJournalContext(
   journals
 ) {
   if (
-    !Array.isArray(
-      journals
-    ) ||
+    !Array.isArray(journals) ||
     !journals.length
   ) {
     return "";
   }
 
 
+  /*
+   * IMPORTANT:
+   *
+   * Do NOT slice here.
+   *
+   * The retrieval/service layer owns topk.
+   */
   const items =
-    journals
-      .slice(
-        0,
-        MAX_ITEMS
-      )
-      .map(
-        (
-          journal,
-          index
-        ) => {
-          const title =
-            normalizeText(
-              journal?.title
-            ) ||
-            "N/A";
+    journals.map(
+      (
+        journal,
+        index
+      ) => {
+
+        // -----------------------------------------------
+        // TITLE
+        // -----------------------------------------------
+
+        const title =
+          firstValue(
+            journal?.title,
+            journal?.name,
+            journal?.journal_title,
+            journal?.source_title,
+            journal?.publication_title
+          ) ||
+          "Untitled journal";
 
 
-          const publisher =
-            normalizeText(
-              journal?.publisher
-            ) ||
-            "N/A";
+        // -----------------------------------------------
+        // PUBLISHER
+        // -----------------------------------------------
 
-
-          const quartile =
-            normalizeText(
-              journal
-                ?.sjr_best_quartile
-            ) ||
-            "N/A";
-
-
-          const fields =
-            joinArray(
-              journal?.fields
-            ) ||
-            joinArray(
-              journal?.categories
-            ) ||
-            joinArray(
-              journal?.areas
-            ) ||
-            "N/A";
-
-
-          const country =
-            normalizeText(
-              journal?.country
-            ) ||
-            "N/A";
-
-
-          const url =
-            normalizeText(
-              journal
-                ?.scimago_link ||
-              journal?.url
-            ) ||
-            "N/A";
-
-
-          return (
-            `[J${index + 1}] ${title}` +
-            ` | publisher: ${publisher}` +
-            ` | quartile: ${quartile}` +
-            ` | field: ${fields}` +
-            ` | country: ${country}` +
-            ` | url: ${url}`
+        const publisher =
+          firstValue(
+            journal?.publisher,
+            journal?.publisher_name,
+            journal?.publisher_alt,
+            journal?.organization
           );
-        }
-      );
+
+
+        // -----------------------------------------------
+        // QUARTILE
+        //
+        // IMPORTANT:
+        //
+        // Only explicit journal-level quartile fields
+        // are accepted.
+        //
+        // Do NOT infer overall journal quartile from
+        // categories such as:
+        //
+        // "Education (Q1); Computer Science (Q2)"
+        //
+        // because category quartiles are not necessarily
+        // equivalent to the canonical journal quartile.
+        // -----------------------------------------------
+
+        const quartile =
+          firstValue(
+            journal?.quartile,
+            journal?.sjr_best_quartile,
+            journal?.best_quartile,
+            journal?.sjr_quartile,
+            journal?.q
+          );
+
+
+        // -----------------------------------------------
+        // FIELD / CATEGORY / AREA
+        // -----------------------------------------------
+
+        const fields =
+          firstArrayValue(
+            journal?.fields,
+            journal?.field,
+            journal?.categories,
+            journal?.category,
+            journal?.areas,
+            journal?.area,
+            journal?.subjects,
+            journal?.subject,
+            journal?.topics,
+            journal?.topic
+          );
+
+
+        // -----------------------------------------------
+        // COUNTRY
+        // -----------------------------------------------
+
+        const country =
+          firstValue(
+            journal?.country,
+            journal?.country_name,
+            journal?.nation
+          );
+
+
+        // -----------------------------------------------
+        // REGION
+        // -----------------------------------------------
+
+        const region =
+          firstValue(
+            journal?.region,
+            journal?.continent
+          );
+
+
+        // -----------------------------------------------
+        // ISSN
+        // -----------------------------------------------
+
+        const issn =
+          firstArrayValue(
+            journal?.issn,
+            journal?.primary_issn,
+            journal?.eissn,
+            journal?.pissn
+          );
+
+
+        // -----------------------------------------------
+        // SJR
+        // -----------------------------------------------
+
+        const sjr =
+          firstValue(
+            journal?.sjr,
+            journal?.sjr_score,
+            journal?.score
+          );
+
+
+        // -----------------------------------------------
+        // H-INDEX
+        // -----------------------------------------------
+
+        const hIndex =
+          firstValue(
+            journal?.h_index,
+            journal?.hindex,
+            journal?.hIndex
+          );
+
+
+        // -----------------------------------------------
+        // RANK
+        // -----------------------------------------------
+
+        const rank =
+          firstValue(
+            journal?.rank,
+            journal?.scimago_rank
+          );
+
+
+        // -----------------------------------------------
+        // COVERAGE
+        // -----------------------------------------------
+
+        const coverage =
+          firstValue(
+            journal?.coverage,
+            journal?.coverage_years
+          );
+
+
+        // -----------------------------------------------
+        // OPEN ACCESS
+        // -----------------------------------------------
+
+        const openAccess =
+          booleanValue(
+            journal?.open_access ??
+            journal?.openAccess ??
+            journal?.is_open_access ??
+            journal?.oa
+          );
+
+
+        // -----------------------------------------------
+        // OPEN ACCESS DIAMOND
+        // -----------------------------------------------
+
+        const openAccessDiamond =
+          booleanValue(
+            journal?.open_access_diamond ??
+            journal?.openAccessDiamond ??
+            journal?.is_open_access_diamond
+          );
+
+
+        // -----------------------------------------------
+        // CITATIONS / DOCUMENT METRICS
+        // -----------------------------------------------
+
+        const citationsPerDoc =
+          firstValue(
+            journal?.citations_per_doc_2years,
+            journal?.cites_per_doc_2years,
+            journal?.citations_doc_2years
+          );
+
+
+        const citableDocs =
+          firstValue(
+            journal?.citable_docs_3years,
+            journal?.citable_docs
+          );
+
+
+        // -----------------------------------------------
+        // URL
+        // -----------------------------------------------
+
+        const url =
+          firstValue(
+            journal?.scimago_link,
+            journal?.url,
+            journal?.link,
+            journal?.website,
+            journal?.homepage,
+            journal?.journal_url
+          );
+
+
+        // -----------------------------------------------
+        // SEARCHABLE TEXT
+        // -----------------------------------------------
+
+        const text =
+          truncate(
+            firstValue(
+              journal?.text,
+              journal?.description,
+              journal?.abstract
+            ),
+            MAX_RETRIEVAL_TEXT_CHARS
+          );
+
+
+        // -----------------------------------------------
+        // INTERNAL RETRIEVAL CONTEXT
+        //
+        // Missing fields are omitted.
+        // -----------------------------------------------
+
+        return buildRecord(
+          `J${index + 1}`,
+          title,
+          [
+            contextField(
+              "publisher",
+              publisher
+            ),
+
+            contextField(
+              "quartile",
+              quartile
+            ),
+
+            contextField(
+              "field",
+              fields
+            ),
+
+            contextField(
+              "country",
+              country
+            ),
+
+            contextField(
+              "region",
+              region
+            ),
+
+            contextField(
+              "issn",
+              issn
+            ),
+
+            contextField(
+              "sjr",
+              sjr
+            ),
+
+            contextField(
+              "h_index",
+              hIndex
+            ),
+
+            contextField(
+              "rank",
+              rank
+            ),
+
+            contextField(
+              "coverage",
+              coverage
+            ),
+
+            contextField(
+              "open_access",
+              openAccess
+            ),
+
+            contextField(
+              "open_access_diamond",
+              openAccessDiamond
+            ),
+
+            contextField(
+              "citations_per_doc_2years",
+              citationsPerDoc
+            ),
+
+            contextField(
+              "citable_docs_3years",
+              citableDocs
+            ),
+
+            contextField(
+              "url",
+              url
+            ),
+
+            contextField(
+              "text",
+              text
+            )
+          ]
+        );
+      }
+    );
 
 
   return [
@@ -693,27 +1408,26 @@ TÍNH CHÍNH XÁC:
 - Kết quả đã được hệ thống truy xuất và xếp hạng trước.
 - Không tự tạo thêm kết quả ngoài danh sách được cung cấp.
 
-QUY TẮC XỬ LÝ DỮ LIỆU THIẾU:
-- Tuyệt đối không hiển thị chuỗi "N/A" trong câu trả lời cho người dùng.
-- N/A, null, chuỗi rỗng hoặc trường không được cung cấp đều có nghĩa là "không có dữ liệu".
+QUY TẮC DỮ LIỆU THIẾU:
+- Trường không xuất hiện trong retrieval context có nghĩa là hệ thống không có dữ liệu cho trường đó.
+- Không tự điền, suy đoán hoặc suy diễn giá trị còn thiếu.
 - Nếu một thuộc tính không có dữ liệu thì bỏ toàn bộ thuộc tính đó khỏi phần trình bày.
 - Không được vì thiếu một hoặc nhiều thuộc tính mà bỏ cả bản ghi.
-- Không được chuyển N/A thành một kết luận phủ định.
-- N/A KHÔNG có nghĩa là thuộc tính không thỏa điều kiện người dùng yêu cầu.
-- Đặc biệt, quartile = N/A KHÔNG có nghĩa là "không phải Q1", "không phải Q2", "không phải Q3" hoặc "không phải Q4".
-- Không được kết luận một tạp chí "không đáp ứng Q1/Q2/Q3/Q4" chỉ vì quartile của bản ghi là N/A.
+- Thiếu dữ liệu KHÔNG đồng nghĩa với việc bản ghi không đáp ứng điều kiện.
+- Đặc biệt, thiếu quartile KHÔNG có nghĩa là "không phải Q1", "không phải Q2", "không phải Q3" hoặc "không phải Q4".
+- Không được kết luận một tạp chí "không đáp ứng Q1/Q2/Q3/Q4" chỉ vì quartile không được cung cấp.
 - Không được viết "không có tạp chí nào đáp ứng..." nếu nguyên nhân duy nhất là dữ liệu quartile bị thiếu.
 - Nếu quartile có giá trị cụ thể và khác quartile người dùng yêu cầu thì mới được xác định rằng bản ghi đó không thỏa điều kiện quartile.
-- Nếu tất cả các kết quả liên quan đều thiếu quartile trong khi người dùng yêu cầu quartile cụ thể, chỉ được nói đúng một câu ngắn rằng dữ liệu hiện có chưa đủ để xác nhận quartile; sau đó vẫn trình bày các kết quả liên quan.
+- Nếu tất cả các kết quả liên quan đều thiếu quartile trong khi người dùng yêu cầu quartile cụ thể, chỉ nói một câu ngắn rằng dữ liệu hiện có chưa đủ để xác nhận quartile; sau đó vẫn trình bày các kết quả liên quan.
 - Không lặp lại lời giải thích về dữ liệu thiếu ở cuối câu trả lời.
 - Không viết disclaimer dài về dữ liệu thiếu.
+- Tuyệt đối không hiển thị "N/A", "null" hoặc "undefined" cho người dùng.
 
 QUY TẮC SỐ LƯỢNG KẾT QUẢ:
-- Phải xét tất cả các bản ghi retrieval được cung cấp.
+- Phải xét tất cả các bản ghi retrieval được cung cấp trong prompt.
 - Nếu hệ thống cung cấp N bản ghi liên quan thì phải trình bày đủ N bản ghi, trừ bản ghi có dữ liệu cụ thể chứng minh rằng nó trái với điều kiện bắt buộc của người dùng.
-- Nếu có 5 bản ghi liên quan và không có dữ liệu cụ thể chứng minh chúng không phù hợp thì phải trình bày đủ cả 5.
 - Không được tự rút gọn số lượng kết quả chỉ để làm câu trả lời ngắn hơn.
-- Không được chỉ chọn 1 hoặc 2 kết quả khi hệ thống đã cung cấp nhiều kết quả liên quan.
+- Không được chỉ chọn một phần kết quả khi hệ thống đã cung cấp nhiều kết quả liên quan.
 - Thiếu publisher, country, quartile, URL hoặc thuộc tính khác không phải là lý do để bỏ bản ghi.
 - Không thay thế các bản ghi thiếu thuộc tính bằng một câu nhận xét chung.
 
@@ -723,6 +1437,18 @@ THỨ TỰ KẾT QUẢ:
 - Không chuyển thứ tự retrieval thành các nhãn đánh giá định tính.
 - Không dùng các nhãn như "Top phù hợp nhất", "Nổi bật", "Đáng cân nhắc", "Tốt nhất", "Hàng đầu" nếu dữ liệu không cung cấp căn cứ trực tiếp.
 - Không giải thích cho người dùng về cơ chế retrieval hoặc ranking nội bộ.
+
+HỘI THẢO - TRẠNG THÁI:
+- stored_status là trạng thái được lưu trong dữ liệu nguồn và có thể phản ánh trạng thái xử lý/crawl.
+- temporal_status là trạng thái thời gian được suy ra từ deadline và ngày tổ chức.
+- Không được tự hiểu stored_status="completed" là hội thảo đã kết thúc nếu ngày tháng không chứng minh điều đó.
+- Khi người dùng hỏi hội thảo còn nhận bài hay sắp diễn ra, ưu tiên deadline, start_date, end_date và temporal_status.
+- Không biến trạng thái crawl/enrichment thành trạng thái học thuật của hội thảo.
+
+QUARTILE TẠP CHÍ:
+- Chỉ trường quartile trong retrieval context được dùng làm quartile chính thức của bản ghi.
+- Không suy ra quartile tổng thể của tạp chí từ chuỗi categories, areas hoặc fields.
+- Ví dụ "Education (Q1); Computer Science (Q2)" trong category không đủ để tự kết luận quartile tổng thể của tạp chí nếu trường quartile không được cung cấp.
 
 PHONG CÁCH TRẢ LỜI:
 - Trả lời bằng tiếng Việt.
@@ -762,7 +1488,7 @@ QUY TẮC KẾT THÚC:
 - Giữa hai tạp chí có một dòng trống.
 - Không dùng "---" để phân cách.
 
-Định dạng bắt buộc:
+Định dạng cơ bản:
 
 ### 1. **Tên tạp chí**
 
@@ -777,10 +1503,12 @@ QUY TẮC:
 - Country không có dữ liệu → bỏ dòng 🌍.
 - Quartile không có dữ liệu → bỏ dòng 📊.
 - URL không có dữ liệu → bỏ dòng 🔗.
-- Tuyệt đối không hiển thị "N/A".
+- Tuyệt đối không hiển thị "N/A", "null" hoặc "undefined".
 - Không ghép Publisher, Country, Quartile hoặc URL trên cùng dòng với tên tạp chí.
 - Không ghép nhiều thuộc tính trên cùng một dòng.
 - Không hiển thị mã [J...].
+- Các trường region, ISSN, SJR, H-index, rank, coverage và open access là dữ liệu hỗ trợ.
+- Chỉ hiển thị các trường hỗ trợ này khi người dùng hỏi hoặc khi chúng trực tiếp cần thiết để trả lời câu hỏi.
 
 ĐỊNH DẠNG HỘI THẢO:
 - Nếu có kết quả hội thảo, dùng tiêu đề:
@@ -792,7 +1520,7 @@ QUY TẮC:
 - Giữa hai hội thảo có một dòng trống.
 - Không dùng "---" để phân cách.
 
-Định dạng bắt buộc:
+Định dạng cơ bản:
 
 ### 1. **Tên hội thảo**
 
@@ -807,9 +1535,11 @@ QUY TẮC:
 - Deadline không có dữ liệu → bỏ dòng 📝.
 - Event date không có dữ liệu → bỏ dòng 📅.
 - URL không có dữ liệu → bỏ dòng 🔗.
-- Tuyệt đối không hiển thị "N/A".
+- Tuyệt đối không hiển thị "N/A", "null" hoặc "undefined".
 - Không ghép nhiều thuộc tính trên cùng một dòng.
 - Không hiển thị mã [C...].
+- Acronym, topics, stored_status, temporal_status, source và CFP text là dữ liệu hỗ trợ.
+- Chỉ hiển thị các trường hỗ trợ khi người dùng hỏi hoặc khi chúng trực tiếp cần thiết để trả lời câu hỏi.
 `.trim();
 
 
@@ -962,7 +1692,7 @@ Không có hội thảo hoặc tạp chí nào được hệ thống truy xuất
 
 Nếu câu hỏi có thể được trả lời trực tiếp từ hồ sơ, dự án, tài liệu hoặc lịch sử hội thoại đã cung cấp thì có thể sử dụng các ngữ cảnh đó.
 
-Nếu người dùng đang yêu cầu hội thảo hoặc tạp chí cụ thể thì trả lời ngắn gọn rằng chưa tìm thấy kết quả phù hợp. Không tự tạo kết quả.
+Nếu người dùng đang yêu cầu hội thảo hoặc tạp chí cụ thể thì trả lời ngắn gọn rằng chưa tìm thấy kết quả phù hợp trong dữ liệu được truy xuất. Không tự tạo kết quả.
 `.trim());
   }
 
@@ -979,22 +1709,21 @@ ${currentQuestion || "(empty)"}
 Trả lời trực tiếp câu hỏi hiện tại dựa trên ngữ cảnh và kết quả truy xuất ở trên.
 
 QUAN TRỌNG VỀ SỐ LƯỢNG:
-- Phải xét tất cả các bản ghi retrieval được cung cấp.
+- Phải xét tất cả các bản ghi retrieval được cung cấp trong prompt.
 - Nếu có N bản ghi liên quan thì phải trình bày đủ N bản ghi, trừ khi dữ liệu cụ thể của bản ghi chứng minh rằng nó trái với điều kiện bắt buộc của người dùng.
-- Nếu có 5 bản ghi liên quan và không có dữ liệu cụ thể chứng minh chúng không phù hợp thì phải trình bày đủ cả 5.
 - Không tự rút gọn danh sách để làm câu trả lời ngắn hơn.
 - Thiếu một thuộc tính không phải là lý do để bỏ cả bản ghi.
 - Không viết một câu tổng quát để thay thế cho các bản ghi chưa được trình bày.
 
-QUAN TRỌNG VỀ N/A:
-- Tuyệt đối không hiển thị "N/A" cho người dùng.
-- Trường N/A, null, rỗng hoặc không được cung cấp thì bỏ toàn bộ dòng tương ứng.
-- N/A chỉ có nghĩa là không có dữ liệu.
-- N/A không có nghĩa là không đáp ứng điều kiện.
-- quartile = N/A không có nghĩa là tạp chí không phải Q1/Q2/Q3/Q4.
+QUAN TRỌNG VỀ DỮ LIỆU THIẾU:
+- Trường không xuất hiện trong retrieval context có nghĩa là không có dữ liệu cho trường đó.
+- Không tự suy diễn giá trị cho trường bị thiếu.
+- Không hiển thị "N/A", "null" hoặc "undefined".
+- Thiếu dữ liệu không có nghĩa là bản ghi không đáp ứng điều kiện.
+- Thiếu quartile không có nghĩa là tạp chí không phải Q1/Q2/Q3/Q4.
 - Không được kết luận "không có tạp chí nào đáp ứng quartile yêu cầu" chỉ vì quartile bị thiếu.
 - Nếu quartile có dữ liệu cụ thể và khác quartile được yêu cầu thì mới được loại bản ghi vì lý do quartile.
-- Nếu tất cả kết quả liên quan đều thiếu quartile, chỉ được nói một câu ngắn rằng dữ liệu hiện có chưa đủ để xác nhận quartile; sau đó vẫn trình bày các kết quả liên quan.
+- Nếu tất cả kết quả liên quan đều thiếu quartile, chỉ nói một câu ngắn rằng dữ liệu hiện có chưa đủ để xác nhận quartile; sau đó vẫn trình bày các kết quả liên quan.
 
 Nếu liệt kê hội thảo:
 - Chỉ sử dụng các bản ghi [C1], [C2], ... được cung cấp trong prompt.
@@ -1005,6 +1734,14 @@ Nếu liệt kê hội thảo:
 - Tên hội thảo phải nằm trên một dòng riêng.
 - Location, Deadline, Event date và URL phải nằm trên các dòng riêng.
 - Không tự suy diễn dữ liệu còn thiếu.
+- Tên hội thảo có thể được khớp từ name, title, conference_name, event_name hoặc acronym.
+- Địa điểm có thể được khớp từ location, venue, place hoặc city + country.
+- Chủ đề/lĩnh vực có thể được khớp từ topics, topic, fields, field, categories, category, areas, area, subjects, subject, keywords hoặc keyword.
+- Deadline có thể được khớp từ deadline, submission_deadline, paper_deadline, cfp_deadline hoặc close_date.
+- Ngày tổ chức có thể được khớp từ start_date, event_date, conference_date hoặc date.
+- stored_status và temporal_status là hai khái niệm khác nhau.
+- Không được hiểu stored_status="completed" là hội thảo đã kết thúc nếu ngày tháng không chứng minh điều đó.
+- CFP text, source, trạng thái crawl và các trường nội bộ chỉ dùng để hiểu bản ghi; không tự động hiển thị nếu người dùng không hỏi.
 
 Nếu liệt kê tạp chí:
 - Chỉ sử dụng các bản ghi [J1], [J2], ... được cung cấp trong prompt.
@@ -1015,7 +1752,13 @@ Nếu liệt kê tạp chí:
 - Tên tạp chí phải nằm trên một dòng riêng.
 - Publisher, Country, Quartile và URL phải nằm trên các dòng riêng.
 - Không tự suy diễn quartile, publisher, country hoặc URL.
-- Nếu quartile của bản ghi là N/A thì bỏ dòng Quartile, không loại bản ghi và không kết luận bản ghi không đáp ứng quartile.
+- Nếu quartile không được cung cấp thì bỏ dòng Quartile, không loại bản ghi và không kết luận bản ghi không đáp ứng quartile.
+- Quartile chỉ được lấy từ trường quartile đã cung cấp trong retrieval context.
+- Không suy ra quartile tổng thể từ categories, areas hoặc fields.
+- Field/lĩnh vực có thể được khớp từ fields, field, categories, category, areas, area, subjects, subject, topics hoặc topic.
+- Publisher có thể được khớp từ publisher, publisher_name, publisher_alt hoặc organization.
+- Country có thể được khớp từ country, country_name hoặc nation.
+- Các trường SJR, H-index, ISSN, rank, coverage và open access chỉ hiển thị nếu câu hỏi của người dùng cần chúng.
 
 VỀ ĐỊNH DẠNG:
 - Dùng heading và emoji theo mẫu trong SYSTEM PROMPT.
@@ -1023,7 +1766,7 @@ VỀ ĐỊNH DẠNG:
 - Không ghép nhiều thuộc tính trên cùng một dòng.
 - Không dùng "---" giữa các kết quả.
 - Không dùng 🥇, 🔥, ⭐ hoặc nhãn đánh giá tương tự.
-- Không hiển thị bất kỳ trường N/A nào.
+- Không hiển thị bất kỳ trường dữ liệu thiếu nào.
 - Không mô tả cơ chế retrieval hoặc ranking nội bộ.
 
 KẾT THÚC:

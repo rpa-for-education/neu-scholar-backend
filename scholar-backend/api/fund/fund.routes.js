@@ -1,6 +1,7 @@
 // api/fund/fund.routes.js
 
 import express from "express";
+import { createHash } from "node:crypto";
 import { runFundAgent } from "../../agents/fund/fund.service.js";
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 const FUND_MODEL_ID = "qwen2.5-14b";
 
 const MAX_TOPK = 5;
+const MAX_HISTORY = 10;
 
 const RECENT_RESULT_TTL_MS =
   Number(process.env.FUND_DEDUP_TTL_MS) || 5000;
@@ -89,10 +91,71 @@ function normalizeKeyPart(value) {
 }
 
 
+function getHistory(context = {}) {
+  if (!Array.isArray(context?.history)) {
+    return [];
+  }
+
+  return context.history
+    .filter(
+      item =>
+        item &&
+        ["user", "assistant"].includes(item.role) &&
+        typeof item.content === "string" &&
+        item.content.trim()
+    )
+    .slice(-MAX_HISTORY);
+}
+
+
+/**
+ * History ảnh hưởng trực tiếp đến contextual rewrite.
+ *
+ * Ví dụ:
+ * - History A: quỹ AI tại Việt Nam
+ * - History B: quỹ AI tại Mỹ
+ *
+ * Cùng câu hỏi "Còn NASA?" không thể dùng chung
+ * một dedup key.
+ *
+ * SHA-256 giúp key ngắn và ổn định.
+ */
+function buildHistoryFingerprint(history = []) {
+  if (!Array.isArray(history) || !history.length) {
+    return "no-history";
+  }
+
+  const payload = history
+    .map(item => ({
+      role: item?.role || "",
+      content: normalizeKeyPart(
+        item?.content || ""
+      )
+    }))
+    .filter(
+      item =>
+        item.role &&
+        item.content
+    );
+
+  if (!payload.length) {
+    return "no-history";
+  }
+
+  return createHash("sha256")
+    .update(
+      JSON.stringify(payload)
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+
 function buildDedupKey({
   body,
   question,
-  topk
+  topk,
+  history
 }) {
   return [
     normalizeKeyPart(
@@ -100,7 +163,8 @@ function buildDedupKey({
     ),
     normalizeKeyPart(question),
     FUND_MODEL_ID,
-    String(topk)
+    String(topk),
+    buildHistoryFingerprint(history)
   ].join("::");
 }
 
@@ -215,7 +279,8 @@ function saveRecentResult(
 async function runDeduplicated({
   req,
   question,
-  topk
+  topk,
+  history
 }) {
   const body =
     req.body || {};
@@ -224,7 +289,8 @@ async function runDeduplicated({
     buildDedupKey({
       body,
       question,
-      topk
+      topk,
+      history
     });
 
   // -------------------------------------------------
@@ -307,14 +373,21 @@ function prepareRequest(req) {
   const body =
     req.body || {};
 
+  const context =
+    body.context || {};
+
   return {
     body,
+    context,
 
     question:
       getQuestion(body),
 
     topk:
       safeTopk(body.topk),
+
+    history:
+      getHistory(context),
 
     sessionId:
       body.session_id ?? null
@@ -354,9 +427,28 @@ function buildSources(result) {
           fund?.agency_name ||
           null,
 
+        /**
+         * Tổng kinh phí chương trình.
+         *
+         * Không dùng award_ceiling làm fallback.
+         */
         amount:
-          fund?.amount ??
           fund?.funding_amount ??
+          fund?.estimated_total_program_funding ??
+          fund?.amount ??
+          fund?.total_funding ??
+          null,
+
+        /**
+         * Mức tối đa/tối thiểu của một award
+         * được giữ riêng.
+         */
+        award_ceiling:
+          fund?.award_ceiling ??
+          null,
+
+        award_floor:
+          fund?.award_floor ??
           null,
 
         deadline:
@@ -416,6 +508,7 @@ async function handleAsk(
     const {
       question,
       topk,
+      history,
       sessionId
     } = prepareRequest(req);
 
@@ -441,7 +534,8 @@ async function handleAsk(
       await runDeduplicated({
         req,
         question,
-        topk
+        topk,
+        history
       });
 
     const answer =
@@ -589,6 +683,14 @@ router.get(
         await Promise.all([
           collection
             .find({})
+
+            /**
+             * Explicit sort để pagination ổn định.
+             */
+            .sort({
+              _id: 1
+            })
+
             .skip(skip)
             .limit(finalLimit)
             .toArray(),
@@ -600,7 +702,7 @@ router.get(
       // ---------------------------------------------
       // Mapping
       //
-      // Hỗ trợ cả field chuẩn mới và alias cũ.
+      // Hỗ trợ field chuẩn và alias cũ.
       // ---------------------------------------------
 
       const data =
@@ -618,9 +720,27 @@ router.get(
             f.agency ||
             "",
 
+          /**
+           * Tổng kinh phí chương trình.
+           *
+           * Không sử dụng award_ceiling làm fallback.
+           */
           amount:
             f.funding_amount ??
+            f.estimated_total_program_funding ??
             f.amount ??
+            f.total_funding ??
+            null,
+
+          /**
+           * Award ceiling/floor là khái niệm riêng.
+           */
+          award_ceiling:
+            f.award_ceiling ??
+            null,
+
+          award_floor:
+            f.award_floor ??
             null,
 
           deadline:
@@ -702,6 +822,7 @@ router.post(
       const {
         question,
         topk,
+        history,
         sessionId
       } = prepareRequest(req);
 
@@ -785,7 +906,8 @@ router.post(
         await runDeduplicated({
           req,
           question,
-          topk
+          topk,
+          history
         });
 
       const answer =
