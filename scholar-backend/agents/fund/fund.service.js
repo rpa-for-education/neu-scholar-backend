@@ -38,20 +38,14 @@ function normalize(value) {
 function isFundQuestion(question) {
   const q = ` ${normalize(question)} `;
   return [
-    "quy",
-    "tai tro",
-    "nguon von",
-    "cap kinh phi",
-    "kinh phi nghien cuu",
-    "grant",
-    "funding",
-    "fund",
-    "fellowship",
-    "nafosted",
-    "nsf",
-    "opportunity",
-    "hoc bong"
-  ].some(word => q.includes(` ${word} `));
+    "quy", "tai tro", "nguon von",
+    "cap kinh phi", "kinh phi nghien cuu",
+    "grant", "funding", "fund",
+    "fellowship", "nafosted", "nsf",
+    "opportunity", "hoc bong"
+  ].some(word =>
+    q.includes(` ${word} `)
+  );
 }
 function isDetailQuestion(question) {
   return /\b(chi tiet|thong tin|gioi thieu|mo ta|about|details?)\b/
@@ -69,7 +63,6 @@ function titleOf(item) {
 }
 function normalizeFunds(results) {
   if (!Array.isArray(results)) return [];
-
   const seen = new Map();
 
   for (const result of results) {
@@ -78,10 +71,11 @@ function normalizeFunds(results) {
       typeof result.payload === "object"
         ? result.payload
         : result || {};
-
     const title = titleOf(payload);
     if (!title) continue;
 
+    // Giữ mọi trường gốc để fund.prompt.js
+    // có thể dùng dữ liệu chi tiết.
     const fund = {
       ...payload,
       title,
@@ -177,23 +171,27 @@ function normalizeFunds(results) {
 
     if (
       !seen.has(key) ||
-      fund.finalScore > seen.get(key).finalScore
+      fund.finalScore >
+        seen.get(key).finalScore
     ) {
       seen.set(key, fund);
     }
   }
 
   return [...seen.values()]
-    .sort((a, b) => b.finalScore - a.finalScore);
+    .sort((a, b) =>
+      b.finalScore - a.finalScore
+    );
 }
 function namedMatches(funds, question) {
   const q = normalize(question);
   return funds.filter(fund => {
     const name = normalize(titleOf(fund));
-    return name.length >= 8 && q.includes(name);
+    return name.length >= 8 &&
+      q.includes(name);
   });
 }
-function fallbackAnswer(funds) {
+function fallbackAnswer(funds, detail = false) {
   if (!funds.length) {
     return "Chưa tìm thấy cơ hội tài trợ phù hợp trong dữ liệu được truy xuất.";
   }
@@ -205,11 +203,30 @@ function fallbackAnswer(funds) {
 
     const fields = [
       ["Cơ quan tài trợ", fund.agency],
+      ["Cơ quan cấp trên", fund.top_level_agency_name],
+      ["Mã cơ hội", first(
+        fund.opportunity_number,
+        fund.opportunity_id
+      )],
+      ["Trạng thái", first(
+        fund.opportunity_status,
+        fund.status
+      )],
       ["Lĩnh vực", first(
         fund.category,
         fund.funding_categories,
         fund.research_area,
         fund.keywords
+      )],
+      ["Tóm tắt", first(
+        fund.summary_description,
+        fund.description,
+        fund.summary,
+        fund.text
+      )],
+      ["Đối tượng", first(
+        fund.applicant_types,
+        fund.eligibility
       )],
       ["Tổng kinh phí chương trình", first(
         fund.funding_amount,
@@ -221,17 +238,30 @@ function fallbackAnswer(funds) {
         fund.award_ceiling,
         fund.maximum_award
       )],
-      ["Đối tượng", first(
-        fund.applicant_types,
-        fund.eligibility
+      ["Mức tài trợ tối thiểu", first(
+        fund.award_floor,
+        fund.minimum_award
       )],
       ["Hạn nộp", fund.deadline],
       ["Liên kết", fund.url]
     ];
 
     for (const [label, value] of fields) {
-      if (text(value)) {
-        lines.push(`- **${label}:** ${text(value)}`);
+      if (
+        text(value) &&
+        (
+          detail ||
+          ![
+            "Tóm tắt",
+            "Cơ quan cấp trên",
+            "Mã cơ hội",
+            "Mức tài trợ tối thiểu"
+          ].includes(label)
+        )
+      ) {
+        lines.push(
+          `- **${label}:** ${text(value)}`
+        );
       }
     }
     return lines.join("\n");
@@ -241,19 +271,59 @@ function fallbackAnswer(funds) {
     blocks.join("\n\n")
   }`;
 }
+function informationCount(fund) {
+  return [
+    fund.agency,
+    fund.category,
+    fund.summary_description,
+    fund.eligibility,
+    fund.applicant_types,
+    fund.funding_amount,
+    fund.award_ceiling,
+    fund.deadline,
+    fund.opportunity_number,
+    fund.url
+  ].filter(value => text(value)).length;
+}
+function isThinAnswer(answer) {
+  const withoutLinks = answer
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(
+      /\[[^\]]+\]\([^)]*\)/g,
+      ""
+    );
+  const lines = withoutLinks
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  return withoutLinks.length < 180 ||
+    lines.length <= 2;
+}
 function modelInfo(result, requestedId) {
   return {
-    model_id: result?.model_id || requestedId || null,
-    model: result?.model || null,
-    latency: result?.latency ?? null,
+    model_id:
+      result?.model_id ||
+      requestedId ||
+      null,
+    model:
+      result?.model ||
+      null,
+    latency:
+      result?.latency ??
+      null,
     prompt_tokens:
-      result?.usage?.prompt_tokens ?? null,
+      result?.usage?.prompt_tokens ??
+      null,
     output_tokens:
-      result?.usage?.output_tokens ?? null
+      result?.usage?.output_tokens ??
+      null
   };
 }
 async function searchWeb(query) {
-  if (!process.env.SERPAPI_API_KEY) return [];
+  if (!process.env.SERPAPI_API_KEY) {
+    return [];
+  }
 
   const params = new URLSearchParams({
     engine: "google",
@@ -265,12 +335,17 @@ async function searchWeb(query) {
 
   const response = await fetch(
     `https://serpapi.com/search.json?${params}`,
-    { signal: AbortSignal.timeout(15000) }
+    {
+      signal:
+        AbortSignal.timeout(15000)
+    }
   );
 
   if (!response.ok) {
     throw new Error(
-      `Google search HTTP ${response.status}`
+      `Google search HTTP ${
+        response.status
+      }`
     );
   }
 
@@ -284,14 +359,20 @@ async function searchWeb(query) {
       ? data.organic_results
       : []
   )
-    .filter(item => item.link && item.snippet)
+    .filter(item =>
+      item.link && item.snippet
+    )
     .slice(0, 5)
     .map((item, index) => ({
       id: `W${index + 1}`,
       type: "web",
-      title: text(item.title) || "Nguồn web",
+      title:
+        text(item.title) ||
+        "Nguồn web",
       url: String(item.link),
-      content: text(item.snippet).slice(0, 1800)
+      content:
+        text(item.snippet)
+          .slice(0, 1800)
     }));
 }
 function generalPrompt(question, history, web) {
@@ -299,16 +380,21 @@ function generalPrompt(question, history, web) {
     .slice(-6)
     .map(item =>
       `${item.role}: ${
-        text(item.content).slice(0, 700)
+        text(item.content)
+          .slice(0, 700)
       }`
     )
     .join("\n");
 
   const sources = web
     .map(item =>
-      `[${item.id}] ${item.title}\nURL: ${
+      `[${item.id}] ${
+        item.title
+      }\nURL: ${
         item.url
-      }\nNội dung: ${item.content}`
+      }\nNội dung: ${
+        item.content
+      }`
     )
     .join("\n\n");
 
@@ -318,8 +404,12 @@ function generalPrompt(question, history, web) {
         ? "Dẫn [W1], [W2] khi dùng nguồn web."
         : "Nếu cần dữ liệu hiện thời mà chưa có nguồn, nói rõ giới hạn."
     }`,
-    previous ? `Lịch sử:\n${previous}` : "",
-    sources ? `Nguồn web:\n${sources}` : "",
+    previous
+      ? `Lịch sử:\n${previous}`
+      : "",
+    sources
+      ? `Nguồn web:\n${sources}`
+      : "",
     `Câu hỏi hiện tại: ${question}`
   ].filter(Boolean).join("\n\n");
 }
@@ -345,8 +435,12 @@ export async function runFundAgent(
     sources,
     domain,
     standalone_question: standalone,
-    model: modelInfo(model, model_id),
-    responseTimeMs: Date.now() - start
+    model: modelInfo(
+      model,
+      model_id
+    ),
+    responseTimeMs:
+      Date.now() - start
   });
 
   try {
@@ -355,20 +449,23 @@ export async function runFundAgent(
     let standalone = text(question);
 
     try {
-      const rewritten = await rewriteQuery(
-        standalone,
-        normalizedHistory
-      );
+      const rewritten =
+        await rewriteQuery(
+          standalone,
+          normalizedHistory
+        );
       if (
         typeof rewritten === "string" &&
         rewritten.trim()
       ) {
-        standalone = rewritten.trim();
+        standalone =
+          rewritten.trim();
       }
     } catch (error) {
       console.warn(
         "⚠️ Fund query rewrite failed:",
-        error?.message || error
+        error?.message ||
+        error
       );
     }
 
@@ -376,45 +473,51 @@ export async function runFundAgent(
       MAX_RETURN,
       Math.max(
         1,
-        Math.trunc(Number(topk)) || MAX_RETURN
+        Math.trunc(Number(topk)) ||
+        MAX_RETURN
       )
     );
 
-    // Tên riêng không chứa chữ "quỹ" vẫn được kiểm tra
-    // với DB khi người dùng hỏi thông tin chi tiết.
     let preflight = null;
 
     if (
       !isFundQuestion(standalone) &&
       isDetailQuestion(standalone)
     ) {
-      const results = await runFundSearch(
-        standalone,
-        model_id,
-        limit
-      );
-      const matches = namedMatches(
-        normalizeFunds(results),
-        standalone
-      );
+      const results =
+        await runFundSearch(
+          standalone,
+          model_id,
+          limit
+        );
+      const matches =
+        namedMatches(
+          normalizeFunds(results),
+          standalone
+        );
       if (matches.length) {
-        preflight = matches.slice(0, 1);
+        preflight =
+          matches.slice(0, 1);
       }
     }
 
     // Câu hỏi không liên quan đến quỹ:
-    // trả lời bằng LLM như trợ lý thông thường.
+    // dùng LLM như trợ lý thông thường.
     if (
       !isFundQuestion(standalone) &&
       !preflight
     ) {
       let web = [];
+
       try {
-        web = await searchWeb(standalone);
+        web = await searchWeb(
+          standalone
+        );
       } catch (error) {
         console.warn(
           "Fund web search failed:",
-          error?.message || error
+          error?.message ||
+          error
         );
       }
 
@@ -428,7 +531,8 @@ export async function runFundAgent(
       );
 
       const answer =
-        typeof result?.answer === "string"
+        typeof result?.answer ===
+        "string"
           ? result.answer.trim()
           : "";
 
@@ -455,8 +559,8 @@ export async function runFundAgent(
       );
     }
 
-    // Câu hỏi về quỹ: truy xuất DB và để LLM
-    // trình bày theo fund.prompt.js.
+    // Câu hỏi về quỹ: lấy bản ghi,
+    // đưa dữ liệu sang prompt và LLM.
     const funds = preflight ||
       normalizeFunds(
         await runFundSearch(
@@ -476,26 +580,50 @@ export async function runFundAgent(
       model_id
     );
 
-    const answer =
-      typeof llm?.answer === "string" &&
-      llm.answer.trim()
+    let answer =
+      typeof llm?.answer === "string"
         ? llm.answer.trim()
-        : fallbackAnswer(funds);
+        : "";
+
+    // Nếu bản ghi có nhiều dữ liệu nhưng LLM chỉ
+    // trả 1–2 dòng, dựng câu trả lời từ các
+    // trường thật của DB để tránh thông tin cụt.
+    if (
+      !answer ||
+      (
+        isDetailQuestion(question) &&
+        funds.length === 1 &&
+        informationCount(funds[0]) >= 5 &&
+        isThinAnswer(answer)
+      )
+    ) {
+      answer = fallbackAnswer(
+        funds,
+        isDetailQuestion(question)
+      );
+    }
 
     return {
       answer,
       funds,
-      sources: funds.map((fund, index) => ({
-        id: `F${index + 1}`,
-        type: "fund",
-        title: fund.title,
-        url: fund.url || "",
-        metadata: fund
-      })),
+      sources: funds.map(
+        (fund, index) => ({
+          id: `F${index + 1}`,
+          type: "fund",
+          title: fund.title,
+          url: fund.url || "",
+          metadata: fund
+        })
+      ),
       domain: "fund",
-      standalone_question: standalone,
-      model: modelInfo(llm, model_id),
-      responseTimeMs: Date.now() - start
+      standalone_question:
+        standalone,
+      model: modelInfo(
+        llm,
+        model_id
+      ),
+      responseTimeMs:
+        Date.now() - start
     };
   } catch (error) {
     console.error(

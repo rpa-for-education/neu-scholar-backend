@@ -7,47 +7,28 @@ import { detectIntent } from "./agentReasoning.js";
 import { COUNTRY_NAME_TO_ISO } from "../../services/scripts/country_iso_full.js";
 import { COUNTRY_VI_TO_ISO } from "../../services/scripts/country_vi_alias.js";
 
-const COLLECTION =
-  process.env.QDRANT_COLLECTION_FUND || "fund_vectors";
+const COLLECTION = process.env.QDRANT_COLLECTION_FUND || "fund_vectors";
 const CACHE_TTL = 300000;
 const EMBED_TTL = 1800000;
 const MAX_CACHE = 500;
-const SEARCH_TIMEOUT =
-  Number(process.env.FUND_SEARCH_TIMEOUT_MS) || 1800;
-const EMBED_TIMEOUT =
-  Number(process.env.FUND_EMBED_TIMEOUT_MS) || 1500;
+const SEARCH_TIMEOUT = Number(process.env.FUND_SEARCH_TIMEOUT_MS) || 1800;
+const EMBED_TIMEOUT = Number(process.env.FUND_EMBED_TIMEOUT_MS) || 1500;
 const CACHE = new Map();
 const EMBED_CACHE = new Map();
 
 const FIELDS = [
-  "opportunity_title",
-  "title",
-  "name",
-  "agency",
-  "agency_name",
-  "agency_code",
-  "top_level_agency_name",
-  "opportunity_number",
-  "opportunity_id",
-  "category",
-  "funding_categories",
-  "funding_category_description",
-  "opportunity_assistance_listings",
-  "funding_instruments",
-  "applicant_types",
-  "applicant_eligibility_description",
-  "summary_description",
-  "description",
-  "text",
-  "opportunity_status",
-  "source"
+  "opportunity_title", "title", "name", "agency", "agency_name",
+  "agency_code", "top_level_agency_name", "opportunity_number",
+  "opportunity_id", "category", "funding_categories",
+  "funding_category_description", "opportunity_assistance_listings",
+  "funding_instruments", "applicant_types",
+  "applicant_eligibility_description", "summary_description",
+  "description", "text", "opportunity_status", "source"
 ];
-
 const STOP = new Set([
-  "cho", "toi", "tim", "kiem", "cac", "mot",
-  "nhung", "tai", "trong", "voi", "cua",
-  "ve", "quy", "tro", "fund", "grant",
-  "for", "the", "and"
+  "cho", "toi", "tim", "kiem", "cac", "mot", "nhung",
+  "tai", "trong", "voi", "cua", "ve", "quy", "tro",
+  "fund", "grant", "for", "the", "and"
 ]);
 
 function text(value) {
@@ -56,17 +37,12 @@ function text(value) {
     return value.map(text).filter(Boolean).join(" ");
   }
   if (typeof value === "object") {
-    return Object.values(value)
-      .map(text)
-      .filter(Boolean)
-      .join(" ");
+    return Object.values(value).map(text).filter(Boolean).join(" ");
   }
   return String(value);
 }
 function norm(value) {
-  return text(value)
-    .toLowerCase()
-    .normalize("NFD")
+  return text(value).toLowerCase().normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
@@ -77,14 +53,47 @@ function first(...values) {
   return values.find(value => {
     const result = text(value).trim().toLowerCase();
     return result &&
-      !["n/a", "na", "null", "undefined"]
-        .includes(result);
+      !["n/a", "na", "null", "undefined"].includes(result);
   }) ?? "";
+}
+function expandSearchTerms(query) {
+  const q = norm(query);
+  const terms = [];
+
+  if (
+    q.includes("he thong thong tin quan ly") ||
+    q.includes("management information systems") ||
+    /\bmis\b/.test(q)
+  ) {
+    terms.push(
+      "management information systems",
+      "information systems",
+      "MIS"
+    );
+  }
+  if (
+    q.includes("nghien cuu sinh") ||
+    /\bphd\b/.test(q) ||
+    q.includes("doctoral")
+  ) {
+    terms.push(
+      "doctoral",
+      "PhD",
+      "graduate research",
+      "predoctoral"
+    );
+  }
+  if (q.includes("tri tue nhan tao")) {
+    terms.push("artificial intelligence", "AI");
+  }
+  if (q.includes("giao duc")) {
+    terms.push("education");
+  }
+  return [...new Set(terms)];
 }
 function tokens(value) {
   return [...new Set(
-    norm(value)
-      .split(" ")
+    norm(value).split(" ")
       .filter(word =>
         word.length >= 3 && !STOP.has(word)
       )
@@ -93,7 +102,6 @@ function tokens(value) {
 function cacheGet(cache, key, ttl) {
   const entry = cache.get(key);
   if (!entry) return null;
-
   if (Date.now() - entry.time >= ttl) {
     cache.delete(key);
     return null;
@@ -101,10 +109,7 @@ function cacheGet(cache, key, ttl) {
   return entry.value;
 }
 function cacheSet(cache, key, value) {
-  cache.set(key, {
-    value,
-    time: Date.now()
-  });
+  cache.set(key, { value, time: Date.now() });
   while (cache.size > MAX_CACHE) {
     cache.delete(cache.keys().next().value);
   }
@@ -122,9 +127,7 @@ function withTimeout(promise, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-// Dùng hai bảng quốc gia đầy đủ của dự án.
 const COUNTRY_CODES = new Map();
-
 for (const [name, iso] of [
   ...Object.entries(COUNTRY_VI_TO_ISO || {}),
   ...Object.entries(COUNTRY_NAME_TO_ISO || {})
@@ -136,16 +139,10 @@ for (const [name, iso] of [
   }
 }
 for (const [name, code] of Object.entries({
-  vietnam: "VN",
-  "viet nam": "VN",
-  vn: "VN",
-  usa: "US",
-  "united states": "US",
-  "united states of america": "US",
-  us: "US",
-  america: "US",
-  uk: "GB",
-  "united kingdom": "GB"
+  vietnam: "VN", "viet nam": "VN", vn: "VN",
+  usa: "US", "united states": "US",
+  "united states of america": "US", us: "US",
+  america: "US", uk: "GB", "united kingdom": "GB"
 })) {
   COUNTRY_CODES.set(norm(name), code);
 }
@@ -158,52 +155,35 @@ function countryState(payload, intent) {
     : intent.country === "usa"
       ? "US"
       : intent.country || "";
-
   if (!wanted) return "unknown";
 
   const values = [
-    payload.country,
-    payload.country_name,
-    payload.country_code,
-    payload.location_country,
+    payload.country, payload.country_name,
+    payload.country_code, payload.location_country,
     payload.nation
   ].filter(Boolean);
-
   if (!values.length) return "unknown";
 
-  const expected =
-    countryCode(wanted) || wanted.toUpperCase();
-  const recognized = values
-    .map(countryCode)
-    .filter(Boolean);
-
+  const expected = countryCode(wanted) || wanted.toUpperCase();
+  const recognized = values.map(countryCode).filter(Boolean);
   if (!recognized.length) return "unknown";
-
-  return recognized.includes(expected)
-    ? "match"
-    : "mismatch";
+  return recognized.includes(expected) ? "match" : "mismatch";
 }
 function normalizeFund(doc = {}) {
-  const item =
-    doc && typeof doc === "object" ? doc : {};
+  const item = doc && typeof doc === "object" ? doc : {};
 
   return {
     ...item,
     title: first(
-      item.opportunity_title,
-      item.title,
-      item.name,
-      item.program_title
+      item.opportunity_title, item.title,
+      item.name, item.program_title
     ),
     agency: first(
-      item.agency_name,
-      item.agency,
-      item.funding_agency,
-      item.organization
+      item.agency_name, item.agency,
+      item.funding_agency, item.organization
     ),
     opportunity_id: first(
-      item.opportunity_id,
-      item.id,
+      item.opportunity_id, item.id,
       item.opportunity_identifier
     ),
     opportunity_number: first(
@@ -212,54 +192,43 @@ function normalizeFund(doc = {}) {
       item.foa_number
     ),
     category: first(
-      item.category,
-      item.funding_categories,
-      item.funding_category,
-      item.research_area
+      item.category, item.funding_categories,
+      item.funding_category, item.research_area
     ),
     summary_description: first(
       item.summary_description,
-      item.description,
-      item.summary,
-      item.text
+      item.description, item.summary, item.text
     ),
     deadline: first(
-      item.close_date,
-      item.deadline,
+      item.close_date, item.deadline,
       item.application_deadline,
       item.submission_deadline
     ),
     funding_amount: first(
       item.funding_amount,
       item.estimated_total_program_funding,
-      item.amount,
-      item.total_funding
+      item.amount, item.total_funding
     ),
     award_ceiling: first(
-      item.award_ceiling,
-      item.maximum_award,
+      item.award_ceiling, item.maximum_award,
       item.max_award
     ),
     award_floor: first(
-      item.award_floor,
-      item.minimum_award,
+      item.award_floor, item.minimum_award,
       item.min_award
     ),
     url: first(
-      item.url,
-      item.link,
+      item.url, item.link,
       item.opportunity_url,
       item.additional_info_url,
-      item.website,
-      item.homepage,
+      item.website, item.homepage,
       item["OPPORTUNITY URL"]
     )
   };
 }
 function searchable(payload) {
   return norm([
-    payload.title,
-    payload.agency,
+    payload.title, payload.agency,
     payload.top_level_agency_name,
     payload.category,
     payload.funding_category_description,
@@ -272,24 +241,22 @@ function searchable(payload) {
   ]);
 }
 function lexical(payload, query) {
-  const words = tokens(query);
+  const words = tokens([
+    query,
+    ...expandSearchTerms(query)
+  ]);
   const haystack = searchable(payload);
   if (!words.length || !haystack) return 0;
-
   return words.filter(word =>
     haystack.includes(word)
   ).length / words.length;
 }
 function fundYears(payload) {
   const years = new Set();
-
   for (const value of [
-    payload.fiscal_year,
-    payload.fy,
-    payload.year,
-    payload.call_year,
-    payload.deadline,
-    payload.close_date,
+    payload.fiscal_year, payload.fy,
+    payload.year, payload.call_year,
+    payload.deadline, payload.close_date,
     payload.post_date
   ]) {
     const matches = text(value).match(/\b20\d{2}\b/g);
@@ -302,13 +269,12 @@ function fundYears(payload) {
   return years;
 }
 function deadlineScore(payload, query) {
-  if (!/(con han|dang mo|sap toi|deadline|han nop|open|upcoming)/
-    .test(norm(query))) return 0;
+  if (
+    !/(con han|dang mo|sap toi|deadline|han nop|open|upcoming)/
+      .test(norm(query))
+  ) return 0;
 
-  const raw = first(
-    payload.deadline,
-    payload.close_date
-  );
+  const raw = first(payload.deadline, payload.close_date);
   if (!raw) return 0;
 
   const date = new Date(
@@ -332,11 +298,8 @@ function scoreResult(result, query, intent) {
 
   if (intent.year) {
     const years = fundYears(payload);
-    if (years.has(intent.year)) {
-      score += 0.25;
-    } else if (years.size) {
-      score -= 0.1;
-    }
+    if (years.has(intent.year)) score += 0.25;
+    else if (years.size) score -= 0.1;
   }
 
   const country = countryState(payload, intent);
@@ -345,14 +308,11 @@ function scoreResult(result, query, intent) {
 
   const q = norm(query);
   const source = searchable(payload);
-
   for (const name of [
-    "nafosted", "nsf", "nih", "erc", "horizon europe"
+    "nafosted", "nsf", "nih",
+    "erc", "horizon europe"
   ]) {
-    if (
-      q.includes(name) &&
-      source.includes(name)
-    ) {
+    if (q.includes(name) && source.includes(name)) {
       score += 0.3;
     }
   }
@@ -367,8 +327,7 @@ function scoreResult(result, query, intent) {
 function identity(result) {
   const payload = result.payload || {};
   const id = first(
-    payload._key,
-    payload.u_key,
+    payload._key, payload.u_key,
     payload.opportunity_id,
     payload.opportunity_number,
     payload.source_id
@@ -387,14 +346,103 @@ function merge(vectorResults, keywordResults) {
     const key = identity(result);
     if (!key) continue;
     const previous = found.get(key);
-    if (
-      !previous ||
-      Number(result.score) > Number(previous.score)
-    ) {
+
+    if (!previous) {
       found.set(key, result);
+      continue;
     }
+
+    const preferred =
+      Number(result.score) > Number(previous.score)
+        ? result
+        : previous;
+    const other =
+      preferred === result
+        ? previous
+        : result;
+
+    found.set(key, {
+      ...preferred,
+      payload: normalizeFund({
+        ...other.payload,
+        ...Object.fromEntries(
+          Object.entries(preferred.payload)
+            .filter(([, value]) =>
+              value !== "" && value != null
+            )
+        )
+      })
+    });
   }
   return [...found.values()];
+}
+async function hydrate(result, db) {
+  const payload = result.payload || {};
+  const conditions = [];
+
+  if (payload.opportunity_id) {
+    conditions.push({
+      opportunity_id: payload.opportunity_id
+    });
+  }
+  if (payload.opportunity_number) {
+    conditions.push({
+      opportunity_number: payload.opportunity_number
+    });
+  }
+
+  const title = first(
+    payload.opportunity_title,
+    payload.title
+  );
+  if (title) {
+    const escaped = String(title).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+    for (const key of [
+      "opportunity_title", "title"
+    ]) {
+      conditions.push({
+        [key]: {
+          $regex: `^${escaped}$`,
+          $options: "i"
+        }
+      });
+    }
+  }
+  if (!conditions.length) return result;
+
+  try {
+    const full = await withTimeout(
+      db.collection("fund").findOne({
+        $or: conditions
+      }),
+      SEARCH_TIMEOUT
+    );
+    if (!full) return result;
+
+    const merged = {
+      ...payload,
+      ...Object.fromEntries(
+        Object.entries(full)
+          .filter(([, value]) =>
+            value !== "" && value != null
+          )
+      )
+    };
+
+    return {
+      ...result,
+      payload: normalizeFund(merged)
+    };
+  } catch (error) {
+    console.warn(
+      "Fund hydration failed:",
+      error?.message || error
+    );
+    return result;
+  }
 }
 async function vectorSearch(vector, limit) {
   if (!vector) return [];
@@ -429,14 +477,18 @@ async function vectorSearch(vector, limit) {
   }
 }
 async function keywordSearch(query, limit) {
-  const words = tokens(query).slice(0, 12);
+  const words = [
+    ...new Set([
+      ...tokens(query),
+      ...expandSearchTerms(query)
+        .flatMap(tokens)
+    ])
+  ].slice(0, 18);
+
   if (!words.length) return [];
 
   try {
     const db = await getDb();
-
-    // Escape regex để từ khóa người dùng được tìm
-    // như văn bản, không trở thành biểu thức regex.
     const conditions = words.flatMap(word =>
       FIELDS.map(field => ({
         [field]: {
@@ -489,10 +541,7 @@ async function keywordSearch(query, limit) {
   }
 }
 
-export async function searchFund(
-  query,
-  topk = 5
-) {
+export async function searchFund(query, topk = 5) {
   const raw = String(query ?? "").trim();
   if (!raw) return [];
 
@@ -505,12 +554,7 @@ export async function searchFund(
   );
   const intent = detectIntent(raw);
   const key = `${norm(raw)}|${limit}`;
-
-  const cached = cacheGet(
-    CACHE,
-    key,
-    CACHE_TTL
-  );
+  const cached = cacheGet(CACHE, key, CACHE_TTL);
   if (cached) return cached;
 
   let vector = cacheGet(
@@ -521,8 +565,12 @@ export async function searchFund(
 
   if (!vector) {
     try {
+      const expanded = [
+        raw,
+        ...expandSearchTerms(raw)
+      ].join(" ");
       vector = await withTimeout(
-        embed(raw),
+        embed(expanded),
         EMBED_TIMEOUT
       );
       if (vector) {
@@ -540,13 +588,14 @@ export async function searchFund(
     }
   }
 
-  const [semantic, keyword] = await Promise.all([
-    vectorSearch(vector, limit),
-    keywordSearch(
-      raw,
-      Math.min(limit * 4, 60)
-    )
-  ]);
+  const [semantic, keyword] =
+    await Promise.all([
+      vectorSearch(vector, limit),
+      keywordSearch(
+        raw,
+        Math.min(limit * 4, 60)
+      )
+    ]);
 
   let ranked = merge(
     semantic,
@@ -555,8 +604,6 @@ export async function searchFund(
     scoreResult(result, raw, intent)
   );
 
-  // Chỉ loại khi trường quốc gia chứng minh
-  // rõ kết quả thuộc quốc gia khác.
   if (intent.country) {
     ranked = ranked.filter(result =>
       countryState(
@@ -566,8 +613,6 @@ export async function searchFund(
     );
   }
 
-  // Nếu có đủ kết quả đúng năm, ưu tiên
-  // tập kết quả đó.
   if (intent.year) {
     const exact = ranked.filter(result =>
       fundYears(result.payload)
@@ -582,19 +627,30 @@ export async function searchFund(
     b.score - a.score
   );
 
-  const output = ranked
-    .slice(0, limit)
-    .map(result => ({
-      ...result,
-      payload: {
-        ...result.payload
-      }
-    }));
+  // Qdrant có thể chỉ giữ title/agency/url.
+  // Lấy bản ghi Mongo đầy đủ trước khi đưa cho LLM.
+  let output = ranked.slice(0, limit);
+  try {
+    const db = await getDb();
+    output = await Promise.all(
+      output.map(result =>
+        hydrate(result, db)
+      )
+    );
+  } catch (error) {
+    console.warn(
+      "Fund detail hydration unavailable:",
+      error?.message || error
+    );
+  }
 
-  cacheSet(
-    CACHE,
-    key,
-    output
-  );
+  output = output.map(result => ({
+    ...result,
+    payload: {
+      ...result.payload
+    }
+  }));
+
+  cacheSet(CACHE, key, output);
   return output;
 }
