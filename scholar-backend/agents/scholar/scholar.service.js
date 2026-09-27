@@ -176,8 +176,7 @@ function contextOf(req, passedHistory) {
       content: x.content.trim().slice(0, 2500)
     }));
 
-  // shared/context.js đã chuẩn hóa nội dung file.
-  // Không ghi đè base.docs bằng document thô.
+  // Dùng tài liệu đã được shared/context.js chuẩn hóa.
   const docs = (
     Array.isArray(base.docs)
       ? base.docs
@@ -209,6 +208,29 @@ function contextOf(req, passedHistory) {
   };
 }
 
+function hasDocumentBody(doc) {
+  // Bỏ link và markup trước khi kiểm tra.
+  // svg[ten-file.pdf](URL) không phải nội dung PDF.
+  const body = text(doc?.text)
+    .replace(
+      /!?\[[^\]]*\]\(https?:\/\/[^)]+\)/gi,
+      " "
+    )
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(
+      /\b(svg|download|file_url|url)\b/gi,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    body.length >= 60 &&
+    (body.match(/[\p{L}]{3,}/gu) || []).length >= 10
+  );
+}
+
 function scopeText(ctx, max = 5500) {
   const p = ctx.project || {};
 
@@ -232,16 +254,20 @@ function scopeText(ctx, max = 5500) {
     max - header.length - 2
   );
 
-  const perDoc = ctx.docs.length
+  const readableDocs = ctx.docs.filter(
+    hasDocumentBody
+  );
+
+  const perDoc = readableDocs.length
     ? Math.max(
         300,
         Math.floor(
-          budget / ctx.docs.length
+          budget / readableDocs.length
         ) - 70
       )
     : 0;
 
-  const files = ctx.docs
+  const files = readableDocs
     .map(
       d =>
         `File ${d.name}: ${d.text.slice(
@@ -257,20 +283,20 @@ function scopeText(ctx, max = 5500) {
 }
 
 function paperText(question, ctx) {
-  const named = ctx.docs.filter(
-    d =>
-      d.text.length >= 30 &&
-      /\b(bai bao|ban thao|manuscript|paper|article|abstract)\b/.test(
-        norm(d.name)
-      )
+  const readable = ctx.docs.filter(
+    hasDocumentBody
+  );
+
+  const named = readable.filter(d =>
+    /\b(bai bao|ban thao|manuscript|paper|article|abstract)\b/.test(
+      norm(d.name)
+    )
   );
 
   const docs = (
     named.length
       ? named
-      : ctx.docs.filter(
-          d => d.text.length >= 30
-        )
+      : readable
   )
     .sort(
       (a, b) =>
@@ -327,11 +353,11 @@ function paperText(question, ctx) {
 }
 
 function articleDocuments(ctx) {
-  const docs = ctx.docs.filter(
-    d => text(d.text).length >= 30
+  const readable = ctx.docs.filter(
+    hasDocumentBody
   );
 
-  const named = docs.filter(d =>
+  const named = readable.filter(d =>
     /\b(bai bao|ban thao|manuscript|paper|article|abstract)\b/.test(
       norm(d.name)
     )
@@ -339,7 +365,7 @@ function articleDocuments(ctx) {
 
   return named.length
     ? named
-    : docs;
+    : readable;
 }
 
 function inventory(req, ctx) {
@@ -1382,6 +1408,23 @@ export async function runScholarAgent(
         history
       );
 
+    // Chỉ ghi metadata, không ghi nội dung bài báo vào log.
+    console.info(
+      "Scholar document context:",
+      {
+        project_id:
+          ctx.project_id ||
+          null,
+        documents:
+          ctx.docs.map(d => ({
+            name: d.name,
+            chars: d.text.length,
+            readable:
+              hasDocumentBody(d)
+          }))
+      }
+    );
+
     if (
       fileInventory(
         original
@@ -1403,7 +1446,7 @@ export async function runScholarAgent(
         ctx
       );
 
-    // Không coi URL hoặc tên file là nội dung PDF.
+    // Tên file hoặc URL không phải văn bản PDF.
     if (
       attachedPaper(
         original
@@ -1827,6 +1870,8 @@ export async function runScholarAgent(
       }
 
       try {
+        // Danh sách dùng CFP tóm tắt.
+        // Câu hỏi chi tiết dùng CFP gốc.
         const promptCs =
           full
             ? cs
@@ -1918,6 +1963,7 @@ export async function runScholarAgent(
       }
     }
 
+    // Chỉ dùng web khi không có kết quả CSDL.
     let web = [];
 
     try {
