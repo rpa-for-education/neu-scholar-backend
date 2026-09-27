@@ -1,302 +1,324 @@
 // agents/scholar/scholar.agent.js
 import { searchConferenceJournalByVector } from "./scholar.search.js";
-import { detectDomain, analyzeQuestion } from "./agentReasoning.js";
+import {
+  detectDomain,
+  analyzeQuestion,
+  countryMatches
+} from "./agentReasoning.js";
 import { rankItems, smartFilter } from "./scholar.ranking.js";
 
 const MAX_CANDIDATES = 15;
 const FINAL_TOPK = 5;
 
-// ================= SAFE =================
-function safe(x) {
-  if (!x) return "";
-  if (Array.isArray(x)) return x.join(", ");
-  if (typeof x === "object") return JSON.stringify(x);
-  return String(x);
+function text(value) {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    return value.map(text).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).trim();
 }
-
-// ================= CHECK VALUE =================
-function hasValue(v) {
-  if (v === null || v === undefined) return false;
-  if (typeof v === "string" && v.trim() === "") return false;
-  if (Array.isArray(v) && v.length === 0) return false;
-  return true;
+function hasValue(value) {
+  const result = text(value).toLowerCase();
+  return Boolean(result) &&
+    !["n/a", "na", "null", "undefined"].includes(result);
 }
-
-// ================= NORMALIZE =================
-function normalizeText(str) {
-  return (str || "")
+function first(...values) {
+  return values.find(hasValue) ?? "";
+}
+function normalize(value) {
+  return text(value)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
-
-// ================= COUNTRY =================
-function normalizeCountry(c) {
-  const map = {
-    vn: "vietnam",
-    usa: "united states",
-    us: "united states",
-    china: "china",
-    "trung quoc": "china"
-  };
-  const n = normalizeText(c);
-  return map[n] || n;
+function countryState(item, target) {
+  const values = [
+    item.country,
+    item.country_name,
+    item.location_country,
+    item.nation,
+    item.country_code,
+    item.iso_code
+  ].filter(hasValue);
+  if (!values.length) return "unknown";
+  return values.some(value => countryMatches(value, target))
+    ? "match"
+    : "mismatch";
 }
-
-// ================= 🔥 SMART COUNTRY FILTER =================
-function filterByCountry(items, analysis) {
-  if (!analysis?.wantsCountryCode) return items;
-
-  const target = normalizeCountry(analysis.wantsCountryCode);
-
-  // ===== tier 1: strict match =====
-  const strict = items.filter(it => {
-    const c = normalizeCountry(it.country);
-    return c.includes(target);
-  });
-
-  if (strict.length > 0) return strict;
-
-  // ===== tier 2: semantic fallback =====
-  const fallback = items.filter(it => {
-    const text = normalizeText(it.text || "");
-    return text.includes(target);
-  });
-
-  if (fallback.length > 0) return fallback;
-
-  // ===== tier 3: return original (ranking sẽ xử lý) =====
-  return items;
-}
-
-// ================= URL =================
-function getConferenceUrl(c) {
-  return (
-    c.cfp_link ||
-    c.url ||
-    c.link ||
-    c.website ||
-    "" // ❌ no google fallback
+function titleOf(item, type) {
+  return text(
+    type === "conference"
+      ? first(
+          item.name,
+          item.title,
+          item.conference_name,
+          item.event_name,
+          item.acronym
+        )
+      : first(
+          item.title,
+          item.name,
+          item.journal_title,
+          item.source_title
+        )
   );
 }
+function identity(item, type) {
+  const id = first(
+    item._key, item.u_key, item.sourceid, item.source_id
+  );
+  if (id) return `${type}|${normalize(id)}`;
 
-function getJournalUrl(j) {
-  return j.scimago_link || j.url || "";
-}
-
-// ================= DEDUPE =================
-function normalizeKey(it) {
-  return normalizeText(
-    it.title || it.name || it.acronym || ""
-  ).replace(/\d{4}/g, "");
-}
-
-function dedupe(items) {
-  const map = new Map();
-  for (const it of items) {
-    const key = normalizeKey(it);
-    if (!key) continue;
-    if (!map.has(key)) map.set(key, it);
+  if (type === "journal") {
+    const issn = first(item.primary_issn, item.issn);
+    if (issn) return `journal|${normalize(issn)}`;
   }
-  return [...map.values()];
+
+  const date = type === "conference"
+    ? normalize(first(
+        item.start_date, item.event_date, item.conference_date
+      ))
+    : "";
+  return `${type}|${normalize(titleOf(item, type))}|${date}`;
 }
-
-// ================= DATE =================
-function safeTime(dateStr) {
-  if (!dateStr) return null;
-  const t = new Date(dateStr).getTime();
-  return isNaN(t) ? null : t;
+function dedupe(items, type) {
+  const found = new Map();
+  for (const item of items) {
+    if (!normalize(titleOf(item, type))) continue;
+    const key = identity(item, type);
+    const previous = found.get(key);
+    const score = Number(
+      item.score ?? item.baseScore ?? item._score
+    ) || 0;
+    const previousScore = Number(
+      previous?.score ?? previous?.baseScore ?? previous?._score
+    ) || 0;
+    if (!previous || score > previousScore) {
+      found.set(key, item);
+    }
+  }
+  return [...found.values()];
 }
-
-// ================= BADGE =================
-function getBadge(index) {
-  if (index === 0) return "🥇 Top phù hợp nhất";
-  if (index === 1) return "🔥 Nổi bật";
-  if (index === 2) return "⭐ Đáng cân nhắc";
-  return "";
+function isDetailQuestion(question) {
+  const q = normalize(question);
+  return /\b(chi tiet|thong tin|gioi thieu|mo ta|noi dung|about|details?)\b/.test(q)
+    || /^cho (toi|minh) biet/.test(q);
 }
-
-// ================= FIELD MATCH =================
-function fieldMatch(item, fieldHint) {
-  const field = normalizeText(fieldHint);
-
-  const text = normalizeText(
-    [
-      item.text,
-      item.topics,
-      item.categories,
-      ...(item.fields || [])
-    ].join(" ")
+function namedMatches(items, question, type) {
+  const q = normalize(question);
+  return items.filter(item => {
+    const name = normalize(titleOf(item, type));
+    return name.length >= 8 && q.includes(name);
+  });
+}
+function chooseResults(items, question, analysis, type, topk) {
+  const unique = dedupe(items, type).filter(
+    item =>
+      !analysis.wantsCountryCode ||
+      countryState(item, analysis.wantsCountryCode) !== "mismatch"
   );
 
-  return text.includes(field);
+  const named = namedMatches(unique, question, type);
+  if (named.length) {
+    return rankItems(named, question, analysis).slice(0, 1);
+  }
+  return smartFilter(
+    rankItems(unique, question, analysis)
+  ).slice(0, topk);
 }
-
-// ================= EXPLAIN =================
-function buildExplain(item, analysis) {
-  const reasons = [];
-  const now = Date.now();
-
-  const deadline = safeTime(item.deadline);
-  const start = safeTime(item.start_date);
-
-  if (deadline) {
-    const diff = (deadline - now) / (1000 * 60 * 60 * 24);
-
-    if (diff > 0 && diff < 14) reasons.push("🔥 Sắp hết hạn");
-    else if (diff > 0 && diff < 60) reasons.push("⏳ Còn hạn");
-    else if (diff > 60) reasons.push("📢 Đang nhận bài");
-    else if (diff < 0) reasons.push("❌ Đã hết hạn");
+function addLine(lines, label, value) {
+  if (hasValue(value)) {
+    lines.push(`- **${label}:** ${text(value)}`);
   }
-
-  if (start) {
-    const diff = (start - now) / (1000 * 60 * 60 * 24);
-    if (diff > 0 && diff < 30) reasons.push("📅 Sắp diễn ra");
-  }
-
-  if (analysis?.fieldHint && fieldMatch(item, analysis.fieldHint)) {
-    reasons.push("🎯 Đúng lĩnh vực");
-  }
-
-  if (item.sjr_best_quartile === "Q1") {
-    reasons.push("🏆 Q1");
-  }
-
-  if (reasons.length <= 1) return "";
-
-  return `💡 ${reasons.join(" • ")}`;
 }
+function conferenceBlock(item, index, detailed) {
+  const lines = [
+    `### ${index + 1}. **${titleOf(item, "conference")}**`
+  ];
+  addLine(lines, "Tên viết tắt", first(
+    item.acronym, item.short_name
+  ));
+  addLine(lines, "Địa điểm", first(
+    item.location,
+    item.venue,
+    item.place,
+    [item.city, item.country].filter(hasValue).join(", ")
+  ));
+  addLine(lines, "Hạn nộp bài", first(
+    item.deadline,
+    item.submission_deadline,
+    item.paper_deadline,
+    item.cfp_deadline
+  ));
+  addLine(lines, "Ngày bắt đầu", first(
+    item.start_date, item.event_date, item.conference_date
+  ));
+  addLine(lines, "Ngày kết thúc", first(
+    item.end_date, item.event_end_date
+  ));
 
-// ================= ANALYSIS =================
-function buildAnalysis(question, conferences, journals) {
-  const total = conferences.length + journals.length;
-
-  if (!total) {
-    return "Không tìm thấy kết quả chính xác, hiển thị kết quả gần nhất.";
+  if (detailed) {
+    addLine(lines, "Đơn vị tổ chức", item.organizer);
+    addLine(lines, "Lĩnh vực", first(
+      item.fields, item.areas, item.categories
+    ));
+    addLine(lines, "Chủ đề", first(
+      item.topics, item.topic, item.keywords
+    ));
+    addLine(lines, "Thông tin CFP", first(
+      item.cfp_text, item.cfp,
+      item.description, item.summary
+    ));
   }
-
-  return `Tìm thấy ${total} kết quả phù hợp với "${question}".`;
+  addLine(lines, "Liên kết", first(
+    item.cfp_link, item.url, item.link,
+    item.website, item.conference_url, item.homepage
+  ));
+  return lines.join("\n");
 }
+function journalBlock(item, index, detailed) {
+  const lines = [
+    `### ${index + 1}. **${titleOf(item, "journal")}**`
+  ];
+  addLine(lines, "Nhà xuất bản", first(
+    item.publisher, item.publisher_name, item.publisher_alt
+  ));
+  addLine(lines, "Quốc gia", first(
+    item.country, item.country_name, item.nation
+  ));
+  addLine(lines, "Quartile", first(
+    item.quartile, item.sjr_best_quartile, item.best_quartile
+  ));
 
-// ================= FORMAT =================
-function formatFinalAnswer(answer, conferences, journals, analysis) {
-  let content = answer || "";
+  if (detailed) {
+    addLine(lines, "Lĩnh vực", first(
+      item.areas, item.fields
+    ));
+    addLine(lines, "Danh mục", first(
+      item.categories, item.category
+    ));
+    addLine(lines, "ISSN", first(
+      item.primary_issn, item.issn
+    ));
+    addLine(lines, "SJR", item.sjr);
+    addLine(lines, "H-index", item.h_index);
+    addLine(lines, "Phạm vi xuất bản", item.coverage);
+    addLine(lines, "Mô tả", first(
+      item.description, item.text
+    ));
+  }
+  addLine(lines, "Liên kết", first(
+    item.scimago_link, item.url, item.link,
+    item.website, item.homepage
+  ));
+  return lines.join("\n");
+}
+function fallbackAnswer(question, conferences, journals) {
+  if (!conferences.length && !journals.length) {
+    return "Chưa tìm thấy hội thảo hoặc tạp chí phù hợp trong kết quả truy xuất.";
+  }
+  const detailed = isDetailQuestion(question);
+  const sections = [];
 
   if (conferences.length) {
-    content += `\n\n## 🎓 Hội thảo liên quan\n\n`;
-
-    conferences.forEach((c, i) => {
-      const url = getConferenceUrl(c);
-      const explain = buildExplain(c, analysis);
-
-      content += `### ${i + 1}. **${safe(c.name || c.title)}** ${getBadge(i)}\n`;
-
-      const location = [c.city, c.country].filter(hasValue).join(", ");
-      if (location) content += `- 📍 ${location}  \n`;
-
-      if (hasValue(c.deadline)) {
-        content += `- ⏳ ${safe(c.deadline)}  \n`;
-      }
-
-      if (hasValue(c.start_date)) {
-        content += `- 📅 ${safe(c.start_date)}  \n`;
-      }
-
-      if (explain) {
-        content += `- ${explain}  \n`;
-      }
-
-      if (url) {
-        content += `- 🌐 ${url}\n\n`;
-      }
-    });
+    sections.push(
+      `## 🎓 Hội thảo liên quan\n\n${
+        conferences.map((item, index) =>
+          conferenceBlock(item, index, detailed)
+        ).join("\n\n")
+      }`
+    );
   }
-
   if (journals.length) {
-    content += `\n## 📚 Tạp chí liên quan\n\n`;
-
-    journals.forEach((j, i) => {
-      const url = getJournalUrl(j);
-      const explain = buildExplain(j, analysis);
-
-      content += `### ${i + 1}. **${safe(j.title)}** ${getBadge(i)}\n`;
-
-      if (hasValue(j.publisher)) {
-        content += `- 🏢 ${safe(j.publisher)}  \n`;
-      }
-
-      if (hasValue(j.sjr_best_quartile)) {
-        content += `- 🏆 ${safe(j.sjr_best_quartile)}  \n`;
-      }
-
-      if (hasValue(j.country)) {
-        content += `- 🌍 ${safe(j.country)}  \n`;
-      }
-
-      if (explain) {
-        content += `- ${explain}  \n`;
-      }
-
-      if (url) {
-        content += `- 🌐 ${url}\n\n`;
-      }
-    });
+    sections.push(
+      `## 📚 Tạp chí liên quan\n\n${
+        journals.map((item, index) =>
+          journalBlock(item, index, detailed)
+        ).join("\n\n")
+      }`
+    );
   }
-
-  return content;
+  return sections.join("\n\n");
 }
 
-// ================= MAIN =================
 export async function runAgent(
   question,
   topk = FINAL_TOPK,
   history = []
 ) {
   const start = Date.now();
+  const safeTopK = Math.max(
+    1,
+    Math.min(
+      Math.trunc(Number(topk)) || FINAL_TOPK,
+      MAX_CANDIDATES
+    )
+  );
 
   try {
     const domain = detectDomain(question);
     const analysis = analyzeQuestion(question);
-
-    const res = await searchConferenceJournalByVector({
+    const found = await searchConferenceJournalByVector({
       question,
-      topk: MAX_CANDIDATES,
+      topk: MAX_CANDIDATES
     });
 
-    let conferences = dedupe(res.conferences || []);
-    let journals = dedupe(res.journals || []);
+    let conferences = chooseResults(
+      found?.conferences || [],
+      question,
+      analysis,
+      "conference",
+      safeTopK
+    );
+    let journals = chooseResults(
+      found?.journals || [],
+      question,
+      analysis,
+      "journal",
+      safeTopK
+    );
 
-    // 🔥 FIX CORE
-    conferences = filterByCountry(conferences, analysis);
-    journals = filterByCountry(journals, analysis);
+    const namedConferences = namedMatches(
+      conferences, question, "conference"
+    );
+    const namedJournals = namedMatches(
+      journals, question, "journal"
+    );
 
-    conferences = smartFilter(rankItems(conferences, question, analysis)).slice(0, topk);
-    journals = smartFilter(rankItems(journals, question, analysis)).slice(0, topk);
-
-    const intro = buildAnalysis(question, conferences, journals);
-    const finalAnswer = formatFinalAnswer(intro, conferences, journals, analysis);
+    if (namedConferences.length && !namedJournals.length) {
+      conferences = namedConferences;
+      journals = [];
+    }
+    if (namedJournals.length && !namedConferences.length) {
+      journals = namedJournals;
+      conferences = [];
+    }
 
     return {
-      answer: finalAnswer,
+      answer: fallbackAnswer(
+        question, conferences, journals
+      ),
       conferences,
       journals,
-      domain,
+      domain: found?.domain || domain,
       analysis,
       history,
       responseTimeMs: Date.now() - start
     };
-
-  } catch (err) {
-    console.error("❌ Agent error:", err);
-
+  } catch (error) {
+    console.error("❌ Scholar agent error:", error);
     return {
-      answer: "Hệ thống đang gặp lỗi.",
+      answer: "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
       conferences: [],
       journals: [],
       domain: "error",
       analysis: {},
+      history,
       responseTimeMs: Date.now() - start
     };
   }

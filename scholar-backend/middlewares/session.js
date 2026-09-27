@@ -1,3 +1,4 @@
+// middleware/session.js
 import session from "express-session";
 
 export const sessionMiddleware = session({
