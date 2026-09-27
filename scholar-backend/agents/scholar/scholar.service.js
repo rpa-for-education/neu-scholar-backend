@@ -6,29 +6,34 @@ import { buildScholarPrompt } from "./scholar.prompt.js";
 import { callLLM } from "../shared/llm.js";
 import { expandScholarQueries } from "./scholar.search.js";
 
-const SERPAPI_API_KEY = "317229a8b9aac04d8acd3c5a504c19dcae02c9b20be7659b4f8f86e9be08fe80";
+const SERPAPI_API_KEY =
+  "317229a8b9aac04d8acd3c5a504c19dcae02c9b20be7659b4f8f86e9be08fe80";
+
 const MAX_HISTORY = 10;
 const MAX_CONTEXT = 5500;
 
-const value = x =>
-  x == null
+const value = input =>
+  input == null
     ? ""
-    : typeof x === "string"
-      ? x.trim()
-      : Array.isArray(x)
-        ? x.map(value).filter(Boolean).join(", ")
-        : typeof x === "object"
-          ? JSON.stringify(x)
-          : String(x);
+    : typeof input === "string"
+      ? input.trim()
+      : Array.isArray(input)
+        ? input.map(value).filter(Boolean).join(", ")
+        : typeof input === "object"
+          ? JSON.stringify(input)
+          : String(input);
 
-const first = (...xs) =>
-  xs.find(x =>
-    value(x) &&
-    !/^(n\/a|na|null|undefined)$/i.test(value(x))
+const first = (...values) =>
+  values.find(
+    item =>
+      value(item) &&
+      !/^(n\/a|na|null|undefined)$/i.test(
+        value(item)
+      )
   ) ?? "";
 
-const norm = x =>
-  value(x)
+const norm = input =>
+  value(input)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -37,34 +42,53 @@ const norm = x =>
     .replace(/\s+/g, " ")
     .trim();
 
-const typeOf = q => {
-  const n = norm(q);
+function typeOf(question) {
+  const q = norm(question);
+
   const journal =
-    /\b(tap chi|journal|issn|scimago|quartile|sjr|q[1-4])\b/.test(n);
+    /\b(tap chi|journal|issn|scimago|quartile|sjr|q[1-4])\b/.test(
+      q
+    );
+
   const conference =
-    /\b(hoi thao|hoi nghi|conference|cfp|symposium)\b/.test(n);
+    /\b(hoi thao|hoi nghi|conference|cfp|symposium)\b/.test(
+      q
+    );
 
-  return journal && conference
-    ? "both"
-    : journal
-      ? "journal"
-      : conference
-        ? "conference"
-        : "general";
-};
+  if (journal && conference) return "both";
+  if (journal) return "journal";
+  if (conference) return "conference";
+  return "general";
+}
 
-const detailed = q =>
-  /\b(chi tiet|thong tin|gioi thieu|mo ta|details?|about|cua quyen|tren|do)\b/.test(
-    norm(q)
+function detailed(question) {
+  return /\b(chi tiet|thong tin|gioi thieu|mo ta|details?|about|cua quyen|tren|do)\b/.test(
+    norm(question)
   );
+}
 
-const isContextual = q =>
-  /\b(cua toi|cho toi|voi toi|de tai|du an|project|file|tai lieu|ho so|theo noi dung|phu hop|goi y|nen chon|tren|do|nay)\b/.test(
-    norm(q)
+function isContextual(question) {
+  return /\b(cua toi|cho toi|voi toi|de tai|du an|project|file|tai lieu|ho so|theo noi dung|phu hop|goi y|nen chon|tren|do|nay)\b/.test(
+    norm(question)
   );
+}
 
-const title = (item, kind) =>
-  value(
+// Chỉ những cách nói trỏ rõ về lượt trước
+// mới được kế thừa chủ đề hội thoại.
+function followsPrevious(question) {
+  return /\b(q[1-4]|con (q[1-4]|loai|nhung)|the (con|va)|tuong tu|khac nua|them nua|o tren|ben tren|vua neu|tap chi (do|nay|tren)|hoi thao (do|nay|tren)|hoi nghi (do|nay|tren)|chung|no|cai do)\b/.test(
+    norm(question)
+  );
+}
+
+function projectRequest(question) {
+  return /\b(de tai|du an|project|file|tai lieu|ho so)\b/.test(
+    norm(question)
+  );
+}
+
+function title(item, kind) {
+  return value(
     kind === "journal"
       ? first(
           item.title,
@@ -80,9 +104,10 @@ const title = (item, kind) =>
           item.acronym
         )
   );
+}
 
-const url = (item, kind) =>
-  value(
+function url(item, kind) {
+  return value(
     kind === "journal"
       ? first(
           item.scimago_link,
@@ -100,13 +125,18 @@ const url = (item, kind) =>
           item.homepage
         )
   );
+}
 
 function line(lines, icon, label, input) {
   if (
     value(input) &&
-    !/^(n\/a|na|null|undefined)$/i.test(value(input))
+    !/^(n\/a|na|null|undefined)$/i.test(
+      value(input)
+    )
   ) {
-    lines.push(`- ${icon} **${label}:** ${value(input)}`);
+    lines.push(
+      `- ${icon} **${label}:** ${value(input)}`
+    );
   }
 }
 
@@ -296,12 +326,14 @@ function format(conferences, journals, full) {
 }
 
 function contextOf(req, passedHistory) {
-  const portal = req?.body?.context || {};
+  const portal =
+    req?.body?.context || {};
 
   let base = {};
 
   try {
-    base = buildLLMContext(req) || {};
+    base =
+      buildLLMContext(req) || {};
   } catch (error) {
     console.warn(
       "Scholar context:",
@@ -309,14 +341,13 @@ function contextOf(req, passedHistory) {
     );
   }
 
-  // Portal gửi lịch sử trong context.history.
-  // Không ghi đè lịch sử này bằng tham số history mặc định [].
-  const rawHistory = Array.isArray(portal.history)
-    ? portal.history
-    : Array.isArray(passedHistory) &&
-        passedHistory.length
-      ? passedHistory
-      : base.history;
+  const rawHistory =
+    Array.isArray(portal.history)
+      ? portal.history
+      : Array.isArray(passedHistory) &&
+          passedHistory.length
+        ? passedHistory
+        : base.history;
 
   const history = (
     Array.isArray(rawHistory)
@@ -326,17 +357,22 @@ function contextOf(req, passedHistory) {
     .filter(
       item =>
         item &&
-        ["user", "assistant"].includes(item.role) &&
-        typeof item.content === "string" &&
+        ["user", "assistant"].includes(
+          item.role
+        ) &&
+        typeof item.content ===
+          "string" &&
         item.content.trim()
     )
     .slice(-MAX_HISTORY)
     .map(item => ({
       role: item.role,
-      content: item.content.slice(0, 2500)
+      content: item.content.slice(
+        0,
+        2500
+      )
     }));
 
-  // Portal đã trích nội dung file vào document[].text.
   const rawDocs =
     portal.extra_data?.document ??
     portal.document ??
@@ -351,7 +387,8 @@ function contextOf(req, passedHistory) {
     .filter(
       item =>
         item &&
-        typeof item.text === "string" &&
+        typeof item.text ===
+          "string" &&
         item.text.trim()
     )
     .slice(0, 8)
@@ -380,11 +417,14 @@ function contextOf(req, passedHistory) {
 }
 
 function scopeText(context) {
-  const project = context.project
-    ? `Dự án: ${value(
-        context.project.name
-      )}. ${value(context.project.description)}`
-    : "";
+  const project =
+    context.project
+      ? `Dự án: ${value(
+          context.project.name
+        )}. ${value(
+          context.project.description
+        )}`
+      : "";
 
   const files = context.docs
     .map(
@@ -402,31 +442,38 @@ function scopeText(context) {
 }
 
 function lastTopic(context) {
-  const previous = context.history
-    .slice()
-    .reverse()
-    .find(
-      item =>
-        item.role === "user" &&
-        typeOf(item.content) !== "general"
-    );
+  const previous =
+    context.history
+      .slice()
+      .reverse()
+      .find(
+        item =>
+          item.role === "user" &&
+          typeOf(item.content) !==
+            "general"
+      );
 
   return previous?.content || "";
 }
 
 function namedFromHistory(context) {
-  const previous = context.history
-    .slice()
-    .reverse()
-    .find(
-      item =>
-        item.role === "assistant" &&
-        /\*\*[^*]{8,}\*\*/.test(item.content)
-    );
+  const previous =
+    context.history
+      .slice()
+      .reverse()
+      .find(
+        item =>
+          item.role ===
+            "assistant" &&
+          /\*\*[^*]{8,}\*\*/.test(
+            item.content
+          )
+      );
 
-  const heading = previous?.content.match(
-    /###\s*\d+\.\s*(?:🎓|📚)?\s*\*\*([^*]+)\*\*/
-  );
+  const heading =
+    previous?.content.match(
+      /###\s*\d+\.\s*(?:🎓|📚)?\s*\*\*([^*]+)\*\*/
+    );
 
   return heading?.[1]?.trim() || "";
 }
@@ -436,19 +483,80 @@ async function retrievalQuery(
   context,
   modelId
 ) {
-  let query = question;
+  let query =
+    question;
 
-  try {
-    const rewritten = await rewriteQuery(
-      question,
-      context.history
+  // Câu hỏi độc lập không được biến thành
+  // truy vấn học thuật chỉ vì history có tạp chí.
+  if (
+    typeOf(question) ===
+      "general" &&
+    !followsPrevious(
+      question
+    ) &&
+    !projectRequest(
+      question
+    )
+  ) {
+    return query;
+  }
+
+  const requestedQuartile =
+    norm(question).match(
+      /\bq[1-4]\b/
+    )?.[0];
+
+  const previousTopic =
+    lastTopic(
+      context
     );
 
+  // "Còn Q2?" kế thừa chủ đề trước và
+  // thay Q1 bằng Q2, không giữ cả hai.
+  if (
+    requestedQuartile &&
+    previousTopic &&
+    !/\b(tap chi|journal|hoi thao|conference)\b/.test(
+      norm(question)
+    )
+  ) {
+    return `${
+      previousTopic.replace(
+        /\bq[1-4]\b/gi,
+        requestedQuartile
+      )
+    }. ${question}`;
+  }
+
+  // Câu hỏi đã đầy đủ loại và chủ đề:
+  // giữ nguyên yêu cầu người dùng.
+  if (
+    typeOf(question) !==
+      "general" &&
+    !followsPrevious(
+      question
+    ) &&
+    norm(question)
+      .split(" ")
+      .length > 5
+  ) {
+    return question;
+  }
+
+  try {
+    const rewritten =
+      await rewriteQuery(
+        question,
+        context.history
+      );
+
     if (
-      typeof rewritten === "string" &&
+      typeof rewritten ===
+        "string" &&
       rewritten.trim()
     ) {
-      query = rewritten.trim();
+      query =
+        rewritten.trim();
     }
   } catch (error) {
     console.warn(
@@ -457,76 +565,115 @@ async function retrievalQuery(
     );
   }
 
-  const prior = lastTopic(context);
-
   if (
-    typeOf(question) === "general" &&
-    typeOf(query) === "general" &&
-    prior &&
-    isContextual(question)
+    typeOf(question) ===
+      "general" &&
+    typeOf(query) ===
+      "general" &&
+    previousTopic &&
+    isContextual(
+      question
+    )
   ) {
-    query = `${prior}. ${question}`;
+    query =
+      `${previousTopic}. ${question}`;
   }
 
-  const named = namedFromHistory(context);
+  const named =
+    namedFromHistory(
+      context
+    );
 
   if (
     named &&
     /\b(tren|do|nay|chi tiet|thong tin)\b/.test(
       norm(question)
     ) &&
-    !norm(query).includes(norm(named))
+    !norm(query).includes(
+      norm(named)
+    )
   ) {
-    query = `${query}. ${named}`;
+    query =
+      `${query}. ${named}`;
   }
 
-  const scope = scopeText(context);
+  const subject =
+    scopeText(
+      context
+    );
 
   if (
-    scope &&
-    isContextual(question) &&
+    subject &&
+    isContextual(
+      question
+    ) &&
     !named
   ) {
     try {
-      const llm = await callLLM(
-        `Viết MỘT câu truy vấn tìm kiếm tạp chí/hội thảo bằng tiếng Việt và từ khóa tiếng Anh dựa trên câu hỏi và đề tài/file. Giữ nguyên yêu cầu về loại, Q1/Q2, nước, năm. Chỉ xuất truy vấn, không nhận xét, tối đa 220 ký tự.\nCâu hỏi: ${query}\nNgữ cảnh: ${scope}`,
-        modelId
-      );
+      const llm =
+        await callLLM(
+          `Viết MỘT câu truy vấn tìm kiếm tạp chí/hội thảo bằng tiếng Việt và từ khóa tiếng Anh dựa trên câu hỏi và đề tài/file. Giữ nguyên yêu cầu về loại, Q1/Q2, nước, năm. Chỉ xuất truy vấn, không nhận xét, tối đa 220 ký tự.\nCâu hỏi: ${query}\nNgữ cảnh: ${subject}`,
+          modelId
+        );
 
-      const candidate = value(
-        llm?.answer
-      )
-        .replace(/\s+/g, " ")
-        .slice(0, 220);
+      const candidate =
+        value(
+          llm?.answer
+        )
+          .replace(
+            /\s+/g,
+            " "
+          )
+          .slice(
+            0,
+            220
+          );
 
       if (
         candidate &&
-        typeOf(candidate) !== "general" &&
+        typeOf(candidate) !==
+          "general" &&
         (
-          typeOf(question) === "general" ||
-          typeOf(candidate) === typeOf(question)
+          typeOf(question) ===
+            "general" ||
+          typeOf(candidate) ===
+            typeOf(question)
         )
       ) {
-        query = candidate;
+        query =
+          candidate;
       }
     } catch (error) {
       console.warn(
         "Scholar contextual query:",
-        error?.message || error
+        error?.message ||
+          error
       );
     }
 
-    if (typeOf(query) !== "general") {
-      query += ` ${scope.slice(0, 350)}`;
+    if (
+      typeOf(query) !==
+      "general"
+    ) {
+      query +=
+        ` ${subject.slice(
+          0,
+          350
+        )}`;
     }
   }
 
   return query;
 }
 
-async function searchWeb(query, kind) {
+async function searchWeb(
+  query,
+  kind
+) {
   const expanded =
-    await expandScholarQueries(query);
+    await expandScholarQueries(
+      query
+    );
 
   const queries = (
     expanded?.queries?.length
@@ -534,67 +681,103 @@ async function searchWeb(query, kind) {
       : [query]
   ).slice(0, 3);
 
-  const batches = await Promise.allSettled(
-    queries.map(async item => {
-      const typed =
-        kind === "journal"
-          ? `${item} journal -conference -workshop`
-          : kind === "conference"
-            ? `${item} conference CFP -journal`
-            : item;
+  const batches =
+    await Promise.allSettled(
+      queries.map(
+        async item => {
+          const typed =
+            kind ===
+            "journal"
+              ? `${item} journal -conference -workshop`
+              : kind ===
+                  "conference"
+                ? `${item} conference CFP -journal`
+                : item;
 
-      const params = new URLSearchParams({
-        engine: "google",
-        q: typed,
-        num: "8",
-        api_key: SERPAPI_API_KEY
-      });
+          const params =
+            new URLSearchParams({
+              engine:
+                "google",
+              q: typed,
+              num: "8",
+              api_key:
+                SERPAPI_API_KEY
+            });
 
-      const response = await fetch(
-        `https://serpapi.com/search.json?${params}`,
-        {
-          signal: AbortSignal.timeout(15000)
+          const response =
+            await fetch(
+              `https://serpapi.com/search.json?${params}`,
+              {
+                signal:
+                  AbortSignal.timeout(
+                    15000
+                  )
+              }
+            );
+
+          if (
+            !response.ok
+          ) {
+            throw new Error(
+              `SerpAPI HTTP ${response.status}`
+            );
+          }
+
+          const data =
+            await response.json();
+
+          if (
+            data.error
+          ) {
+            throw new Error(
+              data.error
+            );
+          }
+
+          return (
+            data.organic_results ||
+            []
+          );
         }
-      );
+      )
+    );
 
-      if (!response.ok) {
-        throw new Error(
-          `SerpAPI HTTP ${response.status}`
-        );
-      }
+  const unique =
+    new Map();
 
-      const data = await response.json();
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      return data.organic_results || [];
-    })
-  );
-
-  const unique = new Map();
-
-  for (const batch of batches) {
-    if (batch.status !== "fulfilled") {
+  for (
+    const batch of
+    batches
+  ) {
+    if (
+      batch.status !==
+      "fulfilled"
+    ) {
       continue;
     }
 
-    for (const item of batch.value) {
+    for (
+      const item of
+      batch.value
+    ) {
       if (
         !item.link ||
         !item.snippet ||
-        unique.has(item.link)
+        unique.has(
+          item.link
+        )
       ) {
         continue;
       }
 
-      const heading = norm(
-        `${item.title} ${item.link}`
-      );
+      const heading =
+        norm(
+          `${item.title} ${item.link}`
+        );
 
       if (
-        kind === "journal" &&
+        kind ===
+          "journal" &&
         /\b(conference|workshop|symposium|hoi thao)\b/.test(
           heading
         )
@@ -603,7 +786,8 @@ async function searchWeb(query, kind) {
       }
 
       if (
-        kind === "conference" &&
+        kind ===
+          "conference" &&
         /\b(journal ranking|journal quartile)\b/.test(
           heading
         )
@@ -611,45 +795,80 @@ async function searchWeb(query, kind) {
         continue;
       }
 
-      unique.set(item.link, {
-        id: `W${unique.size + 1}`,
-        type: "web",
-        title: value(item.title),
-        url: item.link,
-        content: value(
-          item.snippet
-        ).slice(0, 1500)
-      });
+      unique.set(
+        item.link,
+        {
+          id: `W${
+            unique.size +
+            1
+          }`,
+          type:
+            "web",
+          title:
+            value(
+              item.title
+            ),
+          url:
+            item.link,
+          content:
+            value(
+              item.snippet
+            ).slice(
+              0,
+              1500
+            )
+        }
+      );
 
-      if (unique.size === 5) {
+      if (
+        unique.size ===
+        5
+      ) {
         break;
       }
     }
   }
 
-  return [...unique.values()];
+  return [
+    ...unique.values()
+  ];
 }
 
-const evidence = items =>
-  items
-    .map(
-      item =>
-        `[${item.id}] ${item.title}\nURL: ${item.url}\nTrích đoạn: ${item.content}`
-    )
-    .join("\n\n");
+const evidence =
+  items =>
+    items
+      .map(
+        item =>
+          `[${item.id}] ${item.title}\nURL: ${item.url}\nTrích đoạn: ${item.content}`
+      )
+      .join(
+        "\n\n"
+      );
 
-function webAnswer(answer, web) {
-  const cited = [
+function webAnswer(
+  answer,
+  web
+) {
+  const ids = [
     ...new Set(
-      [...answer.matchAll(/\[W(\d+)\]/g)].map(
-        match => `W${match[1]}`
+      [
+        ...answer.matchAll(
+          /\[W(\d+)\]/g
+        )
+      ].map(
+        match =>
+          `W${match[1]}`
       )
     )
   ];
 
-  const used = web.filter(item =>
-    cited.includes(item.id)
-  );
+  const used =
+    web.filter(
+      item =>
+        ids.includes(
+          item.id
+        )
+    );
 
   return used.length
     ? `${answer}\n\n**Nguồn tham khảo**\n${used
@@ -661,7 +880,12 @@ function webAnswer(answer, web) {
     : answer;
 }
 
-function guard(answer, kind, conferences, journals) {
+function guard(
+  answer,
+  kind,
+  conferences,
+  journals
+) {
   if (
     !answer ||
     /===\s*(TẠP CHÍ|HỘI THẢO)|_qdrant|finalScore|baseScore/i.test(
@@ -671,33 +895,70 @@ function guard(answer, kind, conferences, journals) {
     return false;
   }
 
+  // Khi đã trả bản ghi CSDL, không lấy mã
+  // web từ lịch sử rồi lặp nguồn tham khảo.
   if (
-    kind === "journal" &&
-    /##\s*🎓\s*Hội thảo/i.test(answer)
+    /\[W\d+\]|\*\*Nguồn tham khảo\*\*/i.test(
+      answer
+    ) &&
+    (
+      conferences.length ||
+      journals.length
+    )
   ) {
     return false;
   }
 
   if (
-    kind === "conference" &&
-    /##\s*📚\s*Tạp chí/i.test(answer)
+    kind ===
+      "journal" &&
+    /##\s*🎓\s*Hội thảo/i.test(
+      answer
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    kind ===
+      "conference" &&
+    /##\s*📚\s*Tạp chí/i.test(
+      answer
+    )
   ) {
     return false;
   }
 
   const names = [
-    ...conferences.map(item =>
-      norm(title(item, "conference"))
+    ...conferences.map(
+      item =>
+        norm(
+          title(
+            item,
+            "conference"
+          )
+        )
     ),
-    ...journals.map(item =>
-      norm(title(item, "journal"))
+    ...journals.map(
+      item =>
+        norm(
+          title(
+            item,
+            "journal"
+          )
+        )
     )
   ].filter(Boolean);
 
   return (
     !names.length ||
-    names.every(name =>
-      norm(answer).includes(name)
+    names.every(
+      name =>
+        norm(
+          answer
+        ).includes(
+          name
+        )
     )
   );
 }
@@ -709,13 +970,17 @@ export async function runScholarAgent(
   topk,
   history = []
 ) {
-  const started = Date.now();
+  const started =
+    Date.now();
 
-  const original = value(
-    question ||
-    req?.body?.message ||
-    req?.body?.question
-  );
+  const original =
+    value(
+      question ||
+        req?.body
+          ?.message ||
+        req?.body
+          ?.question
+    );
 
   const reply = (
     answer,
@@ -731,27 +996,36 @@ export async function runScholarAgent(
     journals,
     sources,
     domain,
-    standalone_question: standalone,
+    standalone_question:
+      standalone,
     model: {
       model_id:
         llm?.model_id ||
         model_id ||
         null,
-      model: llm?.model || null,
+      model:
+        llm?.model ||
+        null,
       latency:
-        llm?.latency ?? null,
+        llm?.latency ??
+        null,
       prompt_tokens:
-        llm?.usage?.prompt_tokens ??
+        llm?.usage
+          ?.prompt_tokens ??
         null,
       output_tokens:
-        llm?.usage?.output_tokens ??
+        llm?.usage
+          ?.output_tokens ??
         null
     },
     responseTimeMs:
-      Date.now() - started
+      Date.now() -
+      started
   });
 
-  if (!original) {
+  if (
+    !original
+  ) {
     return reply(
       "Vui lòng nhập câu hỏi.",
       "general",
@@ -760,133 +1034,219 @@ export async function runScholarAgent(
   }
 
   try {
-    const context = contextOf(
-      req,
-      history
-    );
+    const context =
+      contextOf(
+        req,
+        history
+      );
+
+    const explicit =
+      typeOf(
+        original
+      );
+
+    const followup =
+      followsPrevious(
+        original
+      );
+
+    // Quyết định dựa trên câu hỏi gốc
+    // trước khi gọi query rewriter.
+    const independentGeneral =
+      explicit ===
+        "general" &&
+      !followup &&
+      !projectRequest(
+        original
+      );
 
     const standalone =
-      await retrievalQuery(
-        original,
-        context,
-        model_id
-      );
-
-    const explicit = typeOf(original);
+      independentGeneral
+        ? original
+        : await retrievalQuery(
+            original,
+            context,
+            model_id
+          );
 
     let kind =
-      explicit !== "general"
-        ? explicit
-        : typeOf(standalone);
+      independentGeneral
+        ? "general"
+        : explicit !==
+            "general"
+          ? explicit
+          : typeOf(
+              standalone
+            );
 
-    if (kind === "general") {
-      const prior = lastTopic(context);
-
-      if (
-        prior &&
-        isContextual(original)
-      ) {
-        kind = typeOf(prior);
-      }
-    }
-
-    // Trường hợp nêu tên bản ghi nhưng không viết
-    // chữ "tạp chí" hoặc "hội thảo".
-    let preflight = null;
+    let preflight =
+      null;
 
     if (
-      kind === "general" &&
-      detailed(original)
+      kind ===
+        "general" &&
+      detailed(
+        original
+      ) &&
+      !independentGeneral
     ) {
-      const check = await runAgent(
-        standalone,
-        topk,
-        context.history
-      );
+      const check =
+        await runAgent(
+          standalone,
+          topk,
+          context.history
+        );
 
       const matches = (
         items,
         type
       ) =>
-        items.filter(item => {
-          const name = norm(
-            title(item, type)
-          );
+        items.filter(
+          item => {
+            const name =
+              norm(
+                title(
+                  item,
+                  type
+                )
+              );
 
-          return (
-            name.length >= 8 &&
-            norm(original).includes(name)
-          );
-        });
+            return (
+              name.length >=
+                8 &&
+              norm(
+                original
+              ).includes(
+                name
+              )
+            );
+          }
+        );
 
       const foundConferences =
         matches(
-          check?.conferences || [],
+          check
+            ?.conferences ||
+            [],
           "conference"
         );
 
       const foundJournals =
         matches(
-          check?.journals || [],
+          check
+            ?.journals ||
+            [],
           "journal"
         );
 
       if (
-        foundConferences.length ||
-        foundJournals.length
+        foundConferences
+          .length ||
+        foundJournals
+          .length
       ) {
         kind =
-          foundConferences.length &&
-          foundJournals.length
+          foundConferences
+            .length &&
+          foundJournals
+            .length
             ? "both"
-            : foundConferences.length
+            : foundConferences
+                .length
               ? "conference"
               : "journal";
 
-        preflight = {
-          conferences:
-            foundConferences,
-          journals:
-            foundJournals
-        };
+        preflight =
+          {
+            conferences:
+              foundConferences,
+            journals:
+              foundJournals
+          };
       }
     }
 
-    if (kind === "general") {
-      const prompt = [
-        "Trả lời câu hỏi bằng tiếng Việt tự nhiên. Dùng hồ sơ để cá nhân hóa khi thích hợp, giới hạn theo dự án đang mở; chỉ dùng nội dung file đã trích, không tự nhận đã đọc URL. Không bịa thông tin.",
-        context.profile
-          ? `Hồ sơ: ${JSON.stringify(
-              context.profile
-            ).slice(0, 1500)}`
-          : "",
-        context.project
-          ? `Dự án: ${JSON.stringify(
-              context.project
-            ).slice(0, 2500)}`
-          : "",
-        scopeText(context),
-        context.history
-          .map(
-            item =>
-              `${item.role}: ${item.content.slice(
-                0,
-                700
-              )}`
-          )
-          .join("\n"),
-        `Câu hỏi: ${original}`
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+    if (
+      kind ===
+      "general"
+    ) {
+      const prior =
+        lastTopic(
+          context
+        );
 
-      const llm = await callLLM(
-        prompt,
-        model_id
-      );
+      if (
+        prior &&
+        followup
+      ) {
+        kind =
+          typeOf(
+            prior
+          );
+      }
+    }
+
+    if (
+      kind ===
+      "general"
+    ) {
+      const prompt =
+        [
+          "Trả lời câu hỏi bằng tiếng Việt tự nhiên. Dùng hồ sơ để cá nhân hóa khi thích hợp, giới hạn theo dự án đang mở; chỉ dùng nội dung file đã trích, không tự nhận đã đọc URL. Không bịa thông tin.",
+
+          context.profile
+            ? `Hồ sơ: ${JSON.stringify(
+                context.profile
+              ).slice(
+                0,
+                1500
+              )}`
+            : "",
+
+          context.project
+            ? `Dự án: ${JSON.stringify(
+                context.project
+              ).slice(
+                0,
+                2500
+              )}`
+            : "",
+
+          scopeText(
+            context
+          ),
+
+          context.history
+            .map(
+              item =>
+                `${item.role}: ${item.content.slice(
+                  0,
+                  700
+                )}`
+            )
+            .join(
+              "\n"
+            ),
+
+          `Câu hỏi: ${original}`
+        ]
+          .filter(
+            Boolean
+          )
+          .join(
+            "\n\n"
+          );
+
+      const llm =
+        await callLLM(
+          prompt,
+          model_id
+        );
 
       return reply(
-        value(llm?.answer) ||
+        value(
+          llm?.answer
+        ) ||
           "Tôi chưa thể trả lời lúc này.",
         "general",
         standalone,
@@ -894,7 +1254,7 @@ export async function runScholarAgent(
       );
     }
 
-    const result =
+    const found =
       preflight ||
       (await runAgent(
         standalone,
@@ -903,72 +1263,108 @@ export async function runScholarAgent(
       ));
 
     const conferences =
-      kind === "journal"
+      kind ===
+      "journal"
         ? []
-        : result?.conferences ||
+        : found
+            ?.conferences ||
           [];
 
     const journals =
-      kind === "conference"
+      kind ===
+      "conference"
         ? []
-        : result?.journals ||
+        : found
+            ?.journals ||
           [];
 
-    const sources = [
-      ...conferences.map(
-        (item, index) => ({
-          id: `C${index + 1}`,
-          type: "conference",
-          title: title(
+    const sources =
+      [
+        ...conferences.map(
+          (
             item,
-            "conference"
-          ),
-          url: url(
+            index
+          ) => ({
+            id: `C${
+              index +
+              1
+            }`,
+            type:
+              "conference",
+            title:
+              title(
+                item,
+                "conference"
+              ),
+            url:
+              url(
+                item,
+                "conference"
+              ),
+            metadata:
+              item
+          })
+        ),
+
+        ...journals.map(
+          (
             item,
-            "conference"
-          ),
-          metadata: item
-        })
-      ),
-      ...journals.map(
-        (item, index) => ({
-          id: `J${index + 1}`,
-          type: "journal",
-          title: title(
-            item,
-            "journal"
-          ),
-          url: url(
-            item,
-            "journal"
-          ),
-          metadata: item
-        })
-      )
-    ];
+            index
+          ) => ({
+            id: `J${
+              index +
+              1
+            }`,
+            type:
+              "journal",
+            title:
+              title(
+                item,
+                "journal"
+              ),
+            url:
+              url(
+                item,
+                "journal"
+              ),
+            metadata:
+              item
+          })
+        )
+      ];
 
     const full =
-      detailed(original);
+      detailed(
+        original
+      );
 
-    const fallback = format(
-      conferences,
-      journals,
-      full
-    );
+    const fallback =
+      format(
+        conferences,
+        journals,
+        full
+      );
 
-    if (fallback) {
+    if (
+      fallback
+    ) {
       const needsLLM =
         full ||
         (
-          isContextual(original) &&
+          isContextual(
+            original
+          ) &&
           (
             context.project ||
             context.profile ||
-            context.docs.length
+            context.docs
+              .length
           )
         );
 
-      if (!needsLLM) {
+      if (
+        !needsLLM
+      ) {
         return reply(
           fallback,
           kind,
@@ -981,19 +1377,22 @@ export async function runScholarAgent(
       }
 
       try {
-        const llm = await callLLM(
-          buildScholarPrompt(
-            original,
-            conferences,
-            journals,
-            context
-          ),
-          model_id
-        );
+        const llm =
+          await callLLM(
+            buildScholarPrompt(
+              original,
+              conferences,
+              journals,
+              context
+            ),
+            model_id
+          );
 
-        const answer = value(
-          llm?.answer
-        );
+        const answer =
+          value(
+            llm
+              ?.answer
+          );
 
         return reply(
           guard(
@@ -1011,10 +1410,14 @@ export async function runScholarAgent(
           conferences,
           journals
         );
-      } catch (error) {
+      } catch (
+        error
+      ) {
         console.warn(
           "Scholar generation:",
-          error?.message || error
+          error
+            ?.message ||
+            error
         );
 
         return reply(
@@ -1029,22 +1432,26 @@ export async function runScholarAgent(
       }
     }
 
-    // Chỉ dùng web khi CSDL không trả được bản ghi.
     let web = [];
 
     try {
-      web = await searchWeb(
-        standalone,
-        kind
-      );
+      web =
+        await searchWeb(
+          standalone,
+          kind
+        );
     } catch (error) {
       console.warn(
         "Scholar web:",
-        error?.message || error
+        error
+          ?.message ||
+          error
       );
     }
 
-    if (!web.length) {
+    if (
+      !web.length
+    ) {
       return reply(
         "Chưa tìm thấy kết quả phù hợp trong CSDL và chưa xác minh được nguồn web phù hợp.",
         kind,
@@ -1052,44 +1459,68 @@ export async function runScholarAgent(
       );
     }
 
-    const prompt = [
-      `Trả lời bằng tiếng Việt, đúng loại ${kind}. Chỉ dùng thông tin được nguồn xác nhận, dẫn [W1] sát từng nhận định. Không suy đoán ISSN, Q1, hạn nộp hoặc địa điểm. Nếu nguồn không đủ để xác minh điều kiện bắt buộc, nói rõ. Mỗi bản ghi ở một mục riêng, có dòng trống.`,
-      context.project
-        ? `Dự án: ${JSON.stringify(
-            context.project
-          ).slice(0, 1800)}`
-        : "",
-      context.profile
-        ? `Hồ sơ: ${JSON.stringify(
-            context.profile
-          ).slice(0, 900)}`
-        : "",
-      scopeText(context),
-      context.history
-        .map(
-          item =>
-            `${item.role}: ${item.content.slice(
+    const prompt =
+      [
+        `Trả lời bằng tiếng Việt, đúng loại ${kind}. Chỉ dùng thông tin được nguồn xác nhận, dẫn [W1] sát từng nhận định. Không suy đoán ISSN, Q1, hạn nộp hoặc địa điểm. Nếu nguồn không đủ để xác minh điều kiện bắt buộc, nói rõ. Mỗi bản ghi ở một mục riêng, có dòng trống.`,
+
+        context.project
+          ? `Dự án: ${JSON.stringify(
+              context.project
+            ).slice(
               0,
-              500
+              1800
             )}`
+          : "",
+
+        context.profile
+          ? `Hồ sơ: ${JSON.stringify(
+              context.profile
+            ).slice(
+              0,
+              900
+            )}`
+          : "",
+
+        scopeText(
+          context
+        ),
+
+        context.history
+          .map(
+            item =>
+              `${item.role}: ${item.content.slice(
+                0,
+                500
+              )}`
+          )
+          .join(
+            "\n"
+          ),
+
+        `Câu hỏi: ${original}`,
+
+        `Nguồn:\n${evidence(
+          web
+        )}`
+      ]
+        .filter(
+          Boolean
         )
-        .join("\n"),
-      `Câu hỏi: ${original}`,
-      `Nguồn:\n${evidence(
-        web
-      )}`
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+        .join(
+          "\n\n"
+        );
 
-    const llm = await callLLM(
-      prompt,
-      model_id
-    );
+    const llm =
+      await callLLM(
+        prompt,
+        model_id
+      );
 
-    const answer = value(
-      llm?.answer
-    );
+    const answer =
+      value(
+        llm
+          ?.answer
+      );
 
     const grounded =
       guard(
@@ -1113,10 +1544,11 @@ export async function runScholarAgent(
       standalone,
       llm,
       grounded
-        ? web.filter(item =>
-            answer.includes(
-              `[${item.id}]`
-            )
+        ? web.filter(
+            item =>
+              answer.includes(
+                `[${item.id}]`
+              )
           )
         : []
     );
