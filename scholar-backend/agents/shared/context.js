@@ -1,336 +1,314 @@
 // agents/shared/context.js
 
-
-// =====================================================
-// LIMITS
-// =====================================================
-
-// Portal có thể gửi nhiều history,
-// chỉ giữ các lượt gần nhất.
 const MAX_HISTORY_ITEMS = 10;
-
-// Chặn một message quá dài.
-// scholar.prompt.js cũng giới hạn lại lần nữa.
 const MAX_HISTORY_CHARS_PER_ITEM = 2000;
-
-// Không cắt document quá mạnh ở tầng context.
-// scholar.prompt.js sẽ quản lý tổng document context = 12000 chars.
-//
-// Mục đích của giới hạn này chỉ là bảo vệ backend
-// nếu Portal gửi một document text cực lớn.
 const MAX_DOC_CHARS_PER_ITEM = 50000;
-
-// Giới hạn số document nhận từ request.
 const MAX_DOCUMENTS = 10;
 
-
-// =====================================================
-// HELPERS
-// =====================================================
-
 function cleanString(value) {
-  return typeof value === "string"
-    ? value.trim()
-    : "";
+  return typeof value === "string" ? value.trim() : "";
 }
 
+function readable(value) {
+  if (typeof value === "string") return value.trim();
 
-// =====================================================
-// HISTORY
-// =====================================================
-
-function buildHistory(context) {
-
-  if (
-    !Array.isArray(context?.history)
-  ) {
-    return [];
+  if (Array.isArray(value)) {
+    return value.map(readable).filter(Boolean).join(", ");
   }
 
+  return "";
+}
 
-  return context.history
-    .filter(
-      h =>
-        h &&
-        ["user", "assistant"].includes(
-          h.role
-        ) &&
-        typeof h.content === "string" &&
-        h.content.trim()
+function firstText(...values) {
+  return values.map(readable).find(Boolean) || "";
+}
+
+function asArray(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function buildHistory(context, body) {
+  const raw = Array.isArray(context.history)
+    ? context.history
+    : Array.isArray(body.history)
+      ? body.history
+      : [];
+
+  return raw
+    .filter(item =>
+      item &&
+      ["user", "assistant"].includes(item.role) &&
+      typeof item.content === "string" &&
+      item.content.trim()
     )
     .slice(-MAX_HISTORY_ITEMS)
-    .map(h => ({
-      role:
-        h.role,
-
-      content:
-        h.content
-          .trim()
-          .slice(
-            0,
-            MAX_HISTORY_CHARS_PER_ITEM
-          )
+    .map(item => ({
+      role: item.role,
+      content: item.content
+        .trim()
+        .slice(0, MAX_HISTORY_CHARS_PER_ITEM)
     }));
 }
 
-
-// =====================================================
-// USER PROFILE
-// =====================================================
-
-function buildProfile(context) {
-
-  const raw =
-    context?.user_profile;
-
+function buildProfile(context, body) {
+  const raw = context.user_profile ?? body.user_profile;
 
   if (
     !raw ||
-    typeof raw !== "object"
+    typeof raw !== "object" ||
+    Array.isArray(raw)
   ) {
     return null;
   }
 
-
-  const directions =
-    Array.isArray(raw.direction)
-      ? raw.direction
-          .filter(Boolean)
-          .map(String)
-          .map(v => v.trim())
-          .filter(Boolean)
-      : [];
-
-
   const profile = {
-
-    email:
-      cleanString(raw.email),
-
-    full_name:
-      cleanString(raw.full_name),
-
-    display_name:
-      cleanString(raw.display_name),
-
-    position:
-      cleanString(raw.position),
-
-    academic_title:
-      cleanString(raw.academic_title),
-
-    academic_degree:
-      cleanString(raw.academic_degree),
-
-    department_name:
-      cleanString(raw.department_name),
-
-    direction:
-      directions
+    email: cleanString(raw.email),
+    full_name: cleanString(raw.full_name),
+    display_name: cleanString(raw.display_name),
+    position: cleanString(raw.position),
+    academic_title: cleanString(raw.academic_title),
+    academic_degree: cleanString(raw.academic_degree),
+    department_name: cleanString(raw.department_name),
+    direction: asArray(raw.direction)
+      .map(readable)
+      .filter(Boolean)
   };
 
+  const hasData = Object.values(profile).some(value =>
+    Array.isArray(value)
+      ? value.length > 0
+      : Boolean(value)
+  );
 
-  const hasData =
-    profile.email ||
-    profile.full_name ||
-    profile.display_name ||
-    profile.position ||
-    profile.academic_title ||
-    profile.academic_degree ||
-    profile.department_name ||
-    profile.direction.length;
-
-
-  return hasData
-    ? profile
-    : null;
+  return hasData ? profile : null;
 }
 
+function buildProject(context, body) {
+  const raw =
+    context.project_info ??
+    context.project ??
+    body.project_info ??
+    body.project;
 
-// =====================================================
-// PROJECT
-// =====================================================
+  const projectId = firstText(
+    context.project_id,
+    body.project_id
+  );
 
-function buildProject(context) {
-
-  const projectInfo =
-    context?.project_info;
-
-
-  // -----------------------------------------------------
-  // Ưu tiên project_info
-  // -----------------------------------------------------
+  if (typeof raw === "string") {
+    return raw.trim() || projectId
+      ? {
+          id: projectId,
+          name: raw.trim(),
+          description: ""
+        }
+      : null;
+  }
 
   if (
-    projectInfo &&
-    typeof projectInfo === "object"
+    !raw ||
+    typeof raw !== "object" ||
+    Array.isArray(raw)
   ) {
+    return projectId
+      ? {
+          id: projectId,
+          name: "",
+          description: ""
+        }
+      : null;
+  }
 
-    const project = {
+  const project = {
+    id: firstText(projectId, raw.id),
 
-      id:
-        cleanString(
-          context?.project_id
-        ),
+    name: firstText(
+      raw.name,
+      raw.title,
+      raw.project_name
+    ),
 
-      name:
-        cleanString(
-          projectInfo.name
-        ),
+    description: firstText(
+      raw.description,
+      raw.summary,
+      raw.abstract
+    ),
 
-      description:
-        cleanString(
-          projectInfo.description
-        )
-    };
+    abstract: firstText(
+      raw.abstract,
+      raw.summary
+    ),
 
+    objectives: firstText(
+      raw.objectives,
+      raw.objective,
+      raw.goals
+    ),
 
-    if (
-      project.id ||
-      project.name ||
-      project.description
-    ) {
-      return project;
+    methodology: firstText(
+      raw.methodology,
+      raw.methods,
+      raw.method
+    ),
+
+    fields: firstText(
+      raw.fields,
+      raw.field
+    ),
+
+    tags: firstText(
+      raw.tags,
+      raw.keywords
+    ),
+
+    applicants: firstText(
+      raw.applicants,
+      raw.participants,
+      raw.researchers
+    ),
+
+    organization: firstText(
+      raw.organization,
+      raw.institution
+    ),
+
+    files: asArray(
+      raw.files ??
+      raw.documents ??
+      raw.attachments
+    )
+  };
+
+  const hasData = Object.entries(project).some(
+    ([key, value]) =>
+      key === "files"
+        ? value.length > 0
+        : Boolean(value)
+  );
+
+  return hasData ? project : null;
+}
+
+function buildDocuments(context, body, project) {
+  const sources = [
+    context.extra_data?.document,
+    context.document,
+    context.files,
+    body.extra_data?.document,
+    body.document,
+    body.files,
+    project?.files
+  ];
+
+  const docs = [];
+  const seen = new Set();
+
+  for (const source of sources) {
+    for (const raw of asArray(source)) {
+      if (
+        !raw ||
+        typeof raw !== "object" ||
+        Array.isArray(raw)
+      ) {
+        continue;
+      }
+
+      const content = firstText(
+        raw.text,
+        raw.extracted_text,
+        raw.extractedText,
+        raw.content,
+        raw.file_content,
+        raw.plain_text,
+        raw.data?.text,
+        raw.data?.content
+      );
+
+      // Tên file, URL và file ID không phải nội dung đã đọc được.
+      if (!content) continue;
+
+      const name = firstText(
+        raw.name,
+        raw.file_name,
+        raw.filename,
+        raw.original_name,
+        raw.originalName
+      ) || "document";
+
+      const url = firstText(
+        raw.url,
+        raw.link
+      );
+
+      const key = `${name}\u0000${content}`;
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      docs.push({
+        name,
+        url,
+        text: content.slice(0, MAX_DOC_CHARS_PER_ITEM),
+        truncated: content.length > MAX_DOC_CHARS_PER_ITEM
+      });
+
+      if (docs.length >= MAX_DOCUMENTS) {
+        return docs;
+      }
     }
   }
 
-
-  // -----------------------------------------------------
-  // Fallback context.project
-  // -----------------------------------------------------
-
-  const projectName =
-    cleanString(
-      context?.project
-    );
-
-
-  if (projectName) {
-    return {
-
-      id:
-        cleanString(
-          context?.project_id
-        ),
-
-      name:
-        projectName,
-
-      description:
-        ""
-    };
-  }
-
-
-  return null;
+  return docs;
 }
-
-
-// =====================================================
-// DOCUMENTS
-// =====================================================
-
-function buildDocuments(context) {
-
-  const documents =
-    context
-      ?.extra_data
-      ?.document;
-
-
-  if (
-    !Array.isArray(documents)
-  ) {
-    return [];
-  }
-
-
-  return documents
-    .filter(
-      d =>
-        d &&
-        typeof d.text === "string" &&
-        d.text.trim()
-    )
-    .slice(
-      0,
-      MAX_DOCUMENTS
-    )
-    .map(d => {
-
-      const rawText =
-        d.text.trim();
-
-
-      return {
-
-        name:
-          cleanString(d.name) ||
-          "document",
-
-        // Giữ URL để sau này có thể dùng
-        // cho citation / metadata nếu cần.
-        url:
-          cleanString(d.url),
-
-        text:
-          rawText.slice(
-            0,
-            MAX_DOC_CHARS_PER_ITEM
-          ),
-
-        truncated:
-          rawText.length >
-          MAX_DOC_CHARS_PER_ITEM
-      };
-    });
-}
-
-
-// =====================================================
-// BUILD LLM CONTEXT
-// =====================================================
 
 export function buildLLMContext(req) {
-
-  const context =
-    req?.body?.context &&
-    typeof req.body.context === "object"
-      ? req.body.context
+  const body =
+    req?.body &&
+    typeof req.body === "object"
+      ? req.body
       : {};
 
+  const context =
+    body.context &&
+    typeof body.context === "object"
+      ? body.context
+      : {};
 
-  const history =
-    buildHistory(context);
-
-
-  const profile =
-    buildProfile(context);
-
-
-  const project =
-    buildProject(context);
-
-
-  const docs =
-    buildDocuments(context);
-
+  const project = buildProject(
+    context,
+    body
+  );
 
   return {
-
-    // Ngôn ngữ Portal gửi.
     language:
-      cleanString(
-        context.language
-      ) ||
-      "vi",
+      firstText(
+        context.language,
+        body.language
+      ) || "vi",
 
-    history,
+    history: buildHistory(
+      context,
+      body
+    ),
 
-    profile,
+    profile: buildProfile(
+      context,
+      body
+    ),
 
     project,
 
-    docs
+    project_id: firstText(
+      context.project_id,
+      body.project_id,
+      project?.id
+    ),
+
+    docs: buildDocuments(
+      context,
+      body,
+      project
+    )
   };
 }

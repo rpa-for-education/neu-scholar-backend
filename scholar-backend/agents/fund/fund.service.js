@@ -13,9 +13,11 @@ const MEMORY_TTL = 3 * 60 * 60 * 1000;
 
 function text(value) {
   if (value == null) return "";
+
   if (Array.isArray(value)) {
     return value.map(text).filter(Boolean).join(", ");
   }
+
   if (typeof value === "object") {
     try {
       return JSON.stringify(value);
@@ -23,6 +25,7 @@ function text(value) {
       return "";
     }
   }
+
   return String(value).trim();
 }
 
@@ -58,6 +61,7 @@ function detailIntent(question) {
 
 function referenceIntent(question) {
   const q = normalize(question);
+
   return (
     /\b(quy|co hoi|chuong trinh|fund)\s+(tren|nay|do|vua neu|above|this|that)\b/.test(q) ||
     /\b(no|cai do)\b/.test(q)
@@ -70,8 +74,37 @@ function contextual(question) {
   );
 }
 
+function deviceQuestion(question) {
+  return /\b(thiet bi|may moc|phan cung|kinh vr|headset|device|equipment|hardware)\b/.test(
+    normalize(question)
+  );
+}
+
+function deviceEvidence(context) {
+  const fromFiles = context.docs
+    .map(doc => `File ${doc.name}: ${doc.text.slice(0, 4500)}`)
+    .join("\n\n");
+
+  const fromHistory = context.history
+    .slice()
+    .reverse()
+    .find(item =>
+      item.role === "user" &&
+      /\b(thiet bi|model|cau hinh|thong so|device|equipment)\b/.test(
+        normalize(item.content)
+      ) &&
+      item.content.length > 100
+    )?.content || "";
+
+  return [fromFiles, fromHistory]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 12000);
+}
+
 function fileInventory(question) {
   const q = normalize(question);
+
   return (
     /\b(file|tep|tai lieu|van ban)\b/.test(q) &&
     /\b(nao|nhung|cac|danh sach|bao nhieu|da dinh kem|da tai len|co gi)\b/.test(q) &&
@@ -81,6 +114,7 @@ function fileInventory(question) {
 
 function explainPrevious(question) {
   const q = normalize(question);
+
   return (
     /\b(tai sao|vi sao|giai thich|ly do)\b/.test(q) &&
     /\b(tren|do|nay|cac quy|nhung quy|cac co hoi|nhung co hoi)\b/.test(q)
@@ -89,6 +123,7 @@ function explainPrevious(question) {
 
 function fundingAdvice(question) {
   const q = normalize(question);
+
   return (
     /\b(bai bao|ban thao|nghien cuu nay|du an nay|de tai nay)\b/.test(q) &&
     /\b(quy|tai tro|fund|grant|phu hop|nen xin|nen nop)\b/.test(q)
@@ -152,25 +187,75 @@ function portalContext(req, supplied = []) {
       content: item.content.slice(0, 2500)
     }));
 
-  const rawDocs =
-    portal.extra_data?.document ??
-    portal.document ??
-    body.extra_data?.document ??
-    body.document ??
-    base.docs ??
-    [];
+  const project =
+    portal.project_info ??
+    portal.project ??
+    body.project_info ??
+    body.project ??
+    base.project ??
+    null;
 
-  const docs = (Array.isArray(rawDocs) ? rawDocs : [rawDocs])
-    .filter(item =>
-      item &&
-      typeof item.text === "string" &&
-      item.text.trim()
-    )
-    .slice(0, 8)
-    .map(item => ({
-      name: text(item.name),
-      text: item.text
-    }));
+  const rawDocs = [
+    base.docs,
+    portal.extra_data?.document,
+    portal.document,
+    body.extra_data?.document,
+    body.document,
+    portal.files,
+    body.files,
+    project?.files,
+    project?.documents,
+    project?.attachments
+  ].flatMap(items =>
+    items == null
+      ? []
+      : Array.isArray(items)
+        ? items
+        : [items]
+  );
+
+  const seenDocs = new Set();
+
+  const docs = rawDocs
+    .map(item => {
+      if (!item || typeof item !== "object") {
+        return { name: "", text: "" };
+      }
+
+      const content = first(
+        item.text,
+        item.extracted_text,
+        item.extractedText,
+        item.content,
+        item.file_content,
+        item.plain_text,
+        item.data?.text,
+        item.data?.content
+      );
+
+      return {
+        name: text(first(
+          item.name,
+          item.file_name,
+          item.filename,
+          item.original_name
+        )),
+        url: text(first(item.url, item.link)),
+        text: typeof content === "string"
+          ? content.trim()
+          : ""
+      };
+    })
+    .filter(item => {
+      if (!item.text) return false;
+
+      const key = `${item.name}\u0000${item.text}`;
+
+      if (seenDocs.has(key)) return false;
+      seenDocs.add(key);
+      return true;
+    })
+    .slice(0, 8);
 
   return {
     ...base,
@@ -180,13 +265,7 @@ function portalContext(req, supplied = []) {
       body.user_profile ??
       base.profile ??
       null,
-    project:
-      portal.project_info ??
-      portal.project ??
-      body.project_info ??
-      body.project ??
-      base.project ??
-      null,
+    project,
     project_id:
       portal.project_id ??
       body.project_id ??
@@ -889,6 +968,31 @@ export async function runFundAgent(
     }
 
     const paper = paperText(original, context);
+
+    if (deviceQuestion(original) && !fundIntent(original)) {
+      const equipment = deviceEvidence(context);
+
+      if (!equipment) {
+        return result(
+          "Tôi đã nhận được thông tin dự án, nhưng lượt hỏi này chưa chuyển nội dung hoặc thông số của thiết bị cho tôi. Nếu bạn đã đính kèm file, Portal cần gửi văn bản trích xuất vào `context.extra_data.document[].text` (hoặc `content`/`extracted_text`). Với ảnh hoặc PDF quét, cần OCR hoặc mô hình đọc ảnh trước. Vui lòng gửi tên/model và thông số thiết bị nếu Portal chưa trích xuất được file.",
+          "general",
+          original
+        );
+      }
+
+      const prompt = `Đánh giá bằng tiếng Việt thiết bị có phù hợp với dự án hay không. Dựa đúng vào dữ liệu dự án và nội dung tài liệu thiết bị dưới đây. Nêu đặc tính cụ thể của thiết bị, vai trò có thể đảm nhiệm, điều kiện kỹ thuật còn phải kiểm tra. Không tự suy đoán thông số hoặc khẳng định đã đọc file khác. Nếu thiếu thông số quyết định, nói rõ điều gì còn thiếu.\n\nDự án:\n${scope(context)}\n\nThông tin thiết bị:\n${equipment}\n\nCâu hỏi: ${original}`;
+
+      const llm = await callLLM(prompt, model_id);
+
+      return result(
+        text(llm?.answer) || "Chưa đủ dữ liệu để đánh giá thiết bị.",
+        "general",
+        original,
+        [],
+        [],
+        llm
+      );
+    }
 
     if (explainPrevious(original)) {
       const saved = lastFunds(req, context);
