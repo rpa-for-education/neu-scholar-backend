@@ -1,365 +1,595 @@
 // agents/scholar/scholar.search.js
 import "dotenv/config";
 import { qdrantClient as qdrant } from "../../db/qdrant.js";
+import { getDb } from "../../db/mongo.js";
 import { detectDomain, analyzeQuestion, countryMatches } from "./agentReasoning.js";
 import { embedBatch } from "../shared/embedding.js";
+import { callLLM } from "../shared/llm.js";
 
 const MAX_LIMIT = 80;
-const QUERY_TTL = 5 * 60 * 1000;
-const QUERY_CACHE = new Map();
-const STOP_WORDS = new Set([
-  "cho", "toi", "tim", "kiem", "ve", "thuoc", "trong", "linh", "vuc",
-  "cac", "nhung", "mot", "so", "va", "hoac", "tai", "cua", "con",
-  "thi", "sao", "nao", "giup", "thong", "tin", "chi", "tiet",
-  "tap", "journal", "journals", "hoi", "thao", "conference", "conferences",
-  "find", "show", "give", "me", "about", "for", "in", "on", "the",
-  "and", "or", "q1", "q2", "q3", "q4"
-]);
+const CACHE_TTL = 5 * 60 * 1000;
+const resultCache = new Map();
+const expansionCache = new Map();
+let collectionNamesCache = null;
+
+function text(value) {
+  return String(value ?? "").trim();
+}
+
 function normalize(value) {
-  return String(value ?? "").toLowerCase().normalize("NFD")
+  return text(value).toLowerCase().normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
-function cleanQuery(value) {
-  return String(value ?? "").toLowerCase().normalize("NFC")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+
+function escapeRegex(value) {
+  return text(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-function toText(value) {
-  if (value == null) return "";
-  if (Array.isArray(value)) return value.map(toText).filter(Boolean).join(" ");
-  if (typeof value === "object") {
-    return Object.values(value).map(toText).filter(Boolean).join(" ");
-  }
-  return normalize(value);
-}
+
 function first(...values) {
   return values.find(value => {
-    if (value == null) return false;
-    const result = String(value).trim().toLowerCase();
-    return result && !["n/a", "na", "null", "undefined"].includes(result);
+    if (value === null || value === undefined) return false;
+    const result = text(value).toLowerCase();
+    return result &&
+      !["n/a", "null", "undefined"].includes(result);
   }) ?? "";
 }
-function countryState(item, target) {
-  const values = [
-    item.country, item.country_name, item.location_country,
-    item.nation, item.country_code, item.iso_code
-  ].filter(Boolean);
-  if (!values.length) return "unknown";
-  return values.some(value => countryMatches(value, target))
-    ? "match" : "mismatch";
+
+function titleOf(item, type) {
+  return text(type === "journal"
+    ? first(item.title, item.name, item.journal_title, item.source_title)
+    : first(item.name, item.title, item.conference_name, item.event_name));
 }
-function quartile(value) {
-  const match = String(value ?? "").match(/\bQ\s*([1-4])\b/i);
+
+function itemQuartile(item) {
+  const value = first(
+    item.quartile,
+    item.sjr_best_quartile,
+    item.best_quartile
+  );
+  const match = text(value).match(/\bQ\s*([1-4])\b/i);
   return match ? `Q${match[1]}` : "";
 }
-function itemQuartile(item) {
-  return quartile(first(
-    item.quartile, item.sjr_best_quartile,
-    item.best_quartile, item.sjr_quartile, item.q
-  ));
+
+function requestedQuartile(question) {
+  const match = text(question).match(/\bQ\s*([1-4])\b/i);
+  return match ? `Q${match[1]}` : "";
 }
-function requestedQuartile(question, analysis) {
-  for (const value of [
-    analysis?.quartile, analysis?.wantsQuartile,
-    analysis?.quartileHint, analysis?.targetQuartile, question
-  ]) {
-    const found = quartile(value);
-    if (found) return found;
-  }
-  return "";
-}
+
 function resourceType(item) {
-  const explicit = normalize(first(
-    item.type, item.resource_type, item.resourceType, item.kind
-  ));
-  if (explicit === "conference" || explicit === "journal") return explicit;
-  if (item._qdrantCollection === "conference_vectors") return "conference";
-  if (item._qdrantCollection === "journal_vectors") return "journal";
-  const conferenceSignals = [
-    item.deadline, item.start_date, item.end_date,
-    item.acronym, item.cfp_text
-  ].filter(Boolean).length;
-  const journalSignals = [
-    item.quartile, item.sjr_best_quartile, item.sjr,
-    item.h_index, item.issn, item.publisher
-  ].filter(Boolean).length;
-  return conferenceSignals > journalSignals ? "conference" : "journal";
-}
-function searchableText(item) {
-  const keys = resourceType(item) === "conference"
-    ? [
-        "name", "title", "conference_name", "event_name", "acronym",
-        "topics", "topic", "fields", "field", "categories", "category",
-        "areas", "area", "subjects", "keywords", "cfp_text", "cfp",
-        "description", "text", "location", "city", "country"
-      ]
-    : [
-        "title", "name", "journal_title", "source_title",
-        "publisher", "publisher_name", "categories", "category",
-        "areas", "area", "fields", "field", "subjects", "topics",
-        "text", "description", "country", "region", "issn", "primary_issn"
-      ];
-  return keys.map(key => toText(item[key])).filter(Boolean).join(" ");
-}
-function tokens(value) {
-  return [...new Set(
-    normalize(value).split(/\s+/).filter(
-      word => word.length >= 2 && !STOP_WORDS.has(word)
-    )
-  )];
-}
-function lexicalScore(item, question) {
-  const haystack = searchableText(item);
-  const words = tokens(question);
-  if (!haystack || !words.length) return 0;
-  const overlap = words.filter(word => haystack.includes(word)).length / words.length;
-  const phrase = normalize(question);
-  return Math.min(
-    overlap * 0.45 +
-    (phrase.length >= 4 && haystack.includes(phrase) ? 0.25 : 0),
-    0.7
-  );
-}
-function fieldScore(item, hint) {
-  const field = normalize(hint);
-  const words = tokens(field);
-  const haystack = searchableText(item);
-  if (!field || !words.length || !haystack) return 0;
-  const overlap = words.filter(word => haystack.includes(word)).length / words.length;
-  return Math.min(
-    (haystack.includes(field) ? 0.35 : 0) + overlap * 0.35,
-    0.7
-  );
-}
-function dateValue(value) {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-function wantsUpcoming(question, analysis) {
   if (
-    analysis?.wantsOpen || analysis?.wantsUpcoming ||
-    analysis?.futureOnly || analysis?.activeOnly
-  ) return true;
-  const q = normalize(question);
-  return [
-    "con han", "con deadline", "con mo", "dang mo",
-    "sap toi", "upcoming", "open submission", "submission open"
-  ].some(phrase => q.includes(phrase));
+    item._qdrantCollection === "journal_vectors" ||
+    normalize(item.type) === "journal"
+  ) return "journal";
+
+  if (
+    item._qdrantCollection === "conference_vectors" ||
+    normalize(item.type) === "conference"
+  ) return "conference";
+
+  return item.deadline || item.start_date ? "conference" : "journal";
 }
-function dateScore(item, question, analysis) {
-  if (resourceType(item) !== "conference") return 0;
-  const deadline = dateValue(first(
-    item.deadline, item.submission_deadline,
-    item.paper_deadline, item.cfp_deadline, item.close_date
-  ));
-  const start = dateValue(first(
-    item.start_date, item.event_date, item.conference_date, item.date
-  ));
-  const active = wantsUpcoming(question, analysis);
-  const now = Date.now();
-  let score = 0;
-  if (deadline !== null) {
-    const days = (deadline - now) / 86400000;
-    if (days >= 0) {
-      score += active ? 0.45 : 0.12;
-      if (active && days <= 90) {
-        score += Math.max(0, 0.15 - days / 600);
-      }
-    } else if (active) {
-      score -= 0.7;
-    }
-  }
-  if (active && start !== null) {
-    score += start >= now ? 0.1 : -0.3;
-  }
-  return score;
+
+function matchesCountry(item, target) {
+  if (!target) return true;
+  const values = [
+    item.country,
+    item.country_name,
+    item.country_code,
+    item.iso_code
+  ].filter(Boolean);
+
+  return !values.length ||
+    values.some(value => countryMatches(value, target));
 }
-function scoreItem(item, question, analysis, targetQuartile, targetCountry) {
-  let score = Number(item.baseScore) || 0;
-  score += lexicalScore(item, question);
-  const hint = first(
-    analysis?.fieldHint, analysis?.field,
-    analysis?.topic, analysis?.topicHint, analysis?.keywords
-  );
-  if (hint) score += fieldScore(item, hint);
-  if (targetCountry) {
-    const state = countryState(item, targetCountry);
-    if (state !== "unknown") {
-      score += state === "match" ? 0.5 : -0.5;
-    }
-  }
-  if (targetQuartile && resourceType(item) === "journal") {
-    const known = itemQuartile(item);
-    if (known) score += known === targetQuartile ? 0.75 : -0.75;
-  }
-  return score + dateScore(item, question, analysis);
+
+function identity(item, type) {
+  return `${type}|${normalize(first(
+    item.u_key,
+    item._key,
+    item.sourceid,
+    item.source_id,
+    type === "journal" ? item.issn : "",
+    titleOf(item, type)
+  ))}`;
 }
-function identity(item) {
-  const type = resourceType(item);
-  const id = first(item._key, item.u_key, item.sourceid, item.source_id);
-  if (id) return `${type}|${normalize(id)}`;
-  if (type === "journal") {
-    const issn = first(item.issn, item.primary_issn);
-    return `journal|${normalize(
-      issn || first(item.title, item.name, item.journal_title)
-    )}`;
-  }
-  const name = first(
-    item.name, item.title, item.conference_name,
-    item.event_name, item.acronym
-  );
-  const date = first(
-    item.start_date, item.event_date, item.conference_date
-  );
-  return `conference|${normalize(name)}|${normalize(date)}`;
-}
-function dedupe(items) {
+
+function dedupe(items, type) {
   const found = new Map();
+
   for (const item of items) {
-    const key = identity(item);
-    if (!key || key === "journal|" || key === "conference||") continue;
+    if (!titleOf(item, type)) continue;
+    const key = identity(item, type);
     const previous = found.get(key);
-    if (!previous || item.score > previous.score) found.set(key, item);
+
+    if (
+      !previous ||
+      (Number(item.score) || 0) >
+        (Number(previous.score) || 0)
+    ) {
+      found.set(key, item);
+    }
   }
+
   return [...found.values()];
 }
-async function searchCollection(collection, vectors, topk) {
-  const searches = vectors.map(async (vector, index) => {
-    if (!vector) return [];
-    try {
-      const results = await qdrant.search(collection, {
-        vector,
-        limit: Math.min(Math.max(topk * 3, 40), MAX_LIMIT),
-        with_payload: true
-      });
-      const weight = index === 0 ? 1 : 0.75;
-      return results.map(result => ({
-        ...(result.payload || {}),
-        _qdrantCollection: collection,
-        _qdrantId: result.id,
-        baseScore: (Number(result.score) || 0) * weight
-      }));
-    } catch (error) {
-      console.error(`❌ Qdrant search ${collection}:`, error?.message || error);
-      return [];
+
+function searchTerms(question, expansion) {
+  const words = expansion?.keywords?.length
+    ? expansion.keywords
+    : normalize(question)
+        .split(" ")
+        .filter(word => word.length >= 4);
+
+  return [...new Set(
+    words
+      .map(normalize)
+      .filter(word =>
+        word.length >= 3 &&
+        !/^(journal|conference|quartile|nghien cuu|tap chi|hoi thao|q[1-4])$/
+          .test(word)
+      )
+  )].slice(0, 12);
+}
+
+export async function expandScholarQueries(question) {
+  const original = text(question);
+  const key = normalize(original);
+
+  if (expansionCache.has(key)) {
+    return expansionCache.get(key);
+  }
+
+  const fallback = {
+    queries: [original],
+    keywords: searchTerms(original)
+  };
+
+  try {
+    const prompt = `Bạn là bộ mở rộng truy vấn tìm kiếm học thuật.
+
+Viết lại câu hỏi bằng tiếng Việt và tiếng Anh để tìm CÙNG MỘT ý định.
+
+Quy tắc:
+- Giữ nguyên tên riêng, ISSN, quốc gia, năm, Q1–Q4 và điều kiện bắt buộc.
+- Giữ nguyên loại tài nguyên: tạp chí, hội thảo hoặc cả hai.
+- Không thêm điều kiện hoặc sự kiện không có trong câu gốc.
+- Chỉ trả JSON hợp lệ, không kèm Markdown.
+- Tối đa 3 queries và 8 keywords.
+
+Định dạng:
+{"queries":["câu tiếng Việt","English search query"],"keywords":["thuật ngữ tiếng Việt","English equivalent"]}
+
+Câu hỏi:
+${original}`;
+
+    const response = await callLLM(prompt);
+    const body = text(response?.answer)
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/, "");
+
+    const parsed = JSON.parse(body);
+
+    const queries = [
+      original,
+      ...(Array.isArray(parsed.queries) ? parsed.queries : [])
+    ]
+      .map(text)
+      .filter(value => value.length >= 4 && value.length <= 250)
+      .slice(0, 4);
+
+    const keywords = (
+      Array.isArray(parsed.keywords) ? parsed.keywords : []
+    )
+      .map(text)
+      .filter(value => value.length >= 3 && value.length <= 80)
+      .slice(0, 8);
+
+    const expanded = {
+      queries: [...new Set(queries)],
+      keywords: keywords.length ? keywords : fallback.keywords
+    };
+
+    expansionCache.set(key, expanded);
+    if (expansionCache.size > 300) {
+      expansionCache.delete(expansionCache.keys().next().value);
     }
-  });
-  return (await Promise.all(searches)).flat();
-}
-function cacheGet(key) {
-  const entry = QUERY_CACHE.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.time >= QUERY_TTL) {
-    QUERY_CACHE.delete(key);
-    return null;
-  }
-  return entry.value;
-}
-function cacheSet(key, value) {
-  QUERY_CACHE.set(key, { value, time: Date.now() });
-  if (QUERY_CACHE.size > 500) {
-    QUERY_CACHE.delete(QUERY_CACHE.keys().next().value);
+    return expanded;
+  } catch (error) {
+    console.warn(
+      "Scholar query expansion:",
+      error?.message || error
+    );
+    expansionCache.set(key, fallback);
+    return fallback;
   }
 }
+
+function topicalScore(item, question, type, expansion) {
+  const words = searchTerms(question, expansion);
+  if (!words.length) return 0;
+
+  const searchable = normalize([
+    titleOf(item, type),
+    item.areas,
+    item.categories,
+    item.fields,
+    item.topics,
+    item.cfp_text,
+    item.description,
+    item.text
+  ].flat().filter(Boolean).join(" "));
+
+  const hits = words.filter(word =>
+    searchable.includes(normalize(word))
+  ).length;
+
+  return hits / words.length;
+}
+
+function itemScore(item, question, type, expansion) {
+  return (Number(item.baseScore ?? item.score) || 0) +
+    topicalScore(item, question, type, expansion) * 0.7;
+}
+
+function detailName(question) {
+  const cleaned = text(question)
+    .replace(/^[\s"“”']+|[\s"“”']+$/g, "");
+
+  return cleaned.replace(
+    /^(?:cho\s+(?:tôi|toi|mình|minh)\s+)?(?:biết\s+)?(?:thông tin\s+)?(?:chi tiết\s+)?(?:về\s+)?(?:hội thảo|tạp chí|conference|journal)\s*/iu,
+    ""
+  ).trim();
+}
+
+function isDetail(question) {
+  return /\b(chi tiet|thong tin|gioi thieu|mo ta|details?|about)\b/
+    .test(normalize(question));
+}
+
+async function vectorSearch(collection, vectors, count) {
+  const batches = await Promise.all(
+    vectors.map(async (vector, index) => {
+      if (!vector) return [];
+
+      try {
+        const hits = await qdrant.search(collection, {
+          vector,
+          limit: count,
+          with_payload: true
+        });
+
+        return hits.map(hit => ({
+          ...(hit.payload || {}),
+          _qdrantCollection: collection,
+          _qdrantId: hit.id,
+          baseScore:
+            (Number(hit.score) || 0) *
+            (index ? 0.85 : 1)
+        }));
+      } catch (error) {
+        console.warn(
+          "Scholar Qdrant:",
+          error?.message || error
+        );
+        return [];
+      }
+    })
+  );
+
+  return batches.flat();
+}
+
+async function collectionNames(db, type) {
+  if (!collectionNamesCache) {
+    const names = (
+      await db.listCollections(
+        {},
+        { nameOnly: true }
+      ).toArray()
+    ).map(item => item.name);
+
+    collectionNamesCache = {
+      journal: names.filter(name =>
+        /journal|scimago/i.test(name) &&
+        !/vector|embedding/i.test(name)
+      ),
+      conference: names.filter(name =>
+        /conference|easychair/i.test(name) &&
+        !/vector|embedding/i.test(name)
+      )
+    };
+  }
+
+  return collectionNamesCache[type] || [];
+}
+
+function lookupQuery(item, type) {
+  const clauses = [];
+
+  for (const key of [
+    "u_key",
+    "_key",
+    "sourceid",
+    "source_id"
+  ]) {
+    if (first(item[key])) {
+      clauses.push({ [key]: item[key] });
+    }
+  }
+
+  if (type === "journal" && first(item.issn)) {
+    clauses.push({ issn: item.issn });
+  }
+
+  const name = titleOf(item, type);
+  if (name) {
+    clauses.push({
+      [type === "journal" ? "title" : "name"]: name
+    });
+  }
+
+  return clauses.length ? { $or: clauses } : null;
+}
+
+async function enrichFromMongo(db, items, type) {
+  const names = await collectionNames(db, type);
+  if (!names.length || !items.length) return items;
+
+  return Promise.all(
+    items.map(async item => {
+      const query = lookupQuery(item, type);
+      if (!query) return item;
+
+      for (const name of names) {
+        const full = await db.collection(name).findOne(query);
+
+        if (full) {
+          const { _id, ...data } = full;
+          return {
+            ...item,
+            ...data,
+            _qdrantCollection: item._qdrantCollection,
+            baseScore: item.baseScore,
+            score: item.score
+          };
+        }
+      }
+      return item;
+    })
+  );
+}
+
+async function mongoCandidates(
+  db,
+  question,
+  type,
+  quartile,
+  expansion
+) {
+  const names = await collectionNames(db, type);
+  if (!names.length) return [];
+
+  const variants = searchTerms(question, expansion)
+    .slice(0, 12);
+
+  const fields = type === "journal"
+    ? ["title", "areas", "categories", "description"]
+    : ["name", "acronym", "topics", "cfp_text"];
+
+  const topicClauses = variants.flatMap(value =>
+    fields.map(field => ({
+      [field]: {
+        $regex: escapeRegex(value),
+        $options: "i"
+      }
+    }))
+  );
+
+  const specificName = isDetail(question)
+    ? detailName(question)
+    : "";
+
+  if (specificName.length >= 8) {
+    topicClauses.unshift({
+      [type === "journal" ? "title" : "name"]: {
+        $regex: escapeRegex(specificName),
+        $options: "i"
+      }
+    });
+  }
+
+  if (!topicClauses.length) return [];
+
+  const query = { $or: topicClauses };
+
+  if (quartile && type === "journal") {
+    query.$and = [{
+      $or: [
+        { quartile },
+        { sjr_best_quartile: quartile }
+      ]
+    }];
+  }
+
+  const batches = await Promise.all(
+    names.map(async name => {
+      const docs = await db.collection(name)
+        .find(
+          query,
+          { projection: { _id: 0 } }
+        )
+        .limit(120)
+        .toArray();
+
+      return docs.map(doc => ({
+        ...doc,
+        baseScore: 0,
+        _mongoCollection: name
+      }));
+    })
+  );
+
+  return batches.flat();
+}
+
 export async function searchConferenceJournalByVector({
   question,
   topk = 10
 }) {
-  const rawQuestion = String(question ?? "").trim();
-  const safeTopK = Math.max(
-    1, Math.min(Math.trunc(Number(topk)) || 10, MAX_LIMIT)
+  const original = text(question);
+  const limit = Math.max(
+    1,
+    Math.min(Math.trunc(Number(topk)) || 10, MAX_LIMIT)
   );
-  const empty = domain => ({ domain, conferences: [], journals: [] });
-  if (!rawQuestion) return empty(null);
-  const cacheKey = `${normalize(rawQuestion)}|${safeTopK}`;
-  const cached = cacheGet(cacheKey);
-  if (cached) return cached;
+
+  if (!original) {
+    return {
+      domain: "general",
+      conferences: [],
+      journals: []
+    };
+  }
+
+  const cacheKey = `${normalize(original)}|${limit}`;
+  const cached = resultCache.get(cacheKey);
+
+  if (
+    cached &&
+    Date.now() - cached.time < CACHE_TTL
+  ) {
+    return cached.value;
+  }
+
+  const domain = detectDomain(original);
+  const analysis = analyzeQuestion(original) || {};
+  const quartile = requestedQuartile(original);
+  const targetCountry = analysis.wantsCountryCode;
+
+  const types = domain === "journal"
+    ? ["journal"]
+    : domain === "conference"
+      ? ["conference"]
+      : ["conference", "journal"];
+
   try {
-    const domain = detectDomain(rawQuestion);
-    const analysis = analyzeQuestion(rawQuestion) || {};
-    const targetQuartile = requestedQuartile(rawQuestion, analysis);
-    const targetCountry = first(
-      analysis.wantsCountryCode, analysis.countryCode,
-      analysis.country, analysis.countryHint
+    const expansion =
+      await expandScholarQueries(original);
+
+    const vectors = await embedBatch(
+      expansion.queries
     );
-    const collections = domain === "conference"
-      ? ["conference_vectors"]
-      : domain === "journal"
-        ? ["journal_vectors"]
-        : ["conference_vectors", "journal_vectors"];
-    const cleaned = cleanQuery(rawQuestion);
-    const inputs = cleaned && cleaned !== rawQuestion
-      ? [rawQuestion, cleaned]
-      : [rawQuestion];
-    const vectors = await embedBatch(inputs);
-    if (!Array.isArray(vectors) || !vectors.length) return empty(domain);
 
-    let results = (await Promise.all(
-      collections.map(collection =>
-        searchCollection(collection, vectors, safeTopK)
-      )
-    )).flat();
-
-    results = results
-      .filter(item =>
-        domain === "conference"
-          ? resourceType(item) === "conference"
-          : domain === "journal"
-            ? resourceType(item) === "journal"
-            : true
-      )
-      .map(item => ({
-        ...item,
-        score: scoreItem(
-          item, rawQuestion, analysis,
-          targetQuartile, targetCountry
-        )
-      }));
-    results = dedupe(results);
-
-    if (targetCountry) {
-      results = results.filter(item =>
-        countryState(item, targetCountry) !== "mismatch"
+    let db = null;
+    try {
+      db = await getDb();
+    } catch (error) {
+      console.warn(
+        "Scholar Mongo unavailable:",
+        error?.message || error
       );
     }
-    if (targetQuartile && domain !== "conference") {
-      const journals = results.filter(item =>
-        resourceType(item) === "journal"
-      );
-      const matching = journals.filter(item =>
-        itemQuartile(item) === targetQuartile
-      );
-      if (matching.length) {
-        results = results.filter(item =>
-          resourceType(item) !== "journal"
-        ).concat(matching);
-      }
-    }
 
-    results.sort((a, b) => b.score - a.score);
     const output = {
       domain,
-      conferences: domain === "journal"
-        ? []
-        : results.filter(item =>
-            resourceType(item) === "conference"
-          ).slice(0, safeTopK),
-      journals: domain === "conference"
-        ? []
-        : results.filter(item =>
-            resourceType(item) === "journal"
-          ).slice(0, safeTopK)
+      conferences: [],
+      journals: []
     };
-    cacheSet(cacheKey, output);
+
+    for (const type of types) {
+      const collection = type === "journal"
+        ? "journal_vectors"
+        : "conference_vectors";
+
+      let items = await vectorSearch(
+        collection,
+        Array.isArray(vectors) ? vectors : [],
+        MAX_LIMIT
+      );
+
+      items = items.filter(item =>
+        resourceType(item) === type
+      );
+
+      if (db) {
+        try {
+          items = await enrichFromMongo(
+            db,
+            items,
+            type
+          );
+          items.push(
+            ...await mongoCandidates(
+              db,
+              original,
+              type,
+              quartile,
+              expansion
+            )
+          );
+        } catch (error) {
+          console.warn(
+            `Scholar Mongo ${type}:`,
+            error?.message || error
+          );
+        }
+      }
+
+      items = dedupe(
+        items.map(item => ({
+          ...item,
+          score: itemScore(
+            item,
+            original,
+            type,
+            expansion
+          )
+        })),
+        type
+      ).filter(item =>
+        matchesCountry(item, targetCountry)
+      );
+
+      if (quartile && type === "journal") {
+        items = items.filter(item =>
+          itemQuartile(item) === quartile
+        );
+      }
+
+      items.sort((a, b) => b.score - a.score);
+
+      output[
+        type === "journal"
+          ? "journals"
+          : "conferences"
+      ] = items.slice(0, limit);
+    }
+
+    resultCache.set(cacheKey, {
+      value: output,
+      time: Date.now()
+    });
+
+    if (resultCache.size > 300) {
+      resultCache.delete(
+        resultCache.keys().next().value
+      );
+    }
+
     return output;
   } catch (error) {
-    console.error("❌ Scholar search fatal:", error);
-    return empty(null);
+    console.error(
+      "Scholar search fatal:",
+      error
+    );
+
+    return {
+      domain,
+      conferences: [],
+      journals: []
+    };
   }
 }
