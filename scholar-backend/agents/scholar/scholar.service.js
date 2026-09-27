@@ -1,42 +1,34 @@
 // agents/scholar/scholar.service.js
 import { runAgent } from "./scholar.agent.js";
-import { normalizeHistory } from "../shared/memory.js";
 import { buildLLMContext } from "../shared/context.js";
 import { rewriteQuery } from "../shared/queryRewriter.js";
 import { buildScholarPrompt } from "./scholar.prompt.js";
 import { callLLM } from "../shared/llm.js";
 import { expandScholarQueries } from "./scholar.search.js";
 
-const SERPAPI_API_KEY =
-  "317229a8b9aac04d8acd3c5a504c19dcae02c9b20be7659b4f8f86e9be08fe80";
+const SERPAPI_API_KEY = "317229a8b9aac04d8acd3c5a504c19dcae02c9b20be7659b4f8f86e9be08fe80";
+const MAX_HISTORY = 10;
+const MAX_CONTEXT = 5500;
 
-function text(value) {
-  if (value == null) return "";
-  if (Array.isArray(value)) {
-    return value.map(text).filter(Boolean).join(", ");
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return "";
-    }
-  }
-  return String(value).trim();
-}
+const value = x =>
+  x == null
+    ? ""
+    : typeof x === "string"
+      ? x.trim()
+      : Array.isArray(x)
+        ? x.map(value).filter(Boolean).join(", ")
+        : typeof x === "object"
+          ? JSON.stringify(x)
+          : String(x);
 
-function valid(value) {
-  const result = text(value).toLowerCase();
-  return !!result &&
-    !["n/a", "na", "null", "undefined"].includes(result);
-}
+const first = (...xs) =>
+  xs.find(x =>
+    value(x) &&
+    !/^(n\/a|na|null|undefined)$/i.test(value(x))
+  ) ?? "";
 
-function first(...values) {
-  return values.find(valid) ?? "";
-}
-
-function normalize(value) {
-  return text(value)
+const norm = x =>
+  value(x)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -44,33 +36,36 @@ function normalize(value) {
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
 
-function requestedType(question) {
-  const q = normalize(question);
-
+const typeOf = q => {
+  const n = norm(q);
   const journal =
-    /\b(journals?|tap chi|issn|scimago|sjr|quartile|q[1-4])\b/.test(q);
-
+    /\b(tap chi|journal|issn|scimago|quartile|sjr|q[1-4])\b/.test(n);
   const conference =
-    /\b(conferences?|hoi thao|hoi nghi|cfp)\b/.test(q);
+    /\b(hoi thao|hoi nghi|conference|cfp|symposium)\b/.test(n);
 
-  if (journal && conference) return "both";
-  if (journal) return "journal";
-  if (conference) return "conference";
-  return "general";
-}
+  return journal && conference
+    ? "both"
+    : journal
+      ? "journal"
+      : conference
+        ? "conference"
+        : "general";
+};
 
-function isDetail(question) {
-  const q = normalize(question);
+const detailed = q =>
+  /\b(chi tiet|thong tin|gioi thieu|mo ta|details?|about|cua quyen|tren|do)\b/.test(
+    norm(q)
+  );
 
-  return /\b(chi tiet|thong tin|gioi thieu|mo ta|details?|about)\b/.test(q) ||
-    /^cho (toi|minh) biet\b/.test(q);
-}
+const isContextual = q =>
+  /\b(cua toi|cho toi|voi toi|de tai|du an|project|file|tai lieu|ho so|theo noi dung|phu hop|goi y|nen chon|tren|do|nay)\b/.test(
+    norm(q)
+  );
 
-function titleOf(item, type) {
-  return text(
-    type === "journal"
+const title = (item, kind) =>
+  value(
+    kind === "journal"
       ? first(
           item.title,
           item.name,
@@ -81,14 +76,14 @@ function titleOf(item, type) {
           item.name,
           item.title,
           item.conference_name,
-          item.event_name
+          item.event_name,
+          item.acronym
         )
   );
-}
 
-function urlOf(item, type) {
-  return text(
-    type === "journal"
+const url = (item, kind) =>
+  value(
+    kind === "journal"
       ? first(
           item.scimago_link,
           item.url,
@@ -105,341 +100,452 @@ function urlOf(item, type) {
           item.homepage
         )
   );
-}
 
-function addLine(lines, icon, label, value) {
-  if (valid(value)) {
-    lines.push(
-      `- ${icon} **${label}:** ${text(value)}`
-    );
+function line(lines, icon, label, input) {
+  if (
+    value(input) &&
+    !/^(n\/a|na|null|undefined)$/i.test(value(input))
+  ) {
+    lines.push(`- ${icon} **${label}:** ${value(input)}`);
   }
 }
 
-function formatBlock(item, index, type, detailed) {
+function block(item, index, kind, full) {
   const lines = [
     `### ${index + 1}. ${
-      type === "journal" ? "📚" : "🎓"
-    } **${titleOf(item, type)}**`
+      kind === "journal" ? "📚" : "🎓"
+    } **${title(item, kind)}**`
   ];
 
-  if (type === "journal") {
-    addLine(
+  if (kind === "journal") {
+    line(
       lines,
       "🏢",
       "Nhà xuất bản",
       first(item.publisher, item.publisher_name)
     );
-
-    addLine(
+    line(
       lines,
       "🌍",
       "Quốc gia",
-      item.country
+      first(item.country, item.country_name)
     );
-
-    addLine(
+    line(
       lines,
       "🧭",
       "Lĩnh vực",
-      item.areas
+      first(item.areas, item.fields)
     );
-
-    addLine(
+    line(
       lines,
       "🏷️",
       "Danh mục",
-      item.categories
+      first(item.categories, item.category)
     );
-
-    addLine(
+    line(
       lines,
       "🏆",
       "Quartile",
       first(
         item.quartile,
-        item.sjr_best_quartile
+        item.sjr_best_quartile,
+        item.best_quartile
       )
     );
-
-    addLine(
+    line(
       lines,
       "🆔",
       "ISSN",
       first(
         item.issn,
-        item.primary_issn
+        item.primary_issn,
+        item.issns,
+        item.e_issn,
+        item.p_issn
       )
     );
 
-    if (detailed) {
-      addLine(
-        lines,
-        "📊",
-        "SJR",
-        item.sjr
-      );
-
-      addLine(
+    if (full) {
+      line(lines, "📊", "SJR", item.sjr);
+      line(
         lines,
         "📈",
         "H-index",
-        item.h_index
+        first(item.h_index, item.hindex)
       );
-
-      addLine(
+      line(
         lines,
         "📖",
         "Giai đoạn xuất bản",
         item.coverage
       );
-
-      if (
-        typeof item.open_access === "boolean"
-      ) {
-        addLine(
-          lines,
-          "🔓",
-          "Truy cập mở",
-          item.open_access
-            ? "Có"
-            : "Không"
-        );
-      }
-
-      addLine(
+      line(
         lines,
         "📝",
         "Mô tả",
-        first(
-          item.description,
-          item.text
-        )
+        first(item.description, item.text)
       );
     }
   } else {
-    addLine(
+    line(
       lines,
       "🏷️",
       "Tên viết tắt",
       item.acronym
     );
-
-    addLine(
+    line(
       lines,
       "📍",
       "Địa điểm",
       first(
         item.location,
+        item.venue,
         [item.city, item.country]
-          .filter(valid)
+          .filter(Boolean)
           .join(", ")
       )
     );
-
-    addLine(
+    line(
       lines,
       "⏳",
       "Hạn nộp bài",
       first(
         item.deadline,
-        item.submission_deadline
+        item.submission_deadline,
+        item.paper_deadline
       )
     );
-
-    addLine(
+    line(
       lines,
       "📅",
       "Ngày bắt đầu",
-      item.start_date
+      first(item.start_date, item.event_date)
     );
-
-    addLine(
+    line(
       lines,
       "🗓️",
       "Ngày kết thúc",
       item.end_date
     );
 
-    if (detailed) {
-      addLine(
+    if (full) {
+      line(
         lines,
         "🏛️",
         "Đơn vị tổ chức",
         item.organizer
       );
-
-      addLine(
+      line(
+        lines,
+        "🧭",
+        "Lĩnh vực",
+        first(
+          item.fields,
+          item.areas,
+          item.categories
+        )
+      );
+      line(
         lines,
         "💬",
         "Chủ đề",
-        item.topics
+        first(item.topics, item.topic)
       );
-
-      addLine(
+      line(
         lines,
         "📝",
         "Thông tin CFP",
         first(
           item.cfp_text,
-          item.description
+          item.description,
+          item.text
         )
       );
     }
   }
 
-  addLine(
+  line(
     lines,
     "🔗",
     "Liên kết",
-    urlOf(item, type)
+    url(item, kind)
   );
 
   return lines.join("\n");
 }
 
-function formatResults(
-  question,
-  conferences,
-  journals
-) {
-  const sections = [];
-  const detailed = isDetail(question);
-
-  if (conferences.length) {
-    sections.push(
-      `## 🎓 Hội thảo liên quan\n\n${
-        conferences
+function format(conferences, journals, full) {
+  return [
+    conferences.length
+      ? `## 🎓 Hội thảo liên quan\n\n${conferences
           .map((item, index) =>
-            formatBlock(
-              item,
-              index,
-              "conference",
-              detailed
-            )
+            block(item, index, "conference", full)
           )
-          .join("\n\n")
-      }`
+          .join("\n\n")}`
+      : "",
+    journals.length
+      ? `## 📚 Tạp chí liên quan\n\n${journals
+          .map((item, index) =>
+            block(item, index, "journal", full)
+          )
+          .join("\n\n")}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function contextOf(req, passedHistory) {
+  const portal = req?.body?.context || {};
+
+  let base = {};
+
+  try {
+    base = buildLLMContext(req) || {};
+  } catch (error) {
+    console.warn(
+      "Scholar context:",
+      error?.message || error
     );
   }
 
-  if (journals.length) {
-    sections.push(
-      `## 📚 Tạp chí liên quan\n\n${
-        journals
-          .map((item, index) =>
-            formatBlock(
-              item,
-              index,
-              "journal",
-              detailed
-            )
-          )
-          .join("\n\n")
-      }`
-    );
-  }
+  // Portal gửi lịch sử trong context.history.
+  // Không ghi đè lịch sử này bằng tham số history mặc định [].
+  const rawHistory = Array.isArray(portal.history)
+    ? portal.history
+    : Array.isArray(passedHistory) &&
+        passedHistory.length
+      ? passedHistory
+      : base.history;
 
-  return sections.join("\n\n");
-}
-
-function modelInfo(result, requestedId) {
-  return {
-    model_id:
-      result?.model_id ||
-      requestedId ||
-      null,
-    model: result?.model || null,
-    latency: result?.latency ?? null,
-    prompt_tokens:
-      result?.usage?.prompt_tokens ??
-      null,
-    output_tokens:
-      result?.usage?.output_tokens ??
-      null
-  };
-}
-
-function invalidAnswer(answer, type, records) {
-  if (
-    /===\s*(TẠP CHÍ|HỘI THẢO|CÂU HỎI|YÊU CẦU)/iu.test(answer) ||
-    /_qdrant(Collection|Id)|baseScore|finalScore/.test(answer)
-  ) {
-    return true;
-  }
-
-  const normalized = normalize(answer);
-
-  if (
-    type === "journal" &&
-    /hoi thao lien quan|hoi nghi lien quan/.test(normalized)
-  ) {
-    return true;
-  }
-
-  if (
-    type === "conference" &&
-    /tap chi lien quan/.test(normalized)
-  ) {
-    return true;
-  }
-
-  if (
-    records.length === 1 &&
-    !normalized.includes(
-      normalize(records[0].title)
+  const history = (
+    Array.isArray(rawHistory)
+      ? rawHistory
+      : []
+  )
+    .filter(
+      item =>
+        item &&
+        ["user", "assistant"].includes(item.role) &&
+        typeof item.content === "string" &&
+        item.content.trim()
     )
-  ) {
-    return true;
-  }
+    .slice(-MAX_HISTORY)
+    .map(item => ({
+      role: item.role,
+      content: item.content.slice(0, 2500)
+    }));
 
-  return false;
-}
+  // Portal đã trích nội dung file vào document[].text.
+  const rawDocs =
+    portal.extra_data?.document ??
+    portal.document ??
+    base.docs ??
+    [];
 
-function buildSource(item, type, index) {
-  const metadata = { ...item };
-
-  delete metadata._qdrantId;
-  delete metadata._qdrantCollection;
+  const docs = (
+    Array.isArray(rawDocs)
+      ? rawDocs
+      : [rawDocs]
+  )
+    .filter(
+      item =>
+        item &&
+        typeof item.text === "string" &&
+        item.text.trim()
+    )
+    .slice(0, 8)
+    .map(item => ({
+      name: value(item.name),
+      text: item.text
+    }));
 
   return {
-    id: `${
-      type === "journal"
-        ? "J"
-        : "C"
-    }${index + 1}`,
-    type,
-    title: titleOf(item, type),
-    name: titleOf(item, type),
-    url: urlOf(item, type),
-    metadata
+    ...base,
+    history,
+    profile:
+      portal.user_profile ??
+      base.profile ??
+      null,
+    project:
+      portal.project_info ??
+      base.project ??
+      null,
+    project_id:
+      portal.project_id ??
+      base.project_id ??
+      null,
+    docs
   };
 }
 
-async function searchWeb(question, type) {
-  const expansion =
-    await expandScholarQueries(question);
+function scopeText(context) {
+  const project = context.project
+    ? `Dự án: ${value(
+        context.project.name
+      )}. ${value(context.project.description)}`
+    : "";
 
-  const queries = expansion.queries
-    .slice(0, 3)
-    .map(query => {
-      if (type === "journal") {
-        return `${query} journal -conference -workshop`;
+  const files = context.docs
+    .map(
+      doc =>
+        `File ${doc.name}: ${doc.text.slice(
+          0,
+          1600
+        )}`
+    )
+    .join("\n");
+
+  return `${project}\n${files}`
+    .slice(0, MAX_CONTEXT)
+    .trim();
+}
+
+function lastTopic(context) {
+  const previous = context.history
+    .slice()
+    .reverse()
+    .find(
+      item =>
+        item.role === "user" &&
+        typeOf(item.content) !== "general"
+    );
+
+  return previous?.content || "";
+}
+
+function namedFromHistory(context) {
+  const previous = context.history
+    .slice()
+    .reverse()
+    .find(
+      item =>
+        item.role === "assistant" &&
+        /\*\*[^*]{8,}\*\*/.test(item.content)
+    );
+
+  const heading = previous?.content.match(
+    /###\s*\d+\.\s*(?:🎓|📚)?\s*\*\*([^*]+)\*\*/
+  );
+
+  return heading?.[1]?.trim() || "";
+}
+
+async function retrievalQuery(
+  question,
+  context,
+  modelId
+) {
+  let query = question;
+
+  try {
+    const rewritten = await rewriteQuery(
+      question,
+      context.history
+    );
+
+    if (
+      typeof rewritten === "string" &&
+      rewritten.trim()
+    ) {
+      query = rewritten.trim();
+    }
+  } catch (error) {
+    console.warn(
+      "Scholar rewrite:",
+      error?.message || error
+    );
+  }
+
+  const prior = lastTopic(context);
+
+  if (
+    typeOf(question) === "general" &&
+    typeOf(query) === "general" &&
+    prior &&
+    isContextual(question)
+  ) {
+    query = `${prior}. ${question}`;
+  }
+
+  const named = namedFromHistory(context);
+
+  if (
+    named &&
+    /\b(tren|do|nay|chi tiet|thong tin)\b/.test(
+      norm(question)
+    ) &&
+    !norm(query).includes(norm(named))
+  ) {
+    query = `${query}. ${named}`;
+  }
+
+  const scope = scopeText(context);
+
+  if (
+    scope &&
+    isContextual(question) &&
+    !named
+  ) {
+    try {
+      const llm = await callLLM(
+        `Viết MỘT câu truy vấn tìm kiếm tạp chí/hội thảo bằng tiếng Việt và từ khóa tiếng Anh dựa trên câu hỏi và đề tài/file. Giữ nguyên yêu cầu về loại, Q1/Q2, nước, năm. Chỉ xuất truy vấn, không nhận xét, tối đa 220 ký tự.\nCâu hỏi: ${query}\nNgữ cảnh: ${scope}`,
+        modelId
+      );
+
+      const candidate = value(
+        llm?.answer
+      )
+        .replace(/\s+/g, " ")
+        .slice(0, 220);
+
+      if (
+        candidate &&
+        typeOf(candidate) !== "general" &&
+        (
+          typeOf(question) === "general" ||
+          typeOf(candidate) === typeOf(question)
+        )
+      ) {
+        query = candidate;
       }
+    } catch (error) {
+      console.warn(
+        "Scholar contextual query:",
+        error?.message || error
+      );
+    }
 
-      if (type === "conference") {
-        return `${query} conference CFP -journal`;
-      }
+    if (typeOf(query) !== "general") {
+      query += ` ${scope.slice(0, 350)}`;
+    }
+  }
 
-      return query;
-    });
+  return query;
+}
 
-  // Một truy vấn lỗi không làm mất kết quả của các truy vấn còn lại.
-  const settled = await Promise.allSettled(
-    queries.map(async query => {
+async function searchWeb(query, kind) {
+  const expanded =
+    await expandScholarQueries(query);
+
+  const queries = (
+    expanded?.queries?.length
+      ? expanded.queries
+      : [query]
+  ).slice(0, 3);
+
+  const batches = await Promise.allSettled(
+    queries.map(async item => {
+      const typed =
+        kind === "journal"
+          ? `${item} journal -conference -workshop`
+          : kind === "conference"
+            ? `${item} conference CFP -journal`
+            : item;
+
       const params = new URLSearchParams({
         engine: "google",
-        q: query,
-        hl: "en",
+        q: typed,
         num: "8",
         api_key: SERPAPI_API_KEY
       });
@@ -447,182 +553,153 @@ async function searchWeb(question, type) {
       const response = await fetch(
         `https://serpapi.com/search.json?${params}`,
         {
-          signal:
-            AbortSignal.timeout(15000)
+          signal: AbortSignal.timeout(15000)
         }
       );
 
       if (!response.ok) {
         throw new Error(
-          `SerpAPI HTTP ${
-            response.status
-          }`
+          `SerpAPI HTTP ${response.status}`
         );
       }
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       if (data.error) {
-        throw new Error(
-          String(data.error)
-        );
+        throw new Error(data.error);
       }
 
-      return Array.isArray(
-        data.organic_results
-      )
-        ? data.organic_results
-        : [];
+      return data.organic_results || [];
     })
   );
 
-  const batches = settled
-    .filter(result =>
-      result.status === "fulfilled"
-    )
-    .map(result =>
-      result.value
-    );
+  const unique = new Map();
 
-  const found = new Map();
-
-  for (const item of batches.flat()) {
-    if (
-      !item.link ||
-      !item.snippet ||
-      found.has(item.link)
-    ) {
+  for (const batch of batches) {
+    if (batch.status !== "fulfilled") {
       continue;
     }
 
-    const heading = normalize(
-      `${item.title} ${item.link}`
-    );
+    for (const item of batch.value) {
+      if (
+        !item.link ||
+        !item.snippet ||
+        unique.has(item.link)
+      ) {
+        continue;
+      }
 
-    if (
-      type === "journal" &&
-      /\b(conference|workshop|symposium|hoi thao)\b/
-        .test(heading)
-    ) {
-      continue;
+      const heading = norm(
+        `${item.title} ${item.link}`
+      );
+
+      if (
+        kind === "journal" &&
+        /\b(conference|workshop|symposium|hoi thao)\b/.test(
+          heading
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        kind === "conference" &&
+        /\b(journal ranking|journal quartile)\b/.test(
+          heading
+        )
+      ) {
+        continue;
+      }
+
+      unique.set(item.link, {
+        id: `W${unique.size + 1}`,
+        type: "web",
+        title: value(item.title),
+        url: item.link,
+        content: value(
+          item.snippet
+        ).slice(0, 1500)
+      });
+
+      if (unique.size === 5) {
+        break;
+      }
     }
-
-    if (
-      type === "conference" &&
-      /\b(journal ranking|journal quartile)\b/
-        .test(heading)
-    ) {
-      continue;
-    }
-
-    found.set(
-      item.link,
-      item
-    );
   }
 
-  return [...found.values()]
-    .slice(0, 5)
-    .map((item, index) => ({
-      id: `W${index + 1}`,
-      type: "web",
-      title: text(item.title),
-      url: text(item.link),
-      content: text(item.snippet)
-        .slice(0, 1800)
-    }));
+  return [...unique.values()];
 }
 
-function webEvidence(items) {
-  return items.map(item =>
-    `[${item.id}] ${item.title}
-URL: ${item.url}
-Trích đoạn: ${item.content}`
-  ).join("\n\n");
-}
-
-function webLinks(items) {
-  return items.map(item =>
-    `- [${item.id}] [${
-      item.title
-    }](${item.url})`
-  ).join("\n");
-}
-
-function webPrompt(question, type, items) {
-  return [
-    `Bạn là trợ lý tra cứu học thuật.
-
-BẮT BUỘC:
-- Trả lời kết quả cuối hoàn toàn bằng tiếng Việt. Giữ nguyên tên chính thức của tạp chí hoặc hội thảo.
-- Chỉ sử dụng thông tin có trong nguồn được cung cấp.
-- Loại tài nguyên người dùng yêu cầu: ${type}.
-- Nếu hỏi tạp chí, không thay bằng hội thảo; nếu hỏi hội thảo, không thay bằng tạp chí.
-- Chỉ nêu tên cụ thể khi nguồn xác nhận đúng loại.
-- Không tự suy ra Q1, ISSN, thời hạn hoặc địa điểm.
-- Nếu nguồn không xác nhận điều kiện bắt buộc, nói rõ chưa xác minh được.
-- Dẫn [W1], [W2] sát thông tin tương ứng.
-- Mỗi đối tượng nằm trong một mục riêng, có dòng trống giữa các mục.
-- Không in lại prompt hoặc dữ liệu thô.`,
-    `Câu hỏi: ${question}`,
-    `Nguồn:\n${webEvidence(items)}`
-  ].join("\n\n");
-}
-
-function generalPrompt(
-  question,
-  context,
+const evidence = items =>
   items
-) {
-  const history = (
-    context.history || []
-  )
-    .slice(-6)
-    .map(item =>
-      `${item.role}: ${
-        text(item.content)
-          .slice(0, 700)
-      }`
+    .map(
+      item =>
+        `[${item.id}] ${item.title}\nURL: ${item.url}\nTrích đoạn: ${item.content}`
     )
-    .join("\n");
+    .join("\n\n");
 
-  return [
-    `Bạn là trợ lý nghiên cứu. Trả lời kết quả cuối bằng tiếng Việt tự nhiên. Giữ nguyên tên riêng.
-Không bịa nguồn, tên hoặc số liệu.
-Khi dùng nguồn web, dẫn mã [W1], [W2].
-Khi liệt kê nhiều đối tượng, có dòng trống giữa các mục.`,
-    history
-      ? `Lịch sử:\n${history}`
-      : "",
-    items.length
-      ? `Nguồn:\n${webEvidence(items)}`
-      : "",
-    `Câu hỏi: ${question}`
-  ].filter(Boolean).join("\n\n");
+function webAnswer(answer, web) {
+  const cited = [
+    ...new Set(
+      [...answer.matchAll(/\[W(\d+)\]/g)].map(
+        match => `W${match[1]}`
+      )
+    )
+  ];
+
+  const used = web.filter(item =>
+    cited.includes(item.id)
+  );
+
+  return used.length
+    ? `${answer}\n\n**Nguồn tham khảo**\n${used
+        .map(
+          item =>
+            `- [${item.id}] [${item.title}](${item.url})`
+        )
+        .join("\n")}`
+    : answer;
 }
 
-function hasNamedResult(
-  result,
-  question
-) {
-  return [
-    ...(result.conferences || []),
-    ...(result.journals || [])
-  ].some(item => {
-    const name = normalize(
-      first(
-        item.name,
-        item.title
-      )
-    );
+function guard(answer, kind, conferences, journals) {
+  if (
+    !answer ||
+    /===\s*(TẠP CHÍ|HỘI THẢO)|_qdrant|finalScore|baseScore/i.test(
+      answer
+    )
+  ) {
+    return false;
+  }
 
-    return (
-      name.length >= 8 &&
-      normalize(question)
-        .includes(name)
-    );
-  });
+  if (
+    kind === "journal" &&
+    /##\s*🎓\s*Hội thảo/i.test(answer)
+  ) {
+    return false;
+  }
+
+  if (
+    kind === "conference" &&
+    /##\s*📚\s*Tạp chí/i.test(answer)
+  ) {
+    return false;
+  }
+
+  const names = [
+    ...conferences.map(item =>
+      norm(title(item, "conference"))
+    ),
+    ...journals.map(item =>
+      norm(title(item, "journal"))
+    )
+  ].filter(Boolean);
+
+  return (
+    !names.length ||
+    names.every(name =>
+      norm(answer).includes(name)
+    )
+  );
 }
 
 export async function runScholarAgent(
@@ -632,16 +709,19 @@ export async function runScholarAgent(
   topk,
   history = []
 ) {
-  const start = Date.now();
-  const original = text(question);
-  const originalType =
-    requestedType(original);
+  const started = Date.now();
 
-  const response = (
+  const original = value(
+    question ||
+    req?.body?.message ||
+    req?.body?.question
+  );
+
+  const reply = (
     answer,
-    type,
+    domain,
     standalone,
-    model = null,
+    llm = null,
     sources = [],
     conferences = [],
     journals = []
@@ -650,192 +730,248 @@ export async function runScholarAgent(
     conferences,
     journals,
     sources,
-    domain: type,
-    standalone_question:
-      standalone,
-    model: modelInfo(
-      model,
-      model_id
-    ),
+    domain,
+    standalone_question: standalone,
+    model: {
+      model_id:
+        llm?.model_id ||
+        model_id ||
+        null,
+      model: llm?.model || null,
+      latency:
+        llm?.latency ?? null,
+      prompt_tokens:
+        llm?.usage?.prompt_tokens ??
+        null,
+      output_tokens:
+        llm?.usage?.output_tokens ??
+        null
+    },
     responseTimeMs:
-      Date.now() - start
+      Date.now() - started
   });
 
+  if (!original) {
+    return reply(
+      "Vui lòng nhập câu hỏi.",
+      "general",
+      ""
+    );
+  }
+
   try {
-    const context =
-      buildLLMContext(req) || {};
+    const context = contextOf(
+      req,
+      history
+    );
 
-    context.history =
-      normalizeHistory(
-        history
-      );
-
-    let standalone =
-      original;
-
-    try {
-      const rewritten =
-        await rewriteQuery(
-          original,
-          context.history
-        );
-
-      if (
-        typeof rewritten === "string" &&
-        rewritten.trim()
-      ) {
-        standalone =
-          rewritten.trim();
-      }
-    } catch (error) {
-      console.warn(
-        "Scholar rewrite:",
-        error?.message || error
-      );
-    }
-
-    // Nếu câu hỏi gốc nêu rõ loại tài nguyên,
-    // không để bước viết lại đổi loại đó.
-    if (
-      originalType !== "general"
-    ) {
-      standalone = original;
-    }
-
-    let preflight = null;
-
-    if (
-      originalType === "general" &&
-      isDetail(original) &&
-      requestedType(standalone) === "general"
-    ) {
-      const check =
-        await runAgent(
-          standalone,
-          topk
-        );
-
-      if (
-        hasNamedResult(
-          check,
-          original
-        )
-      ) {
-        preflight = check;
-      }
-    }
-
-    // Câu hỏi thông thường:
-    // trả lời như trợ lý LLM thông thường.
-    if (
-      originalType === "general" &&
-      requestedType(standalone) === "general" &&
-      !preflight
-    ) {
-      let web = [];
-
-      try {
-        web = await searchWeb(
-          standalone,
-          "general"
-        );
-      } catch (error) {
-        console.warn(
-          "Scholar web:",
-          error?.message || error
-        );
-      }
-
-      const llm = await callLLM(
-        generalPrompt(
-          original,
-          context,
-          web
-        ),
+    const standalone =
+      await retrievalQuery(
+        original,
+        context,
         model_id
       );
 
-      const answer =
-        text(llm?.answer) ||
-        "Tôi chưa thể trả lời lúc này.";
+    const explicit = typeOf(original);
 
-      return response(
-        answer + (
-          web.length
-            ? `\n\n**Nguồn tham khảo**\n${
-                webLinks(web)
-              }`
-            : ""
-        ),
+    let kind =
+      explicit !== "general"
+        ? explicit
+        : typeOf(standalone);
+
+    if (kind === "general") {
+      const prior = lastTopic(context);
+
+      if (
+        prior &&
+        isContextual(original)
+      ) {
+        kind = typeOf(prior);
+      }
+    }
+
+    // Trường hợp nêu tên bản ghi nhưng không viết
+    // chữ "tạp chí" hoặc "hội thảo".
+    let preflight = null;
+
+    if (
+      kind === "general" &&
+      detailed(original)
+    ) {
+      const check = await runAgent(
+        standalone,
+        topk,
+        context.history
+      );
+
+      const matches = (
+        items,
+        type
+      ) =>
+        items.filter(item => {
+          const name = norm(
+            title(item, type)
+          );
+
+          return (
+            name.length >= 8 &&
+            norm(original).includes(name)
+          );
+        });
+
+      const foundConferences =
+        matches(
+          check?.conferences || [],
+          "conference"
+        );
+
+      const foundJournals =
+        matches(
+          check?.journals || [],
+          "journal"
+        );
+
+      if (
+        foundConferences.length ||
+        foundJournals.length
+      ) {
+        kind =
+          foundConferences.length &&
+          foundJournals.length
+            ? "both"
+            : foundConferences.length
+              ? "conference"
+              : "journal";
+
+        preflight = {
+          conferences:
+            foundConferences,
+          journals:
+            foundJournals
+        };
+      }
+    }
+
+    if (kind === "general") {
+      const prompt = [
+        "Trả lời câu hỏi bằng tiếng Việt tự nhiên. Dùng hồ sơ để cá nhân hóa khi thích hợp, giới hạn theo dự án đang mở; chỉ dùng nội dung file đã trích, không tự nhận đã đọc URL. Không bịa thông tin.",
+        context.profile
+          ? `Hồ sơ: ${JSON.stringify(
+              context.profile
+            ).slice(0, 1500)}`
+          : "",
+        context.project
+          ? `Dự án: ${JSON.stringify(
+              context.project
+            ).slice(0, 2500)}`
+          : "",
+        scopeText(context),
+        context.history
+          .map(
+            item =>
+              `${item.role}: ${item.content.slice(
+                0,
+                700
+              )}`
+          )
+          .join("\n"),
+        `Câu hỏi: ${original}`
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const llm = await callLLM(
+        prompt,
+        model_id
+      );
+
+      return reply(
+        value(llm?.answer) ||
+          "Tôi chưa thể trả lời lúc này.",
         "general",
         standalone,
-        llm,
-        web
+        llm
       );
     }
 
     const result =
       preflight ||
-      await runAgent(
+      (await runAgent(
         standalone,
-        topk
-      );
+        topk,
+        context.history
+      ));
 
-    const type =
-      originalType !== "general"
-        ? originalType
-        : requestedType(
-            standalone
-          );
-
-    // Chỉ giữ đúng loại được hỏi.
     const conferences =
-      type === "journal"
+      kind === "journal"
         ? []
-        : result.conferences ||
+        : result?.conferences ||
           [];
 
     const journals =
-      type === "conference"
+      kind === "conference"
         ? []
-        : result.journals ||
+        : result?.journals ||
           [];
 
     const sources = [
       ...conferences.map(
-        (item, index) =>
-          buildSource(
+        (item, index) => ({
+          id: `C${index + 1}`,
+          type: "conference",
+          title: title(
             item,
-            "conference",
-            index
-          )
+            "conference"
+          ),
+          url: url(
+            item,
+            "conference"
+          ),
+          metadata: item
+        })
       ),
       ...journals.map(
-        (item, index) =>
-          buildSource(
+        (item, index) => ({
+          id: `J${index + 1}`,
+          type: "journal",
+          title: title(
             item,
-            "journal",
-            index
-          )
+            "journal"
+          ),
+          url: url(
+            item,
+            "journal"
+          ),
+          metadata: item
+        })
       )
     ];
 
-    const fallback =
-      formatResults(
-        original,
-        conferences,
-        journals
-      );
+    const full =
+      detailed(original);
+
+    const fallback = format(
+      conferences,
+      journals,
+      full
+    );
 
     if (fallback) {
-      // Danh sách được dựng từ CSDL,
-      // không để LLM đổi sang loại khác.
-      if (
-        !isDetail(original)
-      ) {
-        return response(
+      const needsLLM =
+        full ||
+        (
+          isContextual(original) &&
+          (
+            context.project ||
+            context.profile ||
+            context.docs.length
+          )
+        );
+
+      if (!needsLLM) {
+        return reply(
           fallback,
-          type,
+          kind,
           standalone,
           null,
           sources,
@@ -844,8 +980,8 @@ export async function runScholarAgent(
         );
       }
 
-      const llm =
-        await callLLM(
+      try {
+        const llm = await callLLM(
           buildScholarPrompt(
             original,
             conferences,
@@ -855,85 +991,134 @@ export async function runScholarAgent(
           model_id
         );
 
-      const candidate =
-        text(llm?.answer);
+        const answer = value(
+          llm?.answer
+        );
 
-      return response(
-        !candidate ||
-        invalidAnswer(
-          candidate,
-          type,
-          sources
-        )
-          ? fallback
-          : candidate,
-        type,
-        standalone,
-        llm,
-        sources,
-        conferences,
-        journals
-      );
+        return reply(
+          guard(
+            answer,
+            kind,
+            conferences,
+            journals
+          )
+            ? answer
+            : fallback,
+          kind,
+          standalone,
+          llm,
+          sources,
+          conferences,
+          journals
+        );
+      } catch (error) {
+        console.warn(
+          "Scholar generation:",
+          error?.message || error
+        );
+
+        return reply(
+          fallback,
+          kind,
+          standalone,
+          null,
+          sources,
+          conferences,
+          journals
+        );
+      }
     }
 
-    // CSDL không có kết quả:
-    // dùng các truy vấn Việt–Anh để tìm web.
+    // Chỉ dùng web khi CSDL không trả được bản ghi.
     let web = [];
 
     try {
-      web =
-        await searchWeb(
-          original,
-          type
-        );
+      web = await searchWeb(
+        standalone,
+        kind
+      );
     } catch (error) {
       console.warn(
-        "Scholar web fallback:",
+        "Scholar web:",
         error?.message || error
       );
     }
 
     if (!web.length) {
-      return response(
-        type === "journal"
-          ? "Chưa tìm thấy tạp chí phù hợp trong CSDL; chưa xác minh được kết quả từ web."
-          : "Chưa tìm thấy hội thảo phù hợp trong CSDL; chưa xác minh được kết quả từ web.",
-        type,
+      return reply(
+        "Chưa tìm thấy kết quả phù hợp trong CSDL và chưa xác minh được nguồn web phù hợp.",
+        kind,
         standalone
       );
     }
 
-    const llm =
-      await callLLM(
-        webPrompt(
-          original,
-          type,
-          web
-        ),
-        model_id
+    const prompt = [
+      `Trả lời bằng tiếng Việt, đúng loại ${kind}. Chỉ dùng thông tin được nguồn xác nhận, dẫn [W1] sát từng nhận định. Không suy đoán ISSN, Q1, hạn nộp hoặc địa điểm. Nếu nguồn không đủ để xác minh điều kiện bắt buộc, nói rõ. Mỗi bản ghi ở một mục riêng, có dòng trống.`,
+      context.project
+        ? `Dự án: ${JSON.stringify(
+            context.project
+          ).slice(0, 1800)}`
+        : "",
+      context.profile
+        ? `Hồ sơ: ${JSON.stringify(
+            context.profile
+          ).slice(0, 900)}`
+        : "",
+      scopeText(context),
+      context.history
+        .map(
+          item =>
+            `${item.role}: ${item.content.slice(
+              0,
+              500
+            )}`
+        )
+        .join("\n"),
+      `Câu hỏi: ${original}`,
+      `Nguồn:\n${evidence(
+        web
+      )}`
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const llm = await callLLM(
+      prompt,
+      model_id
+    );
+
+    const answer = value(
+      llm?.answer
+    );
+
+    const grounded =
+      guard(
+        answer,
+        kind,
+        [],
+        []
+      ) &&
+      /\[W\d+\]/.test(
+        answer
       );
 
-    const candidate =
-      text(llm?.answer);
-
-    const answer =
-      !candidate ||
-      invalidAnswer(
-        candidate,
-        type,
-        []
-      )
-        ? "Chưa xác minh được kết quả đáp ứng yêu cầu từ các nguồn web tìm thấy."
-        : candidate;
-
-    return response(
-      `${answer}\n\n**Nguồn tham khảo**\n${
-        webLinks(web)
-      }`,
-      type,
+    return reply(
+      webAnswer(
+        grounded
+          ? answer
+          : "Chưa xác minh được kết quả đáp ứng yêu cầu từ các nguồn web tìm thấy.",
+        web
+      ),
+      kind,
       standalone,
       llm,
-      web
+      grounded
+        ? web.filter(item =>
+            answer.includes(
+              `[${item.id}]`
+            )
+          )
+        : []
     );
   } catch (error) {
     console.error(
@@ -941,7 +1126,7 @@ export async function runScholarAgent(
       error
     );
 
-    return response(
+    return reply(
       "Hệ thống đang gặp lỗi, vui lòng thử lại sau.",
       "error",
       original
