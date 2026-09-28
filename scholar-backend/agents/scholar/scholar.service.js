@@ -47,7 +47,6 @@ const kindOf = q => {
     q,
     /\b(tap chi|journal|issn|scimago|quartile|sjr|q[1-4])\b/
   );
-
   const c = matches(
     q,
     /\b(hoi thao|hoi nghi|conference|cfp|symposium)\b/
@@ -181,7 +180,13 @@ function contextOf(req, passedHistory) {
     body.extra_data?.document,
     body.context?.document,
     body.document
-  ].flatMap(x => Array.isArray(x) ? x : x ? [x] : []);
+  ].flatMap(x =>
+    Array.isArray(x)
+      ? x
+      : x
+        ? [x]
+        : []
+  );
 
   const directDocs = attachmentInput
     .filter(x => x && typeof x === "object")
@@ -228,7 +233,11 @@ function contextOf(req, passedHistory) {
         ? passedHistory
         : req?.session?.history || [];
 
-  const history = (Array.isArray(rawHistory) ? rawHistory : [])
+  const history = (
+    Array.isArray(rawHistory)
+      ? rawHistory
+      : []
+  )
     .filter(
       x =>
         x &&
@@ -590,9 +599,7 @@ function inventory(req, ctx) {
 
 function line(lines, icon, label, x) {
   if (text(first(x))) {
-    lines.push(
-      `- ${icon} **${label}:** ${text(x)}`
-    );
+    lines.push(`- ${icon} **${label}:** ${text(x)}`);
   }
 }
 
@@ -657,12 +664,7 @@ function block(x, i, k, full) {
     );
 
     if (full) {
-      line(
-        lines,
-        "📊",
-        "SJR",
-        x.sjr
-      );
+      line(lines, "📊", "SJR", x.sjr);
 
       line(
         lines,
@@ -784,27 +786,15 @@ function format(cs, js, full) {
   return [
     cs.length
       ? `## 🎓 Hội thảo liên quan\n\n${cs
-          .map(
-            (x, i) =>
-              block(
-                x,
-                i,
-                "conference",
-                full
-              )
+          .map((x, i) =>
+            block(x, i, "conference", full)
           )
           .join("\n\n")}`
       : "",
     js.length
       ? `## 📚 Tạp chí liên quan\n\n${js
-          .map(
-            (x, i) =>
-              block(
-                x,
-                i,
-                "journal",
-                full
-              )
+          .map((x, i) =>
+            block(x, i, "journal", full)
           )
           .join("\n\n")}`
       : ""
@@ -821,9 +811,7 @@ async function summarizeCFP(cs, modelId) {
   const input = cs.map((x, i) => ({
     index: i + 1,
     title: title(x, "conference"),
-    topics: text(
-      first(x.topics, x.topic)
-    ),
+    topics: text(first(x.topics, x.topic)),
     cfp: text(
       first(
         x.cfp_text,
@@ -846,10 +834,7 @@ async function summarizeCFP(cs, modelId) {
 
     summaries = JSON.parse(
       text(r?.answer)
-        .replace(
-          /^```(?:json)?\s*/i,
-          ""
-        )
+        .replace(/^```(?:json)?\s*/i, "")
         .replace(/```\s*$/, "")
     );
   } catch (e) {
@@ -862,14 +847,10 @@ async function summarizeCFP(cs, modelId) {
   return cs.map((x, i) => ({
     ...x,
     cfp_summary:
-      text(
-        summaries?.[String(i + 1)]
-      )
+      text(summaries?.[String(i + 1)])
         .replace(/\s+/g, " ")
         .slice(0, 300) ||
-      text(
-        first(x.topics, x.topic)
-      ).slice(0, 250)
+      text(first(x.topics, x.topic)).slice(0, 250)
   }));
 }
 
@@ -919,9 +900,7 @@ function remember(req, ctx, cs, js) {
 
 function prior(req, ctx) {
   const state =
-    RECORDS.get(
-      recordKey(req, ctx)
-    ) ||
+    RECORDS.get(recordKey(req, ctx)) ||
     (
       req?.session?.scholarContext?.scope ===
       ctx.scope
@@ -1015,46 +994,31 @@ async function selectForPaper(
 
     const parsed = JSON.parse(
       text(r?.answer)
-        .replace(
-          /^```(?:json)?\s*/i,
-          ""
-        )
+        .replace(/^```(?:json)?\s*/i, "")
         .replace(/```\s*$/, "")
     );
 
     if (
-      !Array.isArray(
-        parsed.conferences
-      ) ||
-      !Array.isArray(
-        parsed.journals
-      )
+      !Array.isArray(parsed.conferences) ||
+      !Array.isArray(parsed.journals)
     ) {
-      throw new Error(
-        "Invalid selection"
-      );
+      throw new Error("Invalid selection");
     }
 
     return {
       conferences: cs.filter(
         (x, i) =>
-          parsed.conferences.includes(
-            i + 1
-          ) &&
+          parsed.conferences.includes(i + 1) &&
           (
             !x.deadline ||
             !Number.isFinite(
               Date.parse(x.deadline)
             ) ||
-            Date.parse(x.deadline) >=
-              Date.now()
+            Date.parse(x.deadline) >= Date.now()
           )
       ),
-      journals: js.filter(
-        (_, i) =>
-          parsed.journals.includes(
-            i + 1
-          )
+      journals: js.filter((_, i) =>
+        parsed.journals.includes(i + 1)
       )
     };
   } catch (e) {
@@ -1084,10 +1048,9 @@ async function retrievalQuery(
     return q;
   }
 
-  const quartile =
-    norm(q).match(
-      /\bq[1-4]\b/
-    )?.[0];
+  const quartile = norm(q).match(
+    /\bq[1-4]\b/
+  )?.[0];
 
   const previous = lastTopic(ctx);
 
@@ -1141,9 +1104,7 @@ async function retrievalQuery(
       q,
       /\b(tren|do|nay|chi tiet|thong tin)\b/
     ) &&
-    !norm(result).includes(
-      norm(named)
-    )
+    !norm(result).includes(norm(named))
   ) {
     result += `. ${named}`;
   }
@@ -1152,10 +1113,7 @@ async function retrievalQuery(
 
   if (
     subject &&
-    (
-      isAdvice(q) ||
-      isContextual(q)
-    )
+    (isAdvice(q) || isContextual(q))
   ) {
     try {
       const r = await callLLM(
@@ -1163,20 +1121,16 @@ async function retrievalQuery(
         modelId
       );
 
-      const candidate =
-        text(r?.answer)
-          .replace(/\s+/g, " ")
-          .slice(0, 220);
+      const candidate = text(r?.answer)
+        .replace(/\s+/g, " ")
+        .slice(0, 220);
 
       if (
         candidate &&
-        kindOf(candidate) !==
-          "general" &&
+        kindOf(candidate) !== "general" &&
         (
-          kindOf(q) ===
-            "general" ||
-          kindOf(q) ===
-            kindOf(candidate)
+          kindOf(q) === "general" ||
+          kindOf(q) === kindOf(candidate)
         )
       ) {
         result = candidate;
@@ -1188,14 +1142,8 @@ async function retrievalQuery(
       );
     }
 
-    if (
-      kindOf(result) !==
-      "general"
-    ) {
-      result += ` ${subject.slice(
-        0,
-        350
-      )}`;
+    if (kindOf(result) !== "general") {
+      result += ` ${subject.slice(0, 350)}`;
     }
   }
 
@@ -1223,9 +1171,7 @@ async function paperSearchQuery(
       modelId
     );
 
-    const keywords = text(
-      response?.answer
-    )
+    const keywords = text(response?.answer)
       .replace(/\s+/g, " ")
       .slice(0, 200);
 
@@ -1239,10 +1185,73 @@ async function paperSearchQuery(
     );
   }
 
-  return `${resource} ${paper.slice(
-    0,
-    220
-  )}`;
+  return `${resource} ${paper.slice(0, 220)}`;
+}
+
+async function paperQueries(
+  paper,
+  kind,
+  modelId
+) {
+  const primary = await paperSearchQuery(
+    paper,
+    kind,
+    modelId
+  );
+
+  try {
+    const response = await callLLM(
+      `Trích 5 đến 10 cụm từ khóa học thuật về CHỦ ĐỀ của bài báo, bằng tiếng Anh và tiếng Việt. Bỏ tên bài báo, tên tác giả, thông tin trường, câu dẫn và yêu cầu tìm nơi đăng. Chỉ trả một dòng từ khóa để tìm ${
+        kind === "journal"
+          ? "tạp chí"
+          : kind === "conference"
+            ? "hội thảo"
+            : "tạp chí và hội thảo"
+      }.\n${paper.slice(0, 4500)}`,
+      modelId
+    );
+
+    const keywords = text(response?.answer)
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+
+    if (keywords) {
+      const prefix =
+        kind === "journal"
+          ? "journal"
+          : kind === "conference"
+            ? "conference"
+            : "journal conference";
+
+      const broad = `${prefix} ${keywords}`;
+
+      if (norm(broad) !== norm(primary)) {
+        return [primary, broad];
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "Scholar broad paper query:",
+      error?.message || error
+    );
+  }
+
+  return [primary];
+}
+
+function uniqueRecords(items, kind) {
+  const seen = new Set();
+
+  return items.filter(item => {
+    const key = norm(title(item, kind));
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 async function searchWeb(query, kind) {
@@ -1253,10 +1262,7 @@ async function searchWeb(query, kind) {
   let expanded;
 
   try {
-    expanded =
-      await expandScholarQueries(
-        query
-      );
+    expanded = await expandScholarQueries(query);
   } catch (e) {
     console.warn(
       "Scholar query expansion:",
@@ -1270,66 +1276,49 @@ async function searchWeb(query, kind) {
       : [query]
   ).slice(0, 3);
 
-  const batches =
-    await Promise.allSettled(
-      queries.map(async q => {
-        const typed =
-          kind === "journal"
-            ? `${q} journal -conference -workshop`
-            : kind ===
-                "conference"
-              ? `${q} conference CFP -journal`
-              : q;
+  const batches = await Promise.allSettled(
+    queries.map(async q => {
+      const typed =
+        kind === "journal"
+          ? `${q} journal -conference -workshop`
+          : kind === "conference"
+            ? `${q} conference CFP -journal`
+            : q;
 
-        const params =
-          new URLSearchParams({
-            engine: "google",
-            q: typed,
-            num: "8",
-            api_key:
-              SERPAPI_API_KEY
-          });
+      const params = new URLSearchParams({
+        engine: "google",
+        q: typed,
+        num: "8",
+        api_key: SERPAPI_API_KEY
+      });
 
-        const response =
-          await fetch(
-            `https://serpapi.com/search.json?${params}`,
-            {
-              signal:
-                AbortSignal.timeout(
-                  15000
-                )
-            }
-          );
-
-        if (!response.ok) {
-          throw new Error(
-            `SerpAPI HTTP ${response.status}`
-          );
+      const response = await fetch(
+        `https://serpapi.com/search.json?${params}`,
+        {
+          signal: AbortSignal.timeout(15000)
         }
+      );
 
-        const data =
-          await response.json();
-
-        if (data.error) {
-          throw new Error(
-            data.error
-          );
-        }
-
-        return (
-          data.organic_results ||
-          []
+      if (!response.ok) {
+        throw new Error(
+          `SerpAPI HTTP ${response.status}`
         );
-      })
-    );
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      return data.organic_results || [];
+    })
+  );
 
   const found = new Map();
 
   for (const batch of batches) {
-    if (
-      batch.status !==
-      "fulfilled"
-    ) {
+    if (batch.status !== "fulfilled") {
       continue;
     }
 
@@ -1356,8 +1345,7 @@ async function searchWeb(query, kind) {
       }
 
       if (
-        kind ===
-          "conference" &&
+        kind === "conference" &&
         /\b(journal ranking|journal quartile)\b/.test(
           heading
         )
@@ -1366,39 +1354,24 @@ async function searchWeb(query, kind) {
       }
 
       found.set(x.link, {
-        id: `W${
-          found.size + 1
-        }`,
+        id: `W${found.size + 1}`,
         type: "web",
-        title: text(
-          x.title
-        ),
+        title: text(x.title),
         url: x.link,
-        content: text(
-          x.snippet
-        ).slice(
-          0,
-          1500
-        )
+        content: text(x.snippet).slice(0, 1500)
       });
 
-      if (
-        found.size === 5
-      ) {
+      if (found.size === 5) {
         break;
       }
     }
 
-    if (
-      found.size === 5
-    ) {
+    if (found.size === 5) {
       break;
     }
   }
 
-  return [
-    ...found.values()
-  ];
+  return [...found.values()];
 }
 
 const evidence = web =>
@@ -1412,22 +1385,13 @@ const evidence = web =>
 function webAnswer(answer, web) {
   const ids = [
     ...new Set(
-      [
-        ...answer.matchAll(
-          /\[W(\d+)\]/g
-        )
-      ].map(
-        m =>
-          `W${m[1]}`
-      )
+      [...answer.matchAll(/\[W(\d+)\]/g)]
+        .map(m => `W${m[1]}`)
     )
   ];
 
   const used = web.filter(
-    x =>
-      ids.includes(
-        x.id
-      )
+    x => ids.includes(x.id)
   );
 
   return used.length
@@ -1456,10 +1420,7 @@ function validAnswer(
   }
 
   if (
-    (
-      cs.length ||
-      js.length
-    ) &&
+    (cs.length || js.length) &&
     /\[W\d+\]|\*\*Nguồn tham khảo\*\*/i.test(
       answer
     )
@@ -1477,8 +1438,7 @@ function validAnswer(
   }
 
   if (
-    kind ===
-      "conference" &&
+    kind === "conference" &&
     /##\s*📚\s*Tạp chí/i.test(
       answer
     )
@@ -1487,25 +1447,10 @@ function validAnswer(
   }
 
   return [
-    ...cs.map(
-      x =>
-        title(
-          x,
-          "conference"
-        )
-    ),
-    ...js.map(
-      x =>
-        title(
-          x,
-          "journal"
-        )
-    )
-  ].every(
-    x =>
-      norm(answer).includes(
-        norm(x)
-      )
+    ...cs.map(x => title(x, "conference")),
+    ...js.map(x => title(x, "journal"))
+  ].every(x =>
+    norm(answer).includes(norm(x))
   );
 }
 
@@ -1516,8 +1461,7 @@ export async function runScholarAgent(
   topk,
   history = []
 ) {
-  const started =
-    Date.now();
+  const started = Date.now();
 
   const original = text(
     first(
@@ -1541,31 +1485,20 @@ export async function runScholarAgent(
     journals,
     sources,
     domain,
-    standalone_question:
-      standalone,
+    standalone_question: standalone,
     model: {
       model_id:
         llm?.model_id ||
         model_id ||
         null,
-      model:
-        llm?.model ||
-        null,
-      latency:
-        llm?.latency ??
-        null,
+      model: llm?.model || null,
+      latency: llm?.latency ?? null,
       prompt_tokens:
-        llm?.usage
-          ?.prompt_tokens ??
-        null,
+        llm?.usage?.prompt_tokens ?? null,
       output_tokens:
-        llm?.usage
-          ?.output_tokens ??
-        null
+        llm?.usage?.output_tokens ?? null
     },
-    responseTimeMs:
-      Date.now() -
-      started
+    responseTimeMs: Date.now() - started
   });
 
   if (!original) {
@@ -1577,64 +1510,34 @@ export async function runScholarAgent(
   }
 
   try {
-    const ctx = contextOf(
-      req,
-      history
-    );
+    const ctx = contextOf(req, history);
 
     console.info(
       "Scholar document context:",
       {
-        project_id:
-          ctx.project_id ||
-          null,
-        documents:
-          ctx.docs.map(
-            d => ({
-              name:
-                d.name,
-              chars:
-                d.text.length,
-              readable:
-                hasDocumentBody(
-                  d
-                )
-            })
-          )
+        project_id: ctx.project_id || null,
+        documents: ctx.docs.map(d => ({
+          name: d.name,
+          chars: d.text.length,
+          readable: hasDocumentBody(d)
+        }))
       }
     );
 
-    if (
-      fileInventory(
-        original
-      )
-    ) {
+    if (fileInventory(original)) {
       return reply(
-        inventory(
-          req,
-          ctx
-        ),
+        inventory(req, ctx),
         "general",
         original
       );
     }
 
-    if (
-      summaryRequest(
-        original
-      )
-    ) {
-      const docs =
-        articleDocuments(
-          ctx
-        );
+    if (summaryRequest(original)) {
+      const docs = articleDocuments(ctx);
 
-      if (
-        !docs.length
-      ) {
+      if (!docs.length) {
         return reply(
-          ctx.scope ===
-            "chat"
+          ctx.scope === "chat"
             ? "Tệp đính kèm của cuộc trò chuyện chưa có văn bản trích xuất trong request. Portal cần gửi nội dung tệp qua context.extra_data.document[].text."
             : "Dự án hoặc tệp đính kèm hiện chưa có văn bản trích xuất trong request. Portal cần gửi nội dung qua context.extra_data.document[].text.",
           "general",
@@ -1651,55 +1554,35 @@ export async function runScholarAgent(
             )}`
         )
         .join("\n\n")
-        .slice(
-          0,
-          16000
-        );
+        .slice(0, 16000);
 
-      const llm =
-        await answerInVietnamese(
-          `Tóm tắt nội dung bài báo được cung cấp dưới đây bằng tiếng Việt: mục tiêu, phương pháp, dữ liệu, kết quả và đóng góp nếu văn bản có nêu. Chỉ dùng nội dung file trong mục TÀI LIỆU; không lấy thông tin từ câu trả lời cũ hoặc suy đoán phần thiếu. Trình bày thành các đoạn rõ ràng.\n\nTÀI LIỆU:\n${source}\n\nCâu hỏi: ${original}`,
-          model_id
-        );
+      const llm = await answerInVietnamese(
+        `Tóm tắt nội dung bài báo được cung cấp dưới đây bằng tiếng Việt: mục tiêu, phương pháp, dữ liệu, kết quả và đóng góp nếu văn bản có nêu. Chỉ dùng nội dung file trong mục TÀI LIỆU; không lấy thông tin từ câu trả lời cũ hoặc suy đoán phần thiếu. Trình bày thành các đoạn rõ ràng.\n\nTÀI LIỆU:\n${source}\n\nCâu hỏi: ${original}`,
+        model_id
+      );
 
       return reply(
-        text(
-          llm?.answer
-        ),
+        text(llm?.answer),
         "general",
         original,
         llm
       );
     }
 
-    const paper =
-      paperText(
-        original,
-        ctx
-      );
+    const paper = paperText(original, ctx);
 
-    // Đã có tóm tắt trong lịch sử thì không bắt tải lại PDF.
+    // Có thể sử dụng bản tóm tắt ở lịch sử khi
+    // lượt tiếp theo không còn gửi lại văn bản PDF.
     if (
-      attachedPaper(
-        original
-      ) &&
+      attachedPaper(original) &&
       !paper &&
-      !articleDocuments(
-        ctx
-      ).length
+      !articleDocuments(ctx).length
     ) {
-      const files =
-        ctx.project
-          ?.files;
+      const files = ctx.project?.files;
 
-      const declared =
-        Array.isArray(
-          files
-        )
-          ? files.length
-          : Boolean(
-              files
-            );
+      const declared = Array.isArray(files)
+        ? files.length
+        : Boolean(files);
 
       return reply(
         declared
@@ -1710,26 +1593,11 @@ export async function runScholarAgent(
       );
     }
 
-    if (
-      explainPrevious(
-        original
-      )
-    ) {
-      const saved =
-        prior(
-          req,
-          ctx
-        );
+    if (explainPrevious(original)) {
+      const saved = prior(req, ctx);
+      const previous = previousAnswer(ctx);
 
-      const previous =
-        previousAnswer(
-          ctx
-        );
-
-      if (
-        !saved &&
-        !previous
-      ) {
+      if (!saved && !previous) {
         return reply(
           "Tôi chưa thấy danh sách tạp chí hoặc hội thảo được nhắc tới trong lịch sử phiên này.",
           "general",
@@ -1737,29 +1605,21 @@ export async function runScholarAgent(
         );
       }
 
-      const facts =
-        saved
-          ? format(
-              saved.conferences,
-              saved.journals,
-              true
-            )
-          : previous.slice(
-              0,
-              12000
-            );
+      const facts = saved
+        ? format(
+            saved.conferences,
+            saved.journals,
+            true
+          )
+        : previous.slice(0, 12000);
 
-      const llm =
-        await answerInVietnamese(
-          `Trả lời bằng tiếng Việt vì sao nên hoặc không nên chọn TỪNG nơi trong danh sách trước. So sánh phạm vi, CFP và hạn nộp, nêu nơi lệch chủ đề hoặc hết hạn. Không gợi ý thêm nơi mới. Không khẳng định phù hợp nếu thiếu nội dung bài.\nBài báo:\n${paper ||
-            "Chưa có nội dung"}\nDanh sách trước:\n${facts}\nCâu hỏi: ${original}`,
-          model_id
-        );
+      const llm = await answerInVietnamese(
+        `Trả lời bằng tiếng Việt vì sao nên hoặc không nên chọn TỪNG nơi trong danh sách trước. So sánh phạm vi, CFP và hạn nộp, nêu nơi lệch chủ đề hoặc hết hạn. Không gợi ý thêm nơi mới. Không khẳng định phù hợp nếu thiếu nội dung bài.\nBài báo:\n${paper || "Chưa có nội dung"}\nDanh sách trước:\n${facts}\nCâu hỏi: ${original}`,
+        model_id
+      );
 
       return reply(
-        text(
-          llm?.answer
-        ) ||
+        text(llm?.answer) ||
           "Tôi cần nội dung bài báo để đánh giá.",
         "general",
         original,
@@ -1767,12 +1627,7 @@ export async function runScholarAgent(
       );
     }
 
-    if (
-      isAdvice(
-        original
-      ) &&
-      !paper
-    ) {
+    if (isAdvice(original) && !paper) {
       return reply(
         "Bạn gửi giúp tôi tiêu đề, tóm tắt, từ khóa và phương pháp bài báo, hoặc để Portal chuyển văn bản trích xuất từ file đính kèm vào ngữ cảnh.",
         "general",
@@ -1780,178 +1635,108 @@ export async function runScholarAgent(
       );
     }
 
-    const explicit =
-      kindOf(
-        original
-      );
-
-    const followup =
-      isFollowup(
-        original
-      );
+    const explicit = kindOf(original);
+    const followup = isFollowup(original);
 
     const independent =
-      explicit ===
-        "general" &&
+      explicit === "general" &&
       !followup &&
-      !isAdvice(
-        original
-      );
+      !isAdvice(original);
 
-    let standalone =
-      independent
-        ? original
-        : await retrievalQuery(
-            original,
-            ctx,
-            model_id
-          );
-
-    if (
-      isAdvice(
-        original
-      ) &&
-      paper
-    ) {
-      standalone =
-        await paperSearchQuery(
-          paper,
-          explicit,
+    let standalone = independent
+      ? original
+      : await retrievalQuery(
+          original,
+          ctx,
           model_id
         );
+
+    let venueQueries = [];
+
+    if (isAdvice(original) && paper) {
+      venueQueries = await paperQueries(
+        paper,
+        explicit,
+        model_id
+      );
+
+      standalone = venueQueries[0];
     }
 
-    let kind =
-      independent
-        ? "general"
-        : explicit !==
-            "general"
-          ? explicit
-          : kindOf(
-              standalone
-            );
+    let kind = independent
+      ? "general"
+      : explicit !== "general"
+        ? explicit
+        : kindOf(standalone);
 
-    let preflight =
-      null;
+    let preflight = null;
 
     if (
-      kind ===
-        "general" &&
-      isDetail(
-        original
-      ) &&
+      kind === "general" &&
+      isDetail(original) &&
       !independent
     ) {
-      const result =
-        await runAgent(
-          standalone,
-          topk,
-          ctx.history
-        );
+      const result = await runAgent(
+        standalone,
+        topk,
+        ctx.history
+      );
 
-      const named = (
-        xs,
-        k
-      ) =>
-        (
-          xs || []
-        ).filter(
-          x => {
-            const name =
-              norm(
-                title(
-                  x,
-                  k
-                )
-              );
+      const named = (xs, k) =>
+        (xs || []).filter(x => {
+          const name = norm(title(x, k));
 
-            return (
-              name.length >=
-                8 &&
-              norm(
-                original
-              ).includes(
-                name
-              )
-            );
-          }
-        );
+          return (
+            name.length >= 8 &&
+            norm(original).includes(name)
+          );
+        });
 
-      const cs =
-        named(
-          result
-            ?.conferences,
-          "conference"
-        );
+      const cs = named(
+        result?.conferences,
+        "conference"
+      );
 
-      const js =
-        named(
-          result
-            ?.journals,
-          "journal"
-        );
+      const js = named(
+        result?.journals,
+        "journal"
+      );
 
-      if (
-        cs.length ||
-        js.length
-      ) {
+      if (cs.length || js.length) {
         kind =
-          cs.length &&
-          js.length
+          cs.length && js.length
             ? "both"
             : cs.length
               ? "conference"
               : "journal";
 
         preflight = {
-          conferences:
-            cs,
-          journals:
-            js
+          conferences: cs,
+          journals: js
         };
       }
     }
 
-    if (
-      kind ===
-        "general" &&
-      followup
-    ) {
-      kind = kindOf(
-        lastTopic(
-          ctx
-        )
-      );
+    if (kind === "general" && followup) {
+      kind = kindOf(lastTopic(ctx));
     }
 
     if (
-      kind ===
-        "general" &&
-      isAdvice(
-        original
-      )
+      kind === "general" &&
+      isAdvice(original)
     ) {
-      kind =
-        "both";
+      kind = "both";
     }
 
-    if (
-      kind ===
-      "general"
-    ) {
+    if (kind === "general") {
       const prompt = [
         "Trả lời câu hỏi hiện tại bằng tiếng Việt tự nhiên. Lịch sử chỉ giúp hiểu câu nối tiếp. Dùng hồ sơ, dự án và file khi liên quan. Không bịa thông tin.",
         ctx.profile
           ? `Hồ sơ: ${JSON.stringify(
               ctx.profile
-            ).slice(
-              0,
-              1500
-            )}`
+            ).slice(0, 1500)}`
           : "",
-        scopeText(
-          ctx
-        ),
+        scopeText(ctx),
         ctx.history
           .map(
             x =>
@@ -1960,28 +1745,19 @@ export async function runScholarAgent(
                 700
               )}`
           )
-          .join(
-            "\n"
-          ),
+          .join("\n"),
         `Câu hỏi: ${original}`
       ]
-        .filter(
-          Boolean
-        )
-        .join(
-          "\n\n"
-        );
+        .filter(Boolean)
+        .join("\n\n");
 
-      const llm =
-        await answerInVietnamese(
-          prompt,
-          model_id
-        );
+      const llm = await answerInVietnamese(
+        prompt,
+        model_id
+      );
 
       return reply(
-        text(
-          llm?.answer
-        ) ||
+        text(llm?.answer) ||
           "Tôi chưa thể trả lời lúc này.",
         "general",
         standalone,
@@ -1989,7 +1765,7 @@ export async function runScholarAgent(
       );
     }
 
-    const found =
+    let found =
       preflight ||
       await runAgent(
         standalone,
@@ -1997,138 +1773,94 @@ export async function runScholarAgent(
         ctx.history
       );
 
+    if (
+      isAdvice(original) &&
+      paper &&
+      venueQueries.length > 1
+    ) {
+      const broader = await runAgent(
+        venueQueries[1],
+        Math.max(Number(topk) || 5, 10),
+        ctx.history
+      );
+
+      found = {
+        conferences: uniqueRecords(
+          [
+            ...(found?.conferences || []),
+            ...(broader?.conferences || [])
+          ],
+          "conference"
+        ),
+        journals: uniqueRecords(
+          [
+            ...(found?.journals || []),
+            ...(broader?.journals || [])
+          ],
+          "journal"
+        )
+      };
+    }
+
     let cs =
-      kind ===
-        "journal"
+      kind === "journal"
         ? []
-        : found
-            ?.conferences ||
-          [];
+        : found?.conferences || [];
 
     let js =
-      kind ===
-        "conference"
+      kind === "conference"
         ? []
-        : found
-            ?.journals ||
-          [];
+        : found?.journals || [];
 
-    if (
-      isAdvice(
-        original
-      ) &&
-      paper
-    ) {
-      const selected =
-        await selectForPaper(
-          paper,
-          cs,
-          js,
-          model_id
-        );
-
-      cs =
-        selected.conferences;
-
-      js =
-        selected.journals;
-    }
-
-    if (
-      cs.length
-    ) {
-      cs =
-        await summarizeCFP(
-          cs,
-          model_id
-        );
-    }
-
-    if (
-      cs.length ||
-      js.length
-    ) {
-      remember(
-        req,
-        ctx,
+    if (isAdvice(original) && paper) {
+      const selected = await selectForPaper(
+        paper,
         cs,
-        js
+        js,
+        model_id
       );
+
+      cs = selected.conferences;
+      js = selected.journals;
+    }
+
+    if (cs.length) {
+      cs = await summarizeCFP(
+        cs,
+        model_id
+      );
+    }
+
+    if (cs.length || js.length) {
+      remember(req, ctx, cs, js);
     }
 
     const sources = [
-      ...cs.map(
-        (
-          x,
-          i
-        ) => ({
-          id: `C${
-            i + 1
-          }`,
-          type:
-            "conference",
-          title:
-            title(
-              x,
-              "conference"
-            ),
-          url: url(
-            x,
-            "conference"
-          ),
-          metadata:
-            x
-        })
-      ),
-      ...js.map(
-        (
-          x,
-          i
-        ) => ({
-          id: `J${
-            i + 1
-          }`,
-          type:
-            "journal",
-          title:
-            title(
-              x,
-              "journal"
-            ),
-          url: url(
-            x,
-            "journal"
-          ),
-          metadata:
-            x
-        })
-      )
+      ...cs.map((x, i) => ({
+        id: `C${i + 1}`,
+        type: "conference",
+        title: title(x, "conference"),
+        url: url(x, "conference"),
+        metadata: x
+      })),
+      ...js.map((x, i) => ({
+        id: `J${i + 1}`,
+        type: "journal",
+        title: title(x, "journal"),
+        url: url(x, "journal"),
+        metadata: x
+      }))
     ];
 
-    const full =
-      isDetail(
-        original
-      );
+    const full = isDetail(original);
+    const fallback = format(cs, js, full);
 
-    const fallback =
-      format(
-        cs,
-        js,
-        full
-      );
-
-    if (
-      fallback
-    ) {
+    if (fallback) {
       const needsLLM =
-        isAdvice(
-          original
-        ) ||
+        isAdvice(original) ||
         full ||
         (
-          isContextual(
-            original
-          ) &&
+          isContextual(original) &&
           (
             ctx.project ||
             ctx.profile ||
@@ -2136,9 +1868,7 @@ export async function runScholarAgent(
           )
         );
 
-      if (
-        !needsLLM
-      ) {
+      if (!needsLLM) {
         return reply(
           fallback,
           kind,
@@ -2151,55 +1881,38 @@ export async function runScholarAgent(
       }
 
       try {
-        const promptCs =
-          full
-            ? cs
-            : cs.map(
-                x => ({
-                  ...x,
-                  cfp_text:
-                    x.cfp_summary ||
-                    "",
-                  cfp:
-                    "",
-                  description:
-                    x.cfp_summary ||
-                    "",
-                  text:
-                    ""
-                })
-              );
+        const promptCs = full
+          ? cs
+          : cs.map(x => ({
+              ...x,
+              cfp_text: x.cfp_summary || "",
+              cfp: "",
+              description:
+                x.cfp_summary || "",
+              text: ""
+            }));
 
-        const base =
-          buildScholarPrompt(
-            original,
-            promptCs,
-            js,
-            ctx
-          );
+        const base = buildScholarPrompt(
+          original,
+          promptCs,
+          js,
+          ctx
+        );
 
-        const cfp =
-          full
-            ? "Nếu hỏi chi tiết hội thảo, trình bày có căn cứ chủ đề, yêu cầu bản thảo, hạn nộp, cách gửi, phản biện, xuất bản; dẫn liên kết toàn văn."
-            : "Khi liệt kê hội thảo, tóm tắt CFP trong 1–2 câu, không in toàn văn.";
+        const cfp = full
+          ? "Nếu hỏi chi tiết hội thảo, trình bày có căn cứ chủ đề, yêu cầu bản thảo, hạn nộp, cách gửi, phản biện, xuất bản; dẫn liên kết toàn văn."
+          : "Khi liệt kê hội thảo, tóm tắt CFP trong 1–2 câu, không in toàn văn.";
 
-        const advice =
-          isAdvice(
-            original
-          )
-            ? `\nBài báo:\n${paper}\nSo sánh từng nơi với nội dung bài. Giải thích cụ thể vì sao phù hợp, nơi nào lệch chủ đề, và có nên chọn hội thảo hay tạp chí. Không chỉ in danh sách.`
-            : "";
+        const advice = isAdvice(original)
+          ? `\nBài báo:\n${paper}\nSo sánh từng nơi với nội dung bài. Giải thích cụ thể vì sao phù hợp, nơi nào lệch chủ đề, và có nên chọn hội thảo hay tạp chí. Không chỉ in danh sách.`
+          : "";
 
-        const llm =
-          await answerInVietnamese(
-            `${base}\n\n${cfp}${advice}`,
-            model_id
-          );
+        const llm = await answerInVietnamese(
+          `${base}\n\n${cfp}${advice}`,
+          model_id
+        );
 
-        const answer =
-          text(
-            llm?.answer
-          );
+        const answer = text(llm?.answer);
 
         return reply(
           validAnswer(
@@ -2211,8 +1924,7 @@ export async function runScholarAgent(
           (
             !cs.length ||
             full ||
-            answer.length <
-              5000
+            answer.length < 5000
           )
             ? answer
             : fallback,
@@ -2226,8 +1938,7 @@ export async function runScholarAgent(
       } catch (e) {
         console.warn(
           "Scholar generation:",
-          e?.message ||
-            e
+          e?.message || e
         );
 
         return reply(
@@ -2242,26 +1953,21 @@ export async function runScholarAgent(
       }
     }
 
-    let web =
-      [];
+    let web = [];
 
     try {
-      web =
-        await searchWeb(
-          standalone,
-          kind
-        );
+      web = await searchWeb(
+        standalone,
+        kind
+      );
     } catch (e) {
       console.warn(
         "Scholar web:",
-        e?.message ||
-          e
+        e?.message || e
       );
     }
 
-    if (
-      !web.length
-    ) {
+    if (!web.length) {
       return reply(
         "Chưa tìm thấy kết quả phù hợp trong CSDL và chưa xác minh được nguồn web phù hợp.",
         kind,
@@ -2271,21 +1977,14 @@ export async function runScholarAgent(
 
     const prompt = [
       `Trả lời bằng tiếng Việt, đúng loại ${kind}. Chỉ nêu thông tin nguồn xác nhận, dẫn [W1] sát nhận định. Không đoán ISSN, Q1, hạn nộp. Mỗi bản ghi một mục riêng.`,
-      scopeText(
-        ctx
-      ),
-      isAdvice(
-        original
-      )
+      scopeText(ctx),
+      isAdvice(original)
         ? `Bài báo:\n${paper}`
         : "",
       ctx.profile
         ? `Hồ sơ: ${JSON.stringify(
             ctx.profile
-          ).slice(
-            0,
-            900
-          )}`
+          ).slice(0, 900)}`
         : "",
       ctx.history
         .map(
@@ -2295,41 +1994,31 @@ export async function runScholarAgent(
               500
             )}`
         )
-        .join(
-          "\n"
-        ),
+        .join("\n"),
       `Câu hỏi: ${original}`,
-      `Nguồn:\n${evidence(
-        web
-      )}`
+      `Nguồn:\n${evidence(web)}`
     ]
-      .filter(
-        Boolean
+      .filter(Boolean)
+      .join("\n\n");
+
+    const llm = await answerInVietnamese(
+      prompt,
+      model_id
+    );
+
+    const answer = text(llm?.answer);
+
+    const cited = [
+      ...new Set(
+        [...answer.matchAll(/\[W(\d+)\]/g)]
+          .map(match => `W${match[1]}`)
       )
-      .join(
-        "\n\n"
-      );
-
-    const llm =
-      await answerInVietnamese(
-        prompt,
-        model_id
-      );
-
-    const answer =
-      text(
-        llm?.answer
-      );
+    ];
 
     const grounded =
-      validAnswer(
-        answer,
-        kind,
-        [],
-        []
-      ) &&
-      /\[W\d+\]/.test(
-        answer
+      validAnswer(answer, kind, [], []) &&
+      cited.some(id =>
+        web.some(source => source.id === id)
       );
 
     return reply(
@@ -2343,11 +2032,8 @@ export async function runScholarAgent(
       standalone,
       llm,
       grounded
-        ? web.filter(
-            x =>
-              answer.includes(
-                `[${x.id}]`
-              )
+        ? web.filter(x =>
+            answer.includes(`[${x.id}]`)
           )
         : []
     );
