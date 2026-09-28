@@ -1,4 +1,4 @@
-// import_conference_neu.js 
+// jobs/import_conference_neu.js
 import fs from "fs";
 import csv from "csv-parser";
 import crypto from "crypto";

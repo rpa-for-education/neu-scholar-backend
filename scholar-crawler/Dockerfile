@@ -1,13 +1,8 @@
-# ===========================================
-# 🧱 BASE IMAGE
-# ===========================================
 FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# ===========================================
-# 🔥 INSTALL SYSTEM LIBS (PLAYWRIGHT)
-# ===========================================
+# Thư viện hệ thống cho Playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -35,50 +30,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# ===========================================
-# 📦 INSTALL DEPENDENCIES
-# ===========================================
 COPY package*.json ./
 RUN npm install
 
-# ===========================================
-# 📁 COPY SOURCE
-# ===========================================
 COPY . .
 
-# ===========================================
-# 🔥 INSTALL PLAYWRIGHT BROWSER
-# ===========================================
 RUN npx playwright install chromium
 
-# ===========================================
-# 🚀 START (CRAWL + ENRICH LOOP)
-# ===========================================
 CMD ["sh", "-c", "\
+set -e; \
 echo 'JOURNAL'; \
 node src/jobs/import_journal_full.js; \
-echo 'AFTER JOURNAL'; \
-\
 echo 'GSNN'; \
 node src/jobs/import_journal_gsnn_full.js; \
-echo 'AFTER GSNN'; \
-\
 echo 'FUND'; \
 node src/jobs/import_fund_full.js; \
-echo 'AFTER FUND'; \
-\
 echo 'OTHER FUND'; \
 node src/jobs/import_fund_other_full.js; \
-echo 'AFTER OTHER FUND'; \
-\
+echo 'NEU CONFERENCES'; \
+node src/jobs/import_conference_neu.js; \
 echo '🚀 Crawler started...'; \
 while true; do \
   echo '🌐 Crawl EasyChair...'; \
   node src/jobs/crawl_easychair.js || echo '⚠️ Crawl fail'; \
-  \
   echo '🤖 Enrich incremental...'; \
   node src/jobs/enrich_easychair.js || echo '⚠️ Enrich fail'; \
-  \
   echo '😴 Sleep 6 hours...'; \
   sleep 21600; \
 done \
